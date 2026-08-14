@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.5";
+const ENGINE_JS_VERSION = "1.6";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -40,11 +40,11 @@ function addControl(type) {
     const newControl = {
         Type: type,
         Name: `${type}${universalUIModel.Children.length + 1}`,
-        Text: `New ${type}`,
-        X: 30 + (universalUIModel.Children.length * 15),
-        Y: 30 + (universalUIModel.Children.length * 35),
+        Text: type === 'MenuBar' ? 'File, Edit, View, Help' : `New ${type}`,
+        X: 20 + (universalUIModel.Children.length * 10),
+        Y: 20 + (universalUIModel.Children.length * 30),
         Interactive: false,
-        Options: type === 'Dropdown' ? 'Item 1, Item 2, Item 3' : undefined,
+        Options: type === 'Dropdown' ? 'Item 1, Item 2, Item 3' : (type === 'MenuBar' ? 'File, Edit, Help' : undefined),
         Action: type === 'Button' ? '# Enter PowerShell code here...\nWrite-Host "Clicked!"' : ''
     };
     
@@ -85,9 +85,8 @@ function renderSimulator() {
         el.style.left = `${control.X}px`;
         el.style.top = `${control.Y}px`;
         
-        // Accurate Mouse drag binding relative to canvas
         el.onmousedown = (e) => {
-            if (control.Interactive) return; // Don't drag if testing interaction
+            if (control.Interactive) return;
             e.stopPropagation();
             selectControl(index);
             isDragging = true;
@@ -105,9 +104,14 @@ function renderSimulator() {
             el.innerHTML = `<label>${control.Text}</label>`;
         } else if (control.Type === "CheckBox") {
             el.innerHTML = `<div style="display:flex; align-items:center;"><input type="checkbox"> <label>${control.Text}</label></div>`;
+        } else if (control.Type === "RadioButton") {
+            el.innerHTML = `<div style="display:flex; align-items:center;"><input type="radio" name="group_${control.Y}"> <label>${control.Text}</label></div>`;
         } else if (control.Type === "Dropdown") {
-            const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}</option>`).join('');
+            const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}`).join('');
             el.innerHTML = `<select>${optionsHtml}</select>`;
+        } else if (control.Type === "MenuBar") {
+            const menusHtml = (control.Options || control.Text || '').split(',').map(m => `<span>${m.trim()}</span>`).join('');
+            el.innerHTML = `<div class="menu-bar">${menusHtml}</div>`;
         }
         
         canvas.appendChild(el);
@@ -122,7 +126,6 @@ function renderSimulator() {
     };
 }
 
-// Global mouse drag tracking
 document.onmousemove = (e) => {
     if (!isDragging || selectedControlIndex === null) return;
     const canvas = document.getElementById('live-preview-canvas');
@@ -131,7 +134,6 @@ document.onmousemove = (e) => {
     let newX = (e.clientX - canvasRect.left) - dragOffset.x;
     let newY = (e.clientY - canvasRect.top) - dragOffset.y;
     
-    // Boundary constraints inside the form canvas
     newX = Math.max(0, Math.min(newX, canvas.clientWidth - 100));
     newY = Math.max(0, Math.min(newY, canvas.clientHeight - 30));
     
@@ -149,7 +151,6 @@ document.onmouseup = () => {
     isDragging = false;
 };
 
-// Nudge controls (+/- px)
 function nudgeControl(dx, dy) {
     if (selectedControlIndex !== null) {
         const control = universalUIModel.Children[selectedControlIndex];
@@ -204,21 +205,28 @@ function renderPropertiesPanel() {
         </div>
         <div class="prop-group">
             <label>Position Nudge (X: ${control.X}px, Y: ${control.Y}px)</label>
-            <div class="nudge-grid">
-                <div></div>
-                <button class="nudge-btn" onclick="nudgeControl(0, -1)">▲ 1px</button>
-                <div></div>
-                <button class="nudge-btn" onclick="nudgeControl(-1, 0)">◀ 1px</button>
-                <button class="nudge-btn" onclick="nudgeControl(0, 1)">▼ 1px</button>
-                <button class="nudge-btn" onclick="nudgeControl(1, 0)">▶ 1px</button>
-            </div>
-            <div class="nudge-grid" style="grid-template-columns: repeat(2, 1fr); margin-top:5px;">
-                <button class="nudge-btn" onclick="nudgeControl(0, -5)">▲ 5px</button>
-                <button class="nudge-btn" onclick="nudgeControl(0, 5)">▼ 5px</button>
-                <button class="nudge-btn" onclick="nudgeControl(-5, 0)">◀ 5px</button>
-                <button class="nudge-btn" onclick="nudgeControl(5, 0)">▶ 5px</button>
-                <button class="nudge-btn" onclick="nudgeControl(-10, 0)">◀ 10px</button>
-                <button class="nudge-btn" onclick="nudgeControl(10, 0)">▶ 10px</button>
+            <div class="nudge-section">
+                <div class="nudge-row">
+                    <span style="font-size:0.75em; color:#aaa; width:30px;">1px:</span>
+                    <button class="nudge-btn" onclick="nudgeControl(0, -1)">▲ Up</button>
+                    <button class="nudge-btn" onclick="nudgeControl(0, 1)">▼ Down</button>
+                    <button class="nudge-btn" onclick="nudgeControl(-1, 0)">◀ Left</button>
+                    <button class="nudge-btn" onclick="nudgeControl(1, 0)">▶ Right</button>
+                </div>
+                <div class="nudge-row">
+                    <span style="font-size:0.75em; color:#aaa; width:30px;">5px:</span>
+                    <button class="nudge-btn" onclick="nudgeControl(0, -5)">▲ Up</button>
+                    <button class="nudge-btn" onclick="nudgeControl(0, 5)">▼ Down</button>
+                    <button class="nudge-btn" onclick="nudgeControl(-5, 0)">◀ Left</button>
+                    <button class="nudge-btn" onclick="nudgeControl(5, 0)">▶ Right</button>
+                </div>
+                <div class="nudge-row">
+                    <span style="font-size:0.75em; color:#aaa; width:30px;">10px:</span>
+                    <button class="nudge-btn" onclick="nudgeControl(0, -10)">▲ Up</button>
+                    <button class="nudge-btn" onclick="nudgeControl(0, 10)">▼ Down</button>
+                    <button class="nudge-btn" onclick="nudgeControl(-10, 0)">◀ Left</button>
+                    <button class="nudge-btn" onclick="nudgeControl(10, 0)">▶ Right</button>
+                </div>
             </div>
         </div>
         <div class="prop-group">
@@ -230,6 +238,11 @@ function renderPropertiesPanel() {
         ${control.Type === 'Dropdown' ? `
         <div class="prop-group">
             <label>Dropdown Options (Comma separated)</label>
+            <input type="text" value="${control.Options || ''}" oninput="updateControlProperty('Options', this.value)">
+        </div>` : ''}
+        ${control.Type === 'MenuBar' ? `
+        <div class="prop-group">
+            <label>Menu Items (Comma separated)</label>
             <input type="text" value="${control.Options || ''}" oninput="updateControlProperty('Options', this.value)">
         </div>` : ''}
         ${control.Type === 'Button' ? `
