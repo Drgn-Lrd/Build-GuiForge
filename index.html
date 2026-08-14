@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="file-version" id="html-version" content="1.6">
+    <meta name="file-version" id="html-version" content="1.10">
     <title>Build-GuiForge</title>
     <link rel="stylesheet" href="css/themes.css">
     <style>
@@ -16,10 +16,15 @@
 
         #workspace { flex: 1; padding: 20px; background: #333; display: flex; justify-content: center; align-items: center; overflow: auto; position: relative; }
         
-        #live-preview-canvas { width: 650px; height: 450px; position: relative; overflow: hidden; margin-top: 35px; }
+        #live-preview-canvas { position: relative; overflow: hidden; }
         
-        #properties-panel { width: 320px; background: #252526; border-left: 1px solid #333; display: flex; flex-direction: column; z-index: 10; }
-        #props-header { padding: 15px; background: #1e1e1e; border-bottom: 1px solid #333; font-weight: bold; }
+        #properties-panel { width: 340px; background: #252526; border-left: 1px solid #333; display: flex; flex-direction: column; z-index: 10; }
+        
+        /* Sidebar Tab Headers */
+        #props-tabs { display: flex; background: #1e1e1e; border-bottom: 1px solid #333; }
+        .sidebar-tab { flex: 1; padding: 12px; text-align: center; background: #252526; color: #aaa; cursor: pointer; font-weight: bold; font-size: 0.85em; border: none; border-bottom: 2px solid transparent; }
+        .sidebar-tab.active { background: #333; color: #fff; border-bottom: 2px solid #0078d4; }
+
         #props-content { flex: 1; overflow-y: auto; }
         .prop-group { padding: 10px 15px; border-bottom: 1px solid #333; display: flex; flex-direction: column; gap: 5px; }
         .prop-group label { font-size: 0.85em; color: #aaa; }
@@ -53,6 +58,7 @@
         <button class="tool-btn" onclick="addControl('Dropdown')">➕ Dropdown</button>
         <button class="tool-btn" onclick="addControl('RadioButton')">➕ Radio Button</button>
         <button class="tool-btn" onclick="addControl('MenuBar')">➕ Menu Bar</button>
+        <button class="tool-btn" onclick="addControl('TabControl')">➕ Tab Control</button>
         
         <div style="flex-grow: 1;"></div>
         <button class="tool-btn" onclick="openSettings()" style="text-align: center;">⚙️ Settings</button>
@@ -65,7 +71,10 @@
     </div>
 
     <div id="properties-panel">
-        <div id="props-header">Properties</div>
+        <div id="props-tabs">
+            <button id="btn-tab-props" class="sidebar-tab active" onclick="switchSidebarTab('properties')">Properties</button>
+            <button id="btn-tab-code" class="sidebar-tab" onclick="switchSidebarTab('code')">Code Exporter</button>
+        </div>
         <div id="props-content"></div>
     </div>
 
