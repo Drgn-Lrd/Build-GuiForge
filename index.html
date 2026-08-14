@@ -2,82 +2,151 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="file-version" id="html-version" content="1.13">
-    <title>Build-GuiForge</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta id="html-version" content="1.10">
+    <title>PowerShell GUI Form Designer</title>
     <link rel="stylesheet" href="css/themes.css">
+    <script src="js/engine.js" defer></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; background: #1e1e1e; color: #d4d4d4; user-select: none; }
+        /* Base page layout container */
+        #toolbox {
+            width: 220px;
+            background: #2d2d30;
+            border-right: 1px solid #3f3f46;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            gap: 10px;
+        }
+        .tool-category {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            color: #888;
+            margin-top: 5px;
+            margin-bottom: 2px;
+            letter-spacing: 0.5px;
+        }
+        .toolbox-btn {
+            background: #333337;
+            border: 1px solid #3f3f46;
+            color: #f1f1f1;
+            padding: 8px 12px;
+            text-align: left;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.1s;
+        }
+        .toolbox-btn:hover {
+            background: #3e3e42;
+            border-color: #0078d4;
+        }
         
-        #toolbox { width: 200px; background: #252526; border-right: 1px solid #333; padding: 15px; display: flex; flex-direction: column; gap: 8px; z-index: 10; overflow-y: auto; }
-        .tool-btn { padding: 8px; background: #3c3c3c; border: 1px solid #555; color: white; cursor: pointer; text-align: left; border-radius: 4px; font-size: 0.9em; }
-        .tool-btn:hover { background: #505050; }
-        .danger-btn { background: #a80000; text-align: center; margin-top: 15px; }
-        .danger-btn:hover { background: #d10000; }
-
-        #workspace { flex: 1; padding: 40px; background: #333; display: flex; justify-content: center; align-items: center; overflow: auto; position: relative; }
-        
-        #properties-panel { width: 340px; background: #252526; border-left: 1px solid #333; display: flex; flex-direction: column; z-index: 10; }
-        
-        #props-tabs { display: flex; background: #1e1e1e; border-bottom: 1px solid #333; }
-        .sidebar-tab { flex: 1; padding: 12px; text-align: center; background: #252526; color: #aaa; cursor: pointer; font-weight: bold; font-size: 0.85em; border: none; border-bottom: 2px solid transparent; }
-        .sidebar-tab.active { background: #333; color: #fff; border-bottom: 2px solid #0078d4; }
-
-        #props-content { flex: 1; overflow-y: auto; }
-        .prop-group { padding: 10px 15px; border-bottom: 1px solid #333; display: flex; flex-direction: column; gap: 5px; }
-        .prop-group label { font-size: 0.85em; color: #aaa; }
-        .prop-group input, .prop-group textarea, .prop-group select { width: 100%; padding: 5px; background: #1e1e1e; border: 1px solid #555; color: white; box-sizing: border-box; }
-        .prop-group textarea { resize: vertical; min-height: 60px; font-family: Consolas, monospace; }
-        
-        .nudge-section { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; }
-        .nudge-row { display: flex; gap: 4px; justify-content: space-between; }
-        .nudge-btn { background: #3c3c3c; border: 1px solid #555; color: white; padding: 4px 8px; cursor: pointer; font-size: 0.75em; flex: 1; text-align: center; border-radius: 3px; }
-        .nudge-btn:hover { background: #0078d4; }
-
-        #settings-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: #252526; padding: 20px; border: 1px solid #555; width: 400px; border-radius: 5px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); }
-        .version-list { list-style: none; padding: 0; font-family: Consolas, monospace; color: #4af626; background: #000; padding: 10px; border-radius: 4px; }
+        /* Modal Window Styling */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .modal-box {
+            background: #252526;
+            border: 1px solid #3f3f46;
+            width: 400px;
+            border-radius: 6px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .modal-header {
+            padding: 12px 15px;
+            background: #2d2d30;
+            border-bottom: 1px solid #3f3f46;
+            font-weight: 600;
+            font-size: 0.95em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-body {
+            padding: 15px;
+            font-size: 0.9em;
+            color: #ccc;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .modal-footer {
+            padding: 10px 15px;
+            background: #2d2d30;
+            border-top: 1px solid #3f3f46;
+            display: flex;
+            justify-content: flex-end;
+        }
     </style>
 </head>
 <body>
 
+    <!-- TOOLBOX PANEL -->
     <div id="toolbox">
-        <h3 style="margin-top:0;">Toolbox</h3>
-        <button class="tool-btn" onclick="addControl('Button')">➕ Button</button>
-        <button class="tool-btn" onclick="addControl('TextBox')">➕ TextBox</button>
-        <button class="tool-btn" onclick="addControl('Label')">➕ Label</button>
-        <button class="tool-btn" onclick="addControl('CheckBox')">➕ CheckBox</button>
-        <button class="tool-btn" onclick="addControl('Dropdown')">➕ Dropdown</button>
-        <button class="tool-btn" onclick="addControl('RadioButton')">➕ Radio Button</button>
-        <button class="tool-btn" onclick="addControl('MenuBar')">➕ Menu Bar</button>
-        <button class="tool-btn" onclick="addControl('TabControl')">➕ Tab Control</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 5px;">
+            <h2 style="font-size: 1.1em; color: #fff;">Toolbox</h2>
+            <button onclick="openSettings()" class="nudge-btn" title="Version & Settings">⚙️</button>
+        </div>
         
-        <div style="flex-grow: 1;"></div>
-        <button class="tool-btn" onclick="openSettings()" style="text-align: center;">⚙️ Settings</button>
+        <div class="tool-category">Common Controls</div>
+        <button class="toolbox-btn" onclick="addControl('Button')">🔲 Button</button>
+        <button class="toolbox-btn" onclick="addControl('Label')">🏷️ Label</button>
+        <button class="toolbox-btn" onclick="addControl('TextBox')">📝 Text Box</button>
+        <button class="toolbox-btn" onclick="addControl('CheckBox')">☑️ Check Box</button>
+        <button class="toolbox-btn" onclick="addControl('RadioButton')">🔘 Radio Button</button>
+        
+        <div class="tool-category">Advanced Controls</div>
+        <button class="toolbox-btn" onclick="addControl('Dropdown')">▼ Dropdown (ComboBox)</button>
+        <button class="toolbox-btn" onclick="addControl('MenuBar')">📋 Menu Bar</button>
+        <button class="toolbox-btn" onclick="addControl('TabControl')">📂 Tab Control</button>
     </div>
 
+    <!-- WORKSPACE CANVAS -->
     <div id="workspace">
-        <div id="live-preview-canvas">
-            <!-- Rendered by JS -->
+        <div id="live-preview-canvas" class="live-preview-canvas"></div>
+    </div>
+
+    <!-- SIDEBAR PROPERTY & CODE INSPECTOR -->
+    <div id="sidebar">
+        <div style="display: flex; background: #2d2d30; border-bottom: 1px solid #3f3f46;">
+            <button id="btn-tab-props" onclick="switchSidebarTab('properties')" style="flex:1; background:#333; border:none; color:#fff; padding:10px; cursor:pointer; font-size:0.85em; font-weight:600;">Properties</button>
+            <button id="btn-tab-code" onclick="switchSidebarTab('code')" style="flex:1; background:#252526; border:none; color:#aaa; padding:10px; cursor:pointer; font-size:0.85em; font-weight:600;">Code Exporter</button>
+        </div>
+        <div id="props-content" style="flex-grow: 1; overflow-y: auto;">
+            <!-- Dynamically populated properties -->
         </div>
     </div>
 
-    <div id="properties-panel">
-        <div id="props-tabs">
-            <button id="btn-tab-props" class="sidebar-tab active" onclick="switchSidebarTab('properties')">Properties</button>
-            <button id="btn-tab-code" class="sidebar-tab" onclick="switchSidebarTab('code')">Code Exporter</button>
+    <!-- SETTINGS & VERSION MODAL -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span>Application & File Versions</span>
+                <button onclick="closeSettings()" class="nudge-btn">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 10px;">Tracked independent file versions for the GUI Designer workspace:</p>
+                <ul id="version-list-container" style="list-style-type: disc; padding-left: 20px; display:flex; flex-direction:column; gap:6px;">
+                    <!-- Populated via script -->
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button class="tool-btn" onclick="closeSettings()">Close</button>
+            </div>
         </div>
-        <div id="props-content"></div>
     </div>
 
-    <div id="settings-modal">
-        <div class="modal-content">
-            <h3 style="margin-top:0; border-bottom: 1px solid #444; padding-bottom: 10px;">System Settings</h3>
-            <h4>Loaded Components</h4>
-            <ul id="version-list-container" class="version-list"></ul>
-            <button class="tool-btn" onclick="closeSettings()" style="width:100%; margin-top:15px; text-align: center;">Close</button>
-        </div>
-    </div>
-
-    <script src="js/engine.js"></script>
 </body>
 </html>
