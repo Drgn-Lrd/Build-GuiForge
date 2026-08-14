@@ -1,3 +1,7 @@
+:root {
+    --winforms-css-version: "1.1";
+}
+
 /* Base Form Styling */
 .theme-winforms #live-preview-canvas {
     background-color: #F0F0F0;
@@ -37,24 +41,20 @@
     box-shadow: inset 1px 1px 0 #000000;
     padding: 2px 4px;
     height: 20px;
-    margin-bottom: 8px;
     font-family: inherit;
     font-size: inherit;
+    box-sizing: border-box;
 }
 
 /* WinForms Label */
 .theme-winforms label {
-    display: block;
-    margin-top: 5px;
-    margin-bottom: 2px;
+    display: inline-block;
 }
 
 /* WinForms CheckBox */
 .theme-winforms div:has(> input[type="checkbox"]) {
     display: flex;
     align-items: center;
-    margin-bottom: 5px;
-    margin-top: 10px;
 }
 
 .theme-winforms input[type="checkbox"] {
