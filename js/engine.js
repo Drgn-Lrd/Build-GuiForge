@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.15";
+const ENGINE_JS_VERSION = "1.16";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -672,7 +672,7 @@ function generatePowerShellWPFCode() {
     let fullXaml = `<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>`;
 
     if (wpfExportMode === 'xaml') {
-        return `# --- form.xaml ---\n${fullXaml}\n\n# --- run.ps1 ---\n[xml]$xaml = Get-Content "$PSScriptRoot/form.xaml"\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
+        return `========================================\nFILE 1: form.xaml\n========================================\n${fullXaml}\n\n========================================\nFILE 2: run.ps1\n========================================\n[xml]$xaml = Get-Content "$PSScriptRoot/form.xaml"\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
     } else {
         return `[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')\n[xml]$xaml = @"\n${fullXaml}\n"@\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
     }
@@ -681,8 +681,18 @@ function generatePowerShellWPFCode() {
 function generateHTMLCode() {
     let menuHtml = '';
     if (universalUIModel.ShowGlobalMenu && universalUIModel.GlobalMenu) {
-        let menuItems = universalUIModel.GlobalMenu.split(',').map(m => `<li style="display:inline-block; margin-right:15px; cursor:pointer;">${m.trim()}</li>`).join('');
-        menuHtml = `<nav style="background:#eee; padding:8px 15px; border-bottom:1px solid #ccc;"><ul style="list-style:none; margin:0; padding:0;">${menuItems}</ul></nav>\n`;
+        let menuParts = universalUIModel.GlobalMenu.split(',').map(part => {
+            part = part.trim();
+            const subMatch = part.match(/(.*?)\((.*?)\)/);
+            if (subMatch) {
+                let parentName = subMatch[1].trim();
+                let subItems = subMatch[2].split(',').map(s => `<a href="#" onclick="alert('Clicked ${s.trim()}'); return false;" style="display:block; padding:6px 12px; color:#333; text-decoration:none;">${s.trim()}</a>`).join('');
+                return `<li class="html-dropdown" style="display:inline-block; position:relative; margin-right:15px;">\n    <span style="cursor:pointer; padding:4px 8px; display:inline-block;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'block' ? 'none' : 'block'; event.stopPropagation();">${parentName} ▼</span>\n    <div style="display:none; position:absolute; background:#fff; min-width:120px; box-shadow:0px 4px 8px rgba(0,0,0,0.2); border:1px solid #ccc; z-index:50;">${subItems}</div>\n</li>`;
+            } else {
+                return `<li style="display:inline-block; margin-right:15px; cursor:pointer;" onclick="alert('Clicked ${part}')">${part}</li>`;
+            }
+        }).join('');
+        menuHtml = `<nav style="background:#eee; padding:8px 15px; border-bottom:1px solid #ccc;"><ul style="list-style:none; margin:0; padding:0;">${menuParts}</ul></nav>\n`;
     }
 
     let htmlChildren = '';
@@ -700,15 +710,28 @@ function generateHTMLCode() {
         } else if (c.Type === 'Dropdown') {
             let opts = (c.Options || '').split(',').map(o => `<option>${o.trim()}</option>`).join('');
             htmlChildren += `    <select style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${opts}</select>\n`;
+        } else if (c.Type === 'MenuBar') {
+            let menuParts = (c.Options || c.Text || '').split(',').map(part => {
+                part = part.trim();
+                const subMatch = part.match(/(.*?)\((.*?)\)/);
+                if (subMatch) {
+                    let parentName = subMatch[1].trim();
+                    let subItems = subMatch[2].split(',').map(s => `<a href="#" onclick="alert('Clicked ${s.trim()}'); return false;" style="display:block; padding:6px 12px; color:#333; text-decoration:none;">${s.trim()}</a>`).join('');
+                    return `<div style="display:inline-block; position:relative; margin-right:10px;">\n    <span style="cursor:pointer; padding:2px 6px; display:inline-block;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'block' ? 'none' : 'block'; event.stopPropagation();">${parentName} ▼</span>\n    <div style="display:none; position:absolute; background:#fff; min-width:100px; box-shadow:0px 4px 8px rgba(0,0,0,0.2); border:1px solid #ccc; z-index:50;">${subItems}</div>\n</div>`;
+                } else {
+                    return `<div style="display:inline-block; cursor:pointer; margin-right:10px;" onclick="alert('Clicked ${part}')">${part}</div>`;
+                }
+            }).join('');
+            htmlChildren += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px; background:#f0f0f0; border:1px solid #ccc; display:flex; align-items:center; padding:2px 5px; box-sizing:border-box;">${menuParts}</div>\n`;
         } else if (c.Type === 'TabControl') {
             let tabs = (c.Options || 'Tab 1, Tab 2').split(',').map(t => t.trim());
-            let tabBtns = tabs.map((t, idx) => `<button onclick="document.querySelectorAll('.tab-panel-${c.Name}').forEach(p=>p.style.display='none'); document.getElementById('tab-${c.Name}-${idx}').style.display='block';" style="padding:4px 10px; cursor:pointer;">${t}</button>`).join('');
+            let tabBtns = tabs.map((t, idx) => `<button onclick="document.querySelectorAll('.tab-panel-${c.Name}').forEach(p=>p.style.display='none'); document.getElementById('tab-${c.Name}-${idx}').style.display='block';" style="padding:4px 10px; cursor:pointer;">${t}</li>`.replace('</li>','')).join('');
             let tabContent = tabs.map((t, idx) => `<div id="tab-${c.Name}-${idx}" class="tab-panel-${c.Name}" style="display:${idx===0?'block':'none'}; padding:10px; border:1px solid #ccc; height:calc(100% - 35px); box-sizing:border-box;">Content for ${t}</div>`).join('');
             htmlChildren += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px; border:1px solid #ccc; background:#fff; box-sizing:border-box;"><div style="background:#f0f0f0; border-bottom:1px solid #ccc; display:flex;">${tabBtns}</div>${tabContent}</div>\n`;
         }
     });
 
-    return `<!DOCTYPE html>\n<html lang="en">\n<head>\n    <meta charset="UTF-8">\n    <title>${universalUIModel.Title}</title>\n    <style>\n        body { font-family: system-ui, -apple-system, sans-serif; position: relative; width: ${universalUIModel.Width}px; height: ${universalUIModel.Height}px; margin: 0; background: #f9f9f9; }\n    </style>\n</head>\n<body>\n${menuHtml}    <div style="position:relative; width:100%; height:100%;">\n${htmlChildren}    </div>\n</body>\n</html>`;
+    return `<!DOCTYPE html>\n<html lang="en">\n<head>\n    <meta charset="UTF-8">\n    <title>${universalUIModel.Title}</title>\n    <style>\n        body { font-family: system-ui, -apple-system, sans-serif; position: relative; width: ${universalUIModel.Width}px; height: ${universalUIModel.Height}px; margin: 0; background: #f9f9f9; }\n    </style>\n</head>\n<body>\n${menuHtml}    <div style="position:relative; width:100%; height:100%;">\n${htmlChildren}    </div>\n<script>\nwindow.onclick = function() {\n    document.querySelectorAll('[style*=\"display: block\"]').forEach(el => {\n        if(el.tagName === 'DIV' && el.style.position === 'absolute') el.style.display = 'none';\n    });\n};\n</script>\n</body>\n</html>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
