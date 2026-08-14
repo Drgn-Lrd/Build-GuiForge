@@ -1,3 +1,7 @@
+// --- SELF-REPORTING VERSION ---
+const ENGINE_JS_VERSION = "1.2";
+
+// --- GLOBAL STATE ---
 let universalUIModel = {
     Title: "My Custom Tool",
     Children: []
@@ -5,7 +9,34 @@ let universalUIModel = {
 
 let selectedControlIndex = null;
 
-// 1. Add a new control from the Toolbox
+// --- SETTINGS MODAL LOGIC (The Interrogator) ---
+function openSettings() {
+    const list = document.getElementById('version-list-container');
+    list.innerHTML = '';
+    
+    // 1. Pull HTML Version from the DOM
+    const htmlMeta = document.getElementById('html-version');
+    const htmlVer = htmlMeta ? htmlMeta.getAttribute('content') : "Unknown";
+    list.innerHTML += `<li>index.html <span style="color:#888;">[version ${htmlVer}]</span></li>`;
+
+    // 2. Pull JS Version from the loaded script
+    list.innerHTML += `<li>js/engine.js <span style="color:#888;">[version ${ENGINE_JS_VERSION}]</span></li>`;
+
+    // 3. Pull CSS Version from the computed styles
+    const rootStyles = getComputedStyle(document.documentElement);
+    let winformsVer = rootStyles.getPropertyValue('--winforms-css-version').trim();
+    // Clean up extra quotes if present
+    winformsVer = winformsVer.replace(/^["']|["']$/g, '') || "Unknown or Not Loaded";
+    list.innerHTML += `<li>css/winforms.css <span style="color:#888;">[version ${winformsVer}]</span></li>`;
+
+    document.getElementById('settings-modal').style.display = 'flex';
+}
+
+function closeSettings() {
+    document.getElementById('settings-modal').style.display = 'none';
+}
+
+// --- CORE ENGINE LOGIC ---
 function addControl(type) {
     const newControl = {
         Type: type,
@@ -16,17 +47,15 @@ function addControl(type) {
     
     universalUIModel.Children.push(newControl);
     renderSimulator();
-    selectControl(universalUIModel.Children.length - 1); // Auto-select the new item
+    selectControl(universalUIModel.Children.length - 1);
 }
 
-// 2. Select a control on the canvas to edit
 function selectControl(index) {
     selectedControlIndex = index;
-    renderSimulator(); // Redraw to show the selection outline
+    renderSimulator();
     renderPropertiesPanel();
 }
 
-// 3. Draw the Canvas
 function renderSimulator() {
     const canvas = document.getElementById('live-preview-canvas');
     canvas.setAttribute('data-title', universalUIModel.Title);
@@ -37,15 +66,13 @@ function renderSimulator() {
         el.className = 'canvas-element';
         if (index === selectedControlIndex) el.classList.add('selected-element');
         
-        // Basic click-to-select binding
         el.onclick = (e) => {
-            e.stopPropagation(); // Prevent deselecting
+            e.stopPropagation();
             selectControl(index);
         };
 
-        // Render the visual mockup based on type
         if (control.Type === "Button") {
-            el.innerHTML = `<button type="button" style="width:100%; padding: 5px;">${control.Text}</button>`;
+            el.innerHTML = `<button type="button" style="width:100%; padding: 5px; cursor: pointer;">${control.Text}</button>`;
         } else if (control.Type === "TextBox") {
             el.innerHTML = `<input type="text" style="width:100%;" value="${control.Text}" readonly>`;
         } else if (control.Type === "Label") {
@@ -59,7 +86,6 @@ function renderSimulator() {
         canvas.appendChild(el);
     });
 
-    // Clicking the empty canvas deselects everything
     canvas.onclick = () => {
         selectedControlIndex = null;
         renderSimulator();
@@ -67,7 +93,6 @@ function renderSimulator() {
     };
 }
 
-// 4. Populate the Properties Grid for the selected control
 function renderPropertiesPanel() {
     const propsContent = document.getElementById('props-content');
     
@@ -93,7 +118,6 @@ function renderPropertiesPanel() {
         </div>
     `;
 
-    // Only show the PowerShell Action block if it's a Button (for now)
     if (control.Type === "Button") {
         html += `
         <div class="prop-group">
@@ -105,17 +129,11 @@ function renderPropertiesPanel() {
     propsContent.innerHTML = html;
 }
 
-// 5. Live update the JSON model when typing in the Properties Grid
 function updateControlProperty(property, value) {
     if (selectedControlIndex !== null) {
         universalUIModel.Children[selectedControlIndex][property] = value;
-        
-        // Auto-rename if naming convention is needed could go here
-        
-        // Re-render the canvas immediately if the Text changes
         if (property === 'Text') renderSimulator();
     }
 }
 
-// Init
 document.addEventListener('DOMContentLoaded', renderSimulator);
