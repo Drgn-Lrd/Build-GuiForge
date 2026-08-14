@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.13";
+const ENGINE_JS_VERSION = "1.14";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -666,7 +666,7 @@ function generatePowerShellWPFCode() {
     if (wpfExportMode === 'xaml') {
         return `# --- form.xaml ---\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n\n# --- run.ps1 ---\n[xml]$xaml = Get-Content "$PSScriptRoot/form.xaml"\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
     } else {
-        return `[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')\n[xml]$xaml = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n"@\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
+        return `[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')\n[xml]$xaml = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n"@\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog();\n\n[xml]$xaml2 = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title} - Secondary" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n"@\n$reader2 = (New-Object System.Xml.XmlNodeReader $xaml2)\n$form2 = [Windows.Markup.XamlReader]::Load($reader2)\n[void]$form2.ShowDialog()`;
     }
 }
 
