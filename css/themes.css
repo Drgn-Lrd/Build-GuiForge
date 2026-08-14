@@ -1,0 +1,150 @@
+:root {
+    --themes-css-version: "1.2";
+}
+
+/* ==========================================
+   THEME: WINFORMS
+   Classic Windows API look
+========================================== */
+.theme-winforms #live-preview-canvas {
+    background-color: #F0F0F0;
+    border: 1px solid #000;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+    border-top: 30px solid #FFFFFF;
+    font-family: 'Microsoft Sans Serif', Tahoma, Arial, sans-serif;
+    font-size: 8.25pt;
+    color: #000000;
+    padding: 10px;
+}
+
+.theme-winforms #live-preview-canvas::before {
+    content: attr(data-title);
+    position: absolute;
+    top: -30px;
+    left: 0;
+    right: 0;
+    height: 30px;
+    background: linear-gradient(to right, #99B4D1 0%, #BFCFE2 100%);
+    color: #000;
+    line-height: 30px;
+    padding-left: 10px;
+    font-size: 9pt;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+.theme-winforms input[type="text"] {
+    background: #FFFFFF;
+    border-top: 1px solid #8E8F8F;
+    border-left: 1px solid #8E8F8F;
+    border-right: 1px solid #FFFFFF;
+    border-bottom: 1px solid #FFFFFF;
+    box-shadow: inset 1px 1px 0 #000000;
+    padding: 2px 4px;
+    height: 20px;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
+}
+
+.theme-winforms label { display: inline-block; }
+.theme-winforms div:has(> input[type="checkbox"]) { display: flex; align-items: center; }
+.theme-winforms input[type="checkbox"] { margin: 0 5px 0 0; }
+
+/* ==========================================
+   THEME: WPF
+   Modern, flat UI look
+========================================== */
+.theme-wpf #live-preview-canvas {
+    background-color: #FFFFFF;
+    border: 1px solid #1883D7;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    border-top: 32px solid #FFFFFF;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    font-size: 9pt;
+    color: #000000;
+    padding: 15px;
+}
+
+.theme-wpf #live-preview-canvas::before {
+    content: attr(data-title);
+    position: absolute;
+    top: -32px;
+    left: 0;
+    right: 0;
+    height: 32px;
+    background: #FFFFFF;
+    color: #000;
+    line-height: 32px;
+    padding-left: 15px;
+    font-size: 10pt;
+    border-bottom: 1px solid #EAEAEA;
+}
+
+.theme-wpf input[type="text"], .theme-wpf select {
+    background: #FFFFFF;
+    border: 1px solid #CCCCCC;
+    padding: 5px;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+
+.theme-wpf input[type="text"]:hover, .theme-wpf select:hover { border-color: #999999; }
+.theme-wpf button { background: #DDDDDD; border: 1px solid #707070; padding: 5px 15px; transition: background 0.2s; }
+.theme-wpf button:hover { background: #EEEEEE; }
+.theme-wpf div:has(> input[type="checkbox"]) { display: flex; align-items: center; }
+.theme-wpf input[type="checkbox"] { margin: 0 8px 0 0; }
+
+/* ==========================================
+   THEME: HTML
+   Simulated Web Browser layout
+========================================== */
+.theme-html #live-preview-canvas {
+    background-color: #FFFFFF;
+    border: 1px solid #DDDDDD;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    border-top: 40px solid #F1F3F4;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    color: #333333;
+    padding: 20px;
+}
+
+.theme-html #live-preview-canvas::before {
+    content: attr(data-title);
+    position: absolute;
+    top: -40px;
+    left: 0;
+    right: 0;
+    height: 40px;
+    background: #DEE1E6;
+    border-radius: 8px 8px 0 0;
+    color: #5F6368;
+    line-height: 40px;
+    padding-left: 20px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.theme-html input[type="text"], .theme-html select {
+    background: #FFFFFF;
+    border: 1px solid #CED4DA;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
+}
+
+.theme-html button {
+    background: #0D6EFD;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-weight: 500;
+}
+.theme-html div:has(> input[type="checkbox"]) { display: flex; align-items: center; }
+.theme-html input[type="checkbox"] { margin: 0 10px 0 0; transform: scale(1.2); }
