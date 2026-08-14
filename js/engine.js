@@ -1,15 +1,18 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.8";
+const ENGINE_JS_VERSION = "1.9";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
     Title: "My Custom Tool",
     Theme: "winforms",
     ShowControlBox: true,
+    TopMost: false,
+    StartPosition: "CenterScreen",
+    FormBorderStyle: "Sizable",
     Width: 650,
     Height: 480,
     Children: [],
-    GlobalMenu: "File, Edit, View, Help"
+    GlobalMenu: "File (Open, Save, Exit), Edit (Cut, Copy, Paste), Help (About)"
 };
 
 let selectedControlIndex = null;
@@ -43,11 +46,11 @@ function addControl(type) {
     const newControl = {
         Type: type,
         Name: `${type}${universalUIModel.Children.length + 1}`,
-        Text: type === 'MenuBar' ? 'File, Edit, Help' : (type === 'TabControl' ? 'Tab 1, Tab 2' : `New ${type}`),
+        Text: type === 'MenuBar' ? 'File (Open, Save, Exit), Edit, Help' : (type === 'TabControl' ? 'Tab 1, Tab 2, Tab 3' : `New ${type}`),
         X: 20 + (universalUIModel.Children.length * 10),
         Y: 40 + (universalUIModel.Children.length * 20),
-        Width: type === 'TabControl' ? 400 : 150,
-        Height: type === 'TabControl' ? 250 : (type === 'TextBox' || type === 'Dropdown' ? 24 : 30),
+        Width: type === 'TabControl' ? 450 : 160,
+        Height: type === 'TabControl' ? 280 : (type === 'TextBox' || type === 'Dropdown' ? 24 : 30),
         Interactive: false,
         Options: type === 'Dropdown' || type === 'MenuBar' || type === 'TabControl' ? 'Item 1, Item 2' : undefined,
         Action: type === 'Button' ? '# Enter PowerShell code here...\nWrite-Host "Clicked!"' : ''
@@ -89,14 +92,13 @@ function renderSimulator() {
     
     let canvasInnerHtml = `
         <div class="window-controls">
-            <button class="win-btn">_</button>
-            <button class="win-btn">□</button>
-            <button class="win-btn">×</button>
+            <button class="win-btn" title="Minimize">_</button>
+            <button class="win-btn" title="Maximize">□</button>
+            <button class="win-btn" title="Close">×</button>
         </div>`;
 
     if (universalUIModel.GlobalMenu) {
-        const menus = universalUIModel.GlobalMenu.split(',').map(m => `<span>${m.trim()}</span>`).join('');
-        canvasInnerHtml += `<div class="menu-bar">${menus}</div>`;
+        canvasInnerHtml += `<div class="menu-bar">` + parseMenuStructure(universalUIModel.GlobalMenu) + `</div>`;
     }
 
     canvas.innerHTML = canvasInnerHtml;
@@ -137,15 +139,14 @@ function renderSimulator() {
             const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}</option>`).join('');
             el.innerHTML = `<select style="width:100%; height:100%;">${optionsHtml}</select>`;
         } else if (control.Type === "MenuBar") {
-            const menusHtml = (control.Options || control.Text || '').split(',').map(m => `<span>${m.trim()}</span>`).join('');
-            el.innerHTML = `<div class="menu-bar" style="width:100%; height:100%;">${menusHtml}</div>`;
+            el.innerHTML = `<div class="menu-bar" style="width:100%; height:100%;">` + parseMenuStructure(control.Options || control.Text) + `</div>`;
         } else if (control.Type === "TabControl") {
             const tabsArr = (control.Options || 'Tab 1, Tab 2').split(',').map(t => t.trim());
             let tabsHtml = `<div class="tabcontrol-wrapper"><div class="tabcontrol-headers">`;
             tabsArr.forEach((t, ti) => {
                 tabsHtml += `<div class="tabcontrol-tab ${ti === 0 ? 'active' : ''}">${t}</div>`;
             });
-            tabsHtml += `</div><div class="tabcontrol-content"></div></div>`;
+            tabsHtml += `</div><div class="tabcontrol-content" style="padding-bottom:30px;">[Configurable Content Area]</div></div>`;
             el.innerHTML = tabsHtml;
         }
         
@@ -159,6 +160,25 @@ function renderSimulator() {
             renderPropertiesPanel();
         }
     };
+}
+
+// Helper to parse submenus like "File (Open, Save, Exit)"
+function parseMenuStructure(menuString) {
+    if (!menuString) return '';
+    let html = '';
+    // Simple parser matching items or parent with parentheses
+    const parts = menuString.split(/,(?![^(]*\))/);
+    parts.forEach(part => {
+        part = part.trim();
+        const subMatch = part.match(/(.*?)\((.*?)\)/);
+        if (subMatch) {
+            const parentName = subMatch[1].trim();
+            html += `<div class="menu-dropdown-item"><strong>${parentName} ▼</strong></div>`;
+        } else {
+            html += `<div class="menu-dropdown-item">${part}</div>`;
+        }
+    });
+    return html;
 }
 
 document.onmousemove = (e) => {
@@ -225,8 +245,30 @@ function renderPropertiesPanel() {
                 </div>
             </div>
             <div class="prop-group">
-                <label>Global Top Menu Bar Items (Comma separated)</label>
+                <label>Startup Position</label>
+                <select onchange="updateFormProperty('StartPosition', this.value)">
+                    <option value="CenterScreen" ${universalUIModel.StartPosition === 'CenterScreen' ? 'selected' : ''}>Center Screen</option>
+                    <option value="Manual" ${universalUIModel.StartPosition === 'Manual' ? 'selected' : ''}>Manual (Default)</option>
+                    <option value="WindowsDefaultLocation" ${universalUIModel.StartPosition === 'WindowsDefaultLocation' ? 'selected' : ''}>Windows Default</option>
+                </select>
+            </div>
+            <div class="prop-group">
+                <label>Border Style / Resizability</label>
+                <select onchange="updateFormProperty('FormBorderStyle', this.value)">
+                    <option value="Sizable" ${universalUIModel.FormBorderStyle === 'Sizable' ? 'selected' : ''}>Sizable (Resizable)</option>
+                    <option value="FixedSingle" ${universalUIModel.FormBorderStyle === 'FixedSingle' ? 'selected' : ''}>Fixed Single (Non-Resizable)</option>
+                    <option value="None" ${universalUIModel.FormBorderStyle === 'None' ? 'selected' : ''}>None</option>
+                </select>
+            </div>
+            <div class="prop-group">
+                <label>Global Top Menu Bar Items (e.g. File (Open, Save, Exit), Edit, Help)</label>
                 <input type="text" value="${universalUIModel.GlobalMenu}" oninput="updateFormProperty('GlobalMenu', this.value)">
+            </div>
+            <div class="prop-group">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" ${universalUIModel.TopMost ? 'checked' : ''} onchange="updateFormProperty('TopMost', this.checked)" style="width:auto;"> 
+                    TopMost (Always on Top)
+                </label>
             </div>
             <div class="prop-group">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -295,7 +337,7 @@ function renderPropertiesPanel() {
         </div>
         ${control.Type === 'Dropdown' || control.Type === 'MenuBar' || control.Type === 'TabControl' ? `
         <div class="prop-group">
-            <label>Items / Tabs (Comma separated)</label>
+            <label>Items / Tabs / Submenus (Comma separated)</label>
             <input type="text" value="${control.Options || ''}" oninput="updateControlProperty('Options', this.value)">
         </div>` : ''}
         ${control.Type === 'Button' ? `
@@ -316,7 +358,8 @@ function updateFormProperty(property, value) {
 
 function updateControlProperty(property, value) {
     if (selectedControlIndex !== null) {
-        universalUIModel.Children[selectedControlIndex][property] = value;
+        const activeChildren = universalUIModel.Children;
+        activeChildren[selectedControlIndex][property] = value;
         if (property === 'Text' || property === 'Options') {
             renderSimulator();
         }
