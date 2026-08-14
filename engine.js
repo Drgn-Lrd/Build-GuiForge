@@ -1,31 +1,36 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
-    Initial engine for the GUI Designer. Implements the control catalog
-    (16 control types with common + type-specific + event schemas), the
-    in-memory design model, canvas rendering, drag-to-place / drag-to-move
-    / 8-handle resize interactions with grid snapping, the dynamic
-    properties pane (layout, appearance, control-specific, events with a
-    snippet-insert helper, arrow-key nudge d-pad, per-control interact
-    toggle), the format switcher, and code generators for HTML, WinForms
-    (PowerShell), WPF (XAML + PowerShell loader), and a WinUI 3 scaffold.
+    Revision: WinForms is now the default target format, and switching
+    the format switcher now re-skins the canvas preview (distinct
+    WinForms/HTML/WPF/WinUI control looks) instead of only affecting the
+    Show Code output. Default control colors now follow standard Windows
+    system colors (grey control face, white text-entry surfaces, black
+    text) instead of the old dark-blue theme. Added: Form-level chrome
+    properties (title bar buttons, resizable, start position, topmost),
+    mouse-resize handles on the design form itself, a reusable pixel
+    stepper (+-1/5/10) used for X/Y/W/H/FontSize/form size, Dock/Anchor/
+    Cursor properties on every control, and a comment-based help block
+    builder (.SYNOPSIS/.DESCRIPTION/.PARAMETER/.EXAMPLE/.NOTES) on the
+    Form properties tab whose output now heads every generated file,
+    replacing the placeholder developer header used in the first pass.
 */
 
-const ENGINE_VERSION = '1.0';
+const ENGINE_VERSION = '1.1';
 
 /* =========================================================================
    Control catalog
    ========================================================================= */
 
 // Property field shorthand: [key, label, type, default, extra]
-// type: text | number | checkbox | color | select | textarea
+// type: text | number | px | checkbox | color | select | textarea
 const COMMON_APPEARANCE_PROPS = [
-  ['backColor', 'Back Color', 'color', '#ece9d8'],
-  ['foreColor', 'Fore Color', 'color', '#1a1a1a'],
+  ['backColor', 'Back Color', 'color', '#F0F0F0'],
+  ['foreColor', 'Fore Color', 'color', '#000000'],
   ['fontFamily', 'Font Family', 'select', 'Segoe UI', { options: ['Segoe UI', 'Arial', 'Tahoma', 'Consolas', 'Verdana', 'Times New Roman'] }],
-  ['fontSize', 'Font Size', 'number', 9],
+  ['fontSize', 'Font Size', 'px', 9],
   ['fontBold', 'Bold', 'checkbox', false],
   ['fontItalic', 'Italic', 'checkbox', false],
   ['borderStyle', 'Border Style', 'select', 'FixedSingle', { options: ['None', 'FixedSingle', 'Fixed3D'] }],
@@ -36,7 +41,18 @@ const COMMON_BEHAVIOR_PROPS = [
   ['enabled', 'Enabled', 'checkbox', true],
   ['tabIndex', 'Tab Index', 'number', 0],
   ['toolTip', 'Tool Tip', 'text', ''],
+  ['dock', 'Dock', 'select', 'None', { options: ['None', 'Top', 'Bottom', 'Left', 'Right', 'Fill'] }],
+  ['anchor', 'Anchor', 'select', 'Top, Left', { options: ['Top, Left', 'Top, Left, Right', 'Top, Bottom, Left', 'Top, Bottom, Left, Right', 'None'] }],
+  ['cursor', 'Cursor', 'select', 'Default', { options: ['Default', 'Hand', 'IBeam', 'Wait', 'Cross', 'SizeAll'] }],
 ];
+
+// System-color-ish defaults per control type, applied on top of the common
+// grey (#F0F0F0) default so text-entry surfaces read as white like a real
+// Windows install rather than every control sharing one flat grey.
+const TYPE_BACKCOLOR_OVERRIDES = {
+  TextBox: '#FFFFFF', ComboBox: '#FFFFFF', ListBox: '#FFFFFF',
+  RichTextBox: '#FFFFFF', NumericUpDown: '#FFFFFF', DateTimePicker: '#FFFFFF',
+};
 
 const CONTROL_DEFS = {
   Button: {
@@ -185,13 +201,26 @@ const state = {
   gridSize: 5,
   snapEnabled: true,
   nudgeStep: 5,
-  currentFormat: 'html',
+  currentFormat: 'winforms',
   form: {
     text: 'MyForm',
     width: 640,
     height: 420,
-    backColor: '#10243c',
+    backColor: '#F0F0F0',
+    minimizeBox: true,
+    maximizeBox: true,
+    closeBox: true,
+    resizable: true,          // FormBorderStyle: Sizable vs FixedSingle
+    startPosition: 'CenterScreen',
+    topMost: false,
     events: { Load: { fn: 'Form_Load', code: '', ps1: '' } },
+    help: {
+      synopsis: { enabled: true, text: '' },
+      description: { enabled: false, text: '' },
+      parameters: [],
+      examples: [{ enabled: false, text: '' }],
+      notes: { enabled: false, author: '', filename: '', notes: '' },
+    },
   },
 };
 
@@ -209,6 +238,7 @@ function createControl(type, x, y, parentId) {
   def.props.forEach(([key, , , def0]) => { props[key] = def0; });
   COMMON_APPEARANCE_PROPS.forEach(([key, , , def0]) => { props[key] = def0; });
   COMMON_BEHAVIOR_PROPS.forEach(([key, , , def0]) => { props[key] = def0; });
+  if (TYPE_BACKCOLOR_OVERRIDES[type]) props.backColor = TYPE_BACKCOLOR_OVERRIDES[type];
   const events = {};
   def.events.forEach(evt => { events[evt] = null; }); // null = not wired up yet
 
@@ -249,11 +279,65 @@ function render() {
 }
 
 function renderFormChrome() {
-  document.getElementById('designForm').style.width = state.form.width + 'px';
-  document.getElementById('designForm').style.height = (state.form.height + 26) + 'px';
+  const formEl = document.getElementById('designForm');
+  const isHtml = state.currentFormat === 'html';
+  formEl.style.width = state.form.width + 'px';
+  formEl.style.height = (state.form.height + (isHtml ? 0 : 26)) + 'px';
+  formEl.className = 'design-form skin-' + state.currentFormat + (isHtml ? ' no-titlebar' : '');
   document.getElementById('designSurface').style.height = state.form.height + 'px';
   document.getElementById('designSurface').style.background = state.form.backColor;
-  document.getElementById('formTitleText').textContent = state.form.text;
+  document.getElementById('formTitleText').textContent = isHtml ? state.form.text + ' \u2014 index.html' : state.form.text;
+
+  const btnWrap = document.getElementById('formTitleButtons');
+  btnWrap.innerHTML = '';
+  if (!isHtml) {
+    if (state.form.minimizeBox) btnWrap.appendChild(titleGlyphBtn('\u2013'));
+    if (state.form.maximizeBox) btnWrap.appendChild(titleGlyphBtn('\u25a1'));
+    if (state.form.closeBox) btnWrap.appendChild(titleGlyphBtn('\u00d7', true));
+  }
+
+  ensureFormResizeHandles(formEl);
+}
+
+function titleGlyphBtn(glyph, isClose) {
+  const b = document.createElement('span');
+  b.className = 'title-glyph-btn' + (isClose ? ' close' : '');
+  b.textContent = glyph;
+  return b;
+}
+
+function ensureFormResizeHandles(formEl) {
+  if (formEl.querySelector('.form-resize-handle')) return;
+  ['e', 's', 'se'].forEach(pos => {
+    const h = document.createElement('div');
+    h.className = 'form-resize-handle frh-' + pos;
+    h.dataset.handle = pos;
+    h.addEventListener('mousedown', startFormResize);
+    formEl.appendChild(h);
+  });
+}
+
+function startFormResize(e) {
+  e.stopPropagation();
+  e.preventDefault();
+  const handle = e.currentTarget.dataset.handle;
+  const startX = e.clientX, startY = e.clientY;
+  const orig = { w: state.form.width, h: state.form.height };
+
+  function onMove(ev) {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (handle.includes('e')) state.form.width = Math.max(200, snap(orig.w + dx));
+    if (handle.includes('s')) state.form.height = Math.max(150, snap(orig.h + dy));
+    renderFormChrome();
+    renderStatus();
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    render();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 function renderControl(c) {
@@ -639,18 +723,50 @@ function section(title, bodyEl, startOpen) {
   return wrap;
 }
 
+function pixelStepperRow(label, value, onChange, opts) {
+  opts = opts || {};
+  const min = opts.min != null ? opts.min : 0;
+  const row = document.createElement('div');
+  row.className = 'prop-row px-row';
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  const controls = document.createElement('div');
+  controls.className = 'px-controls';
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.value = value;
+  input.className = 'px-input';
+
+  const steps = document.createElement('div');
+  steps.className = 'px-steps';
+
+  function commit(v) {
+    v = Math.max(min, v);
+    input.value = v;
+    onChange(v);
+  }
+
+  [-10, -5, -1, 1, 5, 10].forEach(delta => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'px-step-btn';
+    b.textContent = (delta > 0 ? '+' : '') + delta;
+    b.addEventListener('click', () => commit((Number(input.value) || 0) + delta));
+    steps.appendChild(b);
+  });
+
+  input.addEventListener('change', () => commit(Number(input.value) || 0));
+
+  controls.appendChild(input);
+  controls.appendChild(steps);
+  row.appendChild(labelEl);
+  row.appendChild(controls);
+  return row;
+}
+
 function buildLayoutRows(ctrl) {
   const frag = document.createElement('div');
-  [['x', 'X'], ['y', 'Y'], ['w', 'Width'], ['h', 'Height'], ['z', 'Z-Index']].forEach(([key, label]) => {
-    const row = document.createElement('div');
-    row.className = 'prop-row';
-    row.innerHTML = `<label>${label}</label><input type="number" value="${ctrl[key]}">`;
-    row.querySelector('input').addEventListener('change', (e) => {
-      ctrl[key] = Number(e.target.value) || 0;
-      render();
-    });
-    frag.appendChild(row);
-  });
   const nameRow = document.createElement('div');
   nameRow.className = 'prop-row';
   nameRow.innerHTML = `<label>Name</label><input type="text" value="${escapeHtml(ctrl.name)}">`;
@@ -658,7 +774,18 @@ function buildLayoutRows(ctrl) {
     ctrl.name = e.target.value.trim() || ctrl.name;
     render();
   });
-  frag.prepend(nameRow);
+  frag.appendChild(nameRow);
+
+  [['x', 'X'], ['y', 'Y'], ['w', 'Width'], ['h', 'Height']].forEach(([key, label]) => {
+    frag.appendChild(pixelStepperRow(label, ctrl[key], (v) => { ctrl[key] = snap(v); render(); }, { min: key === 'w' || key === 'h' ? 12 : -9999 }));
+  });
+
+  const zRow = document.createElement('div');
+  zRow.className = 'prop-row';
+  zRow.innerHTML = `<label>Z-Index</label><input type="number" value="${ctrl.z}">`;
+  zRow.querySelector('input').addEventListener('change', (e) => { ctrl.z = Number(e.target.value) || 0; render(); });
+  frag.appendChild(zRow);
+
   return frag;
 }
 
@@ -705,6 +832,10 @@ function buildNudgeSection(ctrl) {
 function buildPropRows(ctrl, propDefs) {
   const frag = document.createElement('div');
   propDefs.forEach(([key, label, type, , extra]) => {
+    if (type === 'px') {
+      frag.appendChild(pixelStepperRow(label, ctrl.props[key], (v) => { ctrl.props[key] = v; render(); }, { min: 1 }));
+      return;
+    }
     const row = document.createElement('div');
     row.className = 'prop-row' + (extra && extra.itemsEditor ? ' items-editor' : '');
     const val = ctrl.props[key];
@@ -846,34 +977,238 @@ function buildEventsSection(ctrl) {
 
 function buildFormProps() {
   const frag = document.createElement('div');
-  const rows = [
-    ['text', 'Title', 'text'],
-    ['width', 'Width', 'number'],
-    ['height', 'Height', 'number'],
-    ['backColor', 'Back Color', 'color'],
-  ];
-  rows.forEach(([key, label, type]) => {
-    const row = document.createElement('div');
-    row.className = 'prop-row';
-    if (type === 'color') {
-      row.innerHTML = `<label>${label}</label><input type="color" value="${state.form[key]}">`;
-      row.querySelector('input').addEventListener('input', (e) => { state.form[key] = e.target.value; render(); });
-    } else {
-      row.innerHTML = `<label>${label}</label><input type="${type}" value="${escapeHtml(state.form[key])}">`;
-      row.querySelector('input').addEventListener('change', (e) => {
-        state.form[key] = type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
-        render();
-      });
-    }
-    frag.appendChild(row);
-  });
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'prop-row';
+  titleRow.innerHTML = `<label>Title</label><input type="text" value="${escapeHtml(state.form.text)}">`;
+  titleRow.querySelector('input').addEventListener('change', (e) => { state.form.text = e.target.value; render(); });
+  frag.appendChild(titleRow);
+
+  frag.appendChild(pixelStepperRow('Width', state.form.width, (v) => { state.form.width = v; render(); }, { min: 200 }));
+  frag.appendChild(pixelStepperRow('Height', state.form.height, (v) => { state.form.height = v; render(); }, { min: 150 }));
+
+  const colorRow = document.createElement('div');
+  colorRow.className = 'prop-row';
+  colorRow.innerHTML = `<label>Back Color</label><input type="color" value="${state.form.backColor}">`;
+  colorRow.querySelector('input').addEventListener('input', (e) => { state.form.backColor = e.target.value; render(); });
+  frag.appendChild(colorRow);
+
+  frag.appendChild(section('Title Bar', buildFormChromeRows(), true));
 
   const hint = document.createElement('div');
   hint.className = 'items-hint';
   hint.style.marginTop = '8px';
   hint.textContent = 'Select a control on the canvas to edit its properties. Nothing selected \u2192 editing the form itself.';
   frag.appendChild(hint);
+
+  frag.appendChild(section('Comment-Based Help', buildHelpBlockEditor(), false));
+
   return frag;
+}
+
+function buildFormChromeRows() {
+  const frag = document.createElement('div');
+
+  [['minimizeBox', 'Minimize Button'], ['maximizeBox', 'Maximize Button'], ['closeBox', 'Close Button'], ['resizable', 'Resizable'], ['topMost', 'Always On Top']].forEach(([key, label]) => {
+    const row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML = `<span class="toggle-label">${label}</span><label class="switch"><input type="checkbox" ${state.form[key] ? 'checked' : ''}><span class="track"></span></label>`;
+    row.querySelector('input').addEventListener('change', (e) => { state.form[key] = e.target.checked; render(); });
+    frag.appendChild(row);
+  });
+
+  const startRow = document.createElement('div');
+  startRow.className = 'prop-row';
+  const opts = ['CenterScreen', 'Manual', 'CenterParent', 'WindowsDefaultLocation', 'WindowsDefaultBounds'];
+  startRow.innerHTML = `<label>Start Position</label><select>${opts.map(o => `<option ${o === state.form.startPosition ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  startRow.querySelector('select').addEventListener('change', (e) => { state.form.startPosition = e.target.value; });
+  frag.appendChild(startRow);
+
+  return frag;
+}
+
+/* ---- Comment-based help builder (PowerShell-style .SYNOPSIS/.DESCRIPTION/etc.) ---- */
+
+const HELP_PLACEHOLDERS = {
+  synopsis: 'This script/function does - What?',
+  description: 'A more detailed description of why and how the function works.',
+  paramName: 'ParamName',
+  paramText: 'The parameter is used to define the value of blah and also blah.',
+  example: 'The example below does blah\nPS C:\\> Example',
+  author: 'Name',
+  get filename() { return (state.form.text.replace(/[^a-zA-Z0-9]/g, '') || 'Form') + '.ps1'; },
+  notes: 'Additional notes about this script.',
+};
+
+function helpCheckboxTextRow(label, item, key, placeholder, multiline) {
+  const row = document.createElement('div');
+  row.className = 'prop-row help-row';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = item.enabled;
+  const field = document.createElement(multiline ? 'textarea' : 'input');
+  if (!multiline) field.type = 'text';
+  field.placeholder = placeholder;
+  field.value = item[key] || '';
+  field.addEventListener('change', () => { item[key] = field.value; });
+  cb.addEventListener('change', () => { item.enabled = cb.checked; });
+
+  const labelWrap = document.createElement('label');
+  labelWrap.className = 'help-item-label';
+  labelWrap.appendChild(cb);
+  const span = document.createElement('span');
+  span.textContent = label;
+  labelWrap.appendChild(span);
+
+  row.appendChild(labelWrap);
+  row.appendChild(field);
+  return row;
+}
+
+function buildHelpBlockEditor() {
+  const h = state.form.help;
+  const frag = document.createElement('div');
+
+  frag.appendChild(helpCheckboxTextRow('.SYNOPSIS', h.synopsis, 'text', HELP_PLACEHOLDERS.synopsis, true));
+  frag.appendChild(helpCheckboxTextRow('.DESCRIPTION', h.description, 'text', HELP_PLACEHOLDERS.description, true));
+
+  const paramWrap = document.createElement('div');
+  paramWrap.className = 'help-list';
+  const paramTitle = document.createElement('div');
+  paramTitle.className = 'items-hint';
+  paramTitle.textContent = '.PARAMETER entries';
+  paramWrap.appendChild(paramTitle);
+  h.parameters.forEach((p, idx) => paramWrap.appendChild(buildParamRow(p, idx)));
+  const addParamBtn = document.createElement('button');
+  addParamBtn.className = 'btn btn-ghost';
+  addParamBtn.textContent = '+ Add parameter';
+  addParamBtn.addEventListener('click', () => { h.parameters.push({ enabled: true, name: '', text: '' }); renderProps(); });
+  paramWrap.appendChild(addParamBtn);
+  frag.appendChild(paramWrap);
+
+  const exWrap = document.createElement('div');
+  exWrap.className = 'help-list';
+  const exTitle = document.createElement('div');
+  exTitle.className = 'items-hint';
+  exTitle.textContent = '.EXAMPLE entries';
+  exWrap.appendChild(exTitle);
+  h.examples.forEach((ex, idx) => exWrap.appendChild(helpCheckboxTextRow('Example ' + (idx + 1), ex, 'text', HELP_PLACEHOLDERS.example, true)));
+  const addExBtn = document.createElement('button');
+  addExBtn.className = 'btn btn-ghost';
+  addExBtn.textContent = '+ Add example';
+  addExBtn.addEventListener('click', () => { h.examples.push({ enabled: true, text: '' }); renderProps(); });
+  exWrap.appendChild(addExBtn);
+  frag.appendChild(exWrap);
+
+  const notesWrap = document.createElement('div');
+  notesWrap.className = 'help-list';
+  const notesHead = document.createElement('label');
+  notesHead.className = 'help-item-label';
+  const notesCb = document.createElement('input');
+  notesCb.type = 'checkbox';
+  notesCb.checked = h.notes.enabled;
+  notesCb.addEventListener('change', () => { h.notes.enabled = notesCb.checked; });
+  notesHead.appendChild(notesCb);
+  const notesSpan = document.createElement('span');
+  notesSpan.textContent = '.NOTES';
+  notesHead.appendChild(notesSpan);
+  notesWrap.appendChild(notesHead);
+
+  const authorRow = document.createElement('div');
+  authorRow.className = 'prop-row';
+  authorRow.innerHTML = `<label>Author</label><input type="text" placeholder="${HELP_PLACEHOLDERS.author}" value="${escapeHtml(h.notes.author)}">`;
+  authorRow.querySelector('input').addEventListener('change', (e) => { h.notes.author = e.target.value; });
+  notesWrap.appendChild(authorRow);
+
+  const fileRow = document.createElement('div');
+  fileRow.className = 'prop-row';
+  fileRow.innerHTML = `<label>Filename</label><input type="text" placeholder="${HELP_PLACEHOLDERS.filename}" value="${escapeHtml(h.notes.filename)}">`;
+  fileRow.querySelector('input').addEventListener('change', (e) => { h.notes.filename = e.target.value; });
+  notesWrap.appendChild(fileRow);
+
+  const notesRow = document.createElement('div');
+  notesRow.className = 'prop-row';
+  notesRow.innerHTML = `<label>Notes</label><textarea placeholder="${HELP_PLACEHOLDERS.notes}">${escapeHtml(h.notes.notes)}</textarea>`;
+  notesRow.querySelector('textarea').addEventListener('change', (e) => { h.notes.notes = e.target.value; });
+  notesWrap.appendChild(notesRow);
+
+  frag.appendChild(notesWrap);
+
+  return frag;
+}
+
+function buildParamRow(p, idx) {
+  const wrap = document.createElement('div');
+  wrap.className = 'param-row';
+  const head = document.createElement('label');
+  head.className = 'help-item-label';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = p.enabled;
+  cb.addEventListener('change', () => { p.enabled = cb.checked; });
+  head.appendChild(cb);
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.placeholder = HELP_PLACEHOLDERS.paramName;
+  nameInput.value = p.name;
+  nameInput.className = 'param-name-input';
+  nameInput.addEventListener('change', () => { p.name = nameInput.value; });
+  head.appendChild(nameInput);
+  const rmBtn = document.createElement('button');
+  rmBtn.className = 'btn btn-ghost btn-danger';
+  rmBtn.textContent = '\u00d7';
+  rmBtn.title = 'Remove parameter';
+  rmBtn.addEventListener('click', () => { state.form.help.parameters.splice(idx, 1); renderProps(); });
+  head.appendChild(rmBtn);
+  wrap.appendChild(head);
+
+  const desc = document.createElement('textarea');
+  desc.placeholder = HELP_PLACEHOLDERS.paramText;
+  desc.value = p.text;
+  desc.addEventListener('change', () => { p.text = desc.value; });
+  wrap.appendChild(desc);
+
+  return wrap;
+}
+
+function generateHelpBlockLines() {
+  const h = state.form.help;
+  const lines = [];
+  if (h.synopsis.enabled) {
+    lines.push('.SYNOPSIS');
+    lines.push('    ' + (h.synopsis.text || HELP_PLACEHOLDERS.synopsis));
+  }
+  if (h.description.enabled) {
+    lines.push('.DESCRIPTION');
+    lines.push('    ' + (h.description.text || HELP_PLACEHOLDERS.description));
+  }
+  h.parameters.filter(p => p.enabled).forEach(p => {
+    lines.push('.PARAMETER ' + (p.name || HELP_PLACEHOLDERS.paramName));
+    lines.push('    ' + (p.text || HELP_PLACEHOLDERS.paramText));
+  });
+  h.examples.filter(ex => ex.enabled).forEach(ex => {
+    lines.push('.EXAMPLE');
+    (ex.text || HELP_PLACEHOLDERS.example).split('\n').forEach(l => lines.push('    ' + l));
+  });
+  if (h.notes.enabled) {
+    lines.push('.NOTES');
+    lines.push('    Author: ' + (h.notes.author || HELP_PLACEHOLDERS.author));
+    lines.push('    Filename: ' + (h.notes.filename || HELP_PLACEHOLDERS.filename));
+    if (h.notes.notes) h.notes.notes.split('\n').forEach(l => lines.push('    ' + l));
+  }
+  return lines;
+}
+
+function helpBlockAsPs1Comment() {
+  const lines = generateHelpBlockLines();
+  if (!lines.length) return '';
+  return '<#\n' + lines.join('\n') + '\n#>\n\n';
+}
+
+function helpBlockAsHtmlComment() {
+  const lines = generateHelpBlockLines();
+  if (!lines.length) return '';
+  return '<!--\n' + lines.join('\n') + '\n-->\n';
 }
 
 /* =========================================================================
@@ -957,18 +1292,7 @@ function generateHTML() {
     if (data && data.code) functions.push(`function ${data.fn}(event) {\n  ${data.code.split('\n').join('\n  ')}\n}`);
   }));
 
-  return `<!--
-    ${state.form.text.replace(/[^a-zA-Z0-9]/g, '') || 'Form'}.html
-    Written by: Johnathon Largent
-    Version 1.0
-
-    Generated by GUI Designer (engine v${ENGINE_VERSION}). Static markup for
-    the "${f.text}" form: ${ctrls.length} control(s) laid out with the
-    designer's canvas coordinates, plus inline event handler stubs wired to
-    each control's configured event.
-
--->
-<!DOCTYPE html>
+  return `${helpBlockAsHtmlComment()}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1008,7 +1332,12 @@ function generateWinForms() {
   lines.push(`$Form.Text = "${f.text}"`);
   lines.push(`$Form.Size = New-Object System.Drawing.Size(${f.width}, ${f.height})`);
   lines.push(`$Form.BackColor = ${psColor(f.backColor)}`);
-  lines.push(`$Form.StartPosition = "CenterScreen"`);
+  lines.push(`$Form.StartPosition = "${f.startPosition}"`);
+  lines.push(`$Form.MinimizeBox = $${f.minimizeBox}`);
+  lines.push(`$Form.MaximizeBox = $${f.maximizeBox}`);
+  lines.push(`$Form.ControlBox = $${f.closeBox}`);
+  lines.push(`$Form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::${f.resizable ? 'Sizable' : 'FixedSingle'}`);
+  lines.push(`$Form.TopMost = $${f.topMost}`);
   lines.push('');
 
   ctrls.forEach(c => {
@@ -1028,6 +1357,12 @@ function generateWinForms() {
     lines.push(`$${c.name}.Visible = $${p.visible}`);
     lines.push(`$${c.name}.Enabled = $${p.enabled}`);
     lines.push(`$${c.name}.TabIndex = ${p.tabIndex}`);
+    if (p.dock !== 'None') lines.push(`$${c.name}.Dock = [System.Windows.Forms.DockStyle]::${p.dock}`);
+    if (p.anchor !== 'None') {
+      const flags = p.anchor.split(',').map(s => s.trim()).map(f => `[System.Windows.Forms.AnchorStyles]::${f}`).join(' -bor ');
+      lines.push(`$${c.name}.Anchor = ${flags}`);
+    }
+    if (p.cursor !== 'Default') lines.push(`$${c.name}.Cursor = [System.Windows.Forms.Cursors]::${p.cursor}`);
     if (p.toolTip) {
       lines.push(`$tt_${c.name} = New-Object System.Windows.Forms.ToolTip`);
       lines.push(`$tt_${c.name}.SetToolTip($${c.name}, "${p.toolTip}")`);
@@ -1106,19 +1441,7 @@ function generateWinForms() {
 
   lines.push(`[void]$Form.ShowDialog()`);
 
-  const header = `<#
-    ${(f.text || 'Form').replace(/[^a-zA-Z0-9]/g, '')}.ps1
-    Written by: Johnathon Largent
-    Version 1.0
-
-    Generated by GUI Designer (engine v${ENGINE_VERSION}). WinForms
-    PowerShell script for the "${f.text}" form: builds every control with
-    New-Object, sets layout/appearance/type-specific properties, wires
-    Add_<Event> handlers (inline code or a dot-sourced .ps1 path), and
-    shows the form modally.
-#>
-`;
-  return header + lines.join('\n');
+  return helpBlockAsPs1Comment() + lines.join('\n');
 }
 
 function xamlColorAttr(hex) { return hex; }
@@ -1156,24 +1479,12 @@ function generateWPF() {
     }
   };
 
-  const header = `<!--
-    ${(f.text || 'Window').replace(/[^a-zA-Z0-9]/g, '')}.xaml
-    Written by: Johnathon Largent
-    Version 1.0
-
-    Generated by GUI Designer (engine v${ENGINE_VERSION}). WPF markup for
-    the "${f.text}" window. Controls sit on a Canvas using the designer's
-    absolute coordinates. Nested containers and full event/data-binding
-    wiring are not yet generated here -- this is a first-pass scaffold;
-    pair with a PowerShell loader (Show Code > WinForms tab pattern also
-    applies: dot-source this XAML with [System.Windows.Markup.XamlReader]).
-
--->
-`;
+  const header = helpBlockAsHtmlComment();
 
   const xaml = `<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="${escapeHtml(f.text)}" Width="${f.width}" Height="${f.height}" Background="${f.backColor}">
+        Title="${escapeHtml(f.text)}" Width="${f.width}" Height="${f.height}" Background="${f.backColor}"
+        ResizeMode="${f.resizable ? 'CanResize' : 'NoResize'}" WindowStartupLocation="${f.startPosition === 'CenterScreen' ? 'CenterScreen' : 'Manual'}" Topmost="${f.topMost}">
   <Canvas>
     ${ctrls.map(elFor).join('\n    ')}
   </Canvas>
@@ -1184,19 +1495,9 @@ function generateWPF() {
 
 function generateWinUI() {
   const f = state.form;
-  const header = `<!--
-    ${(f.text || 'Page').replace(/[^a-zA-Z0-9]/g, '')}.xaml
-    Written by: Johnathon Largent
-    Version 1.0
-
-    WinUI 3 scaffold generated by GUI Designer (engine v${ENGINE_VERSION}).
-    WinUI export is on the roadmap: control -> markup mapping, styling
-    (Fluent design tokens), and event wiring are not implemented yet.
-    This stub gives you a page shell with the right title/size so a
-    project can be started; controls placed in the designer are listed
-    below as TODOs for manual porting.
-
--->
+  const header = helpBlockAsHtmlComment() + `<!-- WinUI export is a roadmap item: control -> markup mapping, Fluent
+     styling, and event wiring are not implemented yet. This is a page
+     shell with a TODO list of placed controls for manual porting. -->
 `;
   const todoList = state.controls.map(c => `    <!-- TODO: port ${c.name} (${c.type}) at ${c.x},${c.y} ${c.w}x${c.h} -->`).join('\n');
   const xaml = `<Page
@@ -1222,6 +1523,7 @@ function initFormatSwitch() {
       document.querySelectorAll('.format-switch button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.currentFormat = btn.dataset.format;
+      render();
     });
   });
 }
