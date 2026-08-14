@@ -1,9 +1,8 @@
 :root {
-    --themes-css-version: "1.9";
+    --themes-css-version: "1.10";
 }
 
-/* Workspace padding adjustment to give room for window chrome */
-#workspace { padding-top: 45px !important; }
+#workspace { padding-top: 50px !important; }
 
 /* ==========================================
    THEME: WINFORMS
@@ -80,18 +79,13 @@
     border-bottom: 1px solid #ACA899;
     display: flex;
     padding: 2px 5px;
-    gap: 15px;
+    gap: 10px;
     font-size: 8.5pt;
     width: 100%;
     box-sizing: border-box;
-}
-
-.theme-winforms .menu-dropdown-item {
     position: relative;
-    cursor: pointer;
-    padding: 2px 6px;
+    z-index: 25;
 }
-.theme-winforms .menu-dropdown-item:hover { background: #316AC5; color: #fff; }
 
 /* ==========================================
    THEME: WPF
@@ -161,10 +155,12 @@
     border-bottom: 1px solid #E0E0E0;
     display: flex;
     padding: 4px 10px;
-    gap: 20px;
+    gap: 15px;
     font-size: 9pt;
     width: 100%;
     box-sizing: border-box;
+    position: relative;
+    z-index: 25;
 }
 
 .theme-wpf .menu-dropdown-item {
@@ -256,14 +252,18 @@
     font-size: 14px;
     width: 100%;
     box-sizing: border-box;
+    position: relative;
+    z-index: 25;
 }
 
-.theme-html .menu-dropdown-item {
-    cursor: pointer;
-    padding: 4px 10px;
-    border-radius: 4px;
-}
-.theme-html .menu-dropdown-item:hover { background: #E2E6EA; }
+/* Interactive Dropdown Menu Styling */
+.menu-item-wrapper { position: relative; display: inline-block; }
+.menu-label { cursor: pointer; padding: 2px 6px; border-radius: 3px; }
+.menu-label:hover { background: rgba(0,0,0,0.1); }
+.menu-dropdown-content { display: none; position: absolute; background-color: #f9f9f9; min-width: 120px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); z-index: 30; border: 1px solid #ccc; }
+.menu-dropdown-content div { color: black; padding: 6px 12px; text-decoration: none; display: block; font-size: 0.9em; cursor: pointer; }
+.menu-dropdown-content div:hover { background-color: #0078d4; color: white; }
+.menu-item-wrapper.active .menu-dropdown-content { display: block; }
 
 /* TabControl UI Styling */
 .tabcontrol-wrapper { display: flex; flex-direction: column; width: 100%; height: 100%; border: 1px solid #ccc; background: #fff; box-sizing: border-box; }
