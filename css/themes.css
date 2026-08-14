@@ -1,5 +1,5 @@
 :root {
-    --themes-css-version: "1.6";
+    --themes-css-version: "1.7";
 }
 
 /* ==========================================
@@ -7,28 +7,50 @@
 ========================================== */
 .theme-winforms #live-preview-canvas {
     background-color: #F0F0F0;
-    border: 1px solid #000;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+    border: 1px solid #0055EA;
+    box-shadow: 2px 2px 10px rgba(0,0,0,0.5);
     font-family: 'Microsoft Sans Serif', Tahoma, Arial, sans-serif;
     font-size: 8.25pt;
     color: #000000;
 }
 
-.theme-winforms #live-preview-canvas::before {
+.theme-winforms .window-frame::before {
     content: attr(data-title);
     position: absolute;
     top: -30px;
     left: -1px;
     right: -1px;
     height: 30px;
-    background: linear-gradient(to right, #99B4D1 0%, #BFCFE2 100%);
-    color: #000;
+    background: linear-gradient(to right, #0054E3 0%, #3281F7 100%);
+    color: #FFFFFF;
     line-height: 30px;
     padding-left: 10px;
     font-size: 9pt;
     font-family: 'Segoe UI', sans-serif;
+    font-weight: bold;
     border: 1px solid #000;
     box-sizing: border-box;
+}
+
+.theme-winforms .window-controls {
+    position: absolute;
+    top: -26px;
+    right: 5px;
+    display: flex;
+    gap: 2px;
+    z-index: 20;
+}
+
+.theme-winforms .win-btn {
+    width: 20px;
+    height: 18px;
+    background: #E1E1E1;
+    border: 1px solid #707070;
+    font-size: 9px;
+    line-height: 14px;
+    text-align: center;
+    cursor: pointer;
+    color: #000;
 }
 
 .theme-winforms input[type="text"], .theme-winforms select {
@@ -56,6 +78,8 @@
     padding: 2px 5px;
     gap: 15px;
     font-size: 8.5pt;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 /* ==========================================
@@ -70,7 +94,7 @@
     color: #000000;
 }
 
-.theme-wpf #live-preview-canvas::before {
+.theme-wpf .window-frame::before {
     content: attr(data-title);
     position: absolute;
     top: -32px;
@@ -86,6 +110,26 @@
     border-bottom: 1px solid #EAEAEA;
     box-sizing: border-box;
 }
+
+.theme-wpf .window-controls {
+    position: absolute;
+    top: -30px;
+    right: 5px;
+    display: flex;
+    gap: 5px;
+    z-index: 20;
+}
+
+.theme-wpf .win-btn {
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    font-size: 12px;
+    cursor: pointer;
+    color: #333;
+}
+.theme-wpf .win-btn:hover { background: #E5E5E5; }
 
 .theme-wpf input[type="text"], .theme-wpf select {
     background: #FFFFFF;
@@ -107,6 +151,8 @@
     padding: 4px 10px;
     gap: 20px;
     font-size: 9pt;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 /* ==========================================
@@ -122,7 +168,7 @@
     color: #333333;
 }
 
-.theme-html #live-preview-canvas::before {
+.theme-html .window-frame::before {
     content: attr(data-title);
     position: absolute;
     top: -40px;
@@ -138,6 +184,25 @@
     font-weight: 500;
     border: 1px solid #DDDDDD;
     box-sizing: border-box;
+}
+
+.theme-html .window-controls {
+    position: absolute;
+    top: -35px;
+    right: 10px;
+    display: flex;
+    gap: 8px;
+    z-index: 20;
+}
+
+.theme-html .win-btn {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    color: #5F6368;
 }
 
 .theme-html input[type="text"], .theme-html select {
@@ -170,4 +235,14 @@
     padding: 8px 15px;
     gap: 20px;
     font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
 }
+
+/* Tabs UI Styling */
+.tab-container { display: flex; flex-direction: column; width: 100%; height: 100%; }
+.tab-headers { display: flex; background: rgba(0,0,0,0.05); border-bottom: 1px solid #ccc; }
+.tab-header-btn { padding: 6px 12px; cursor: pointer; border: 1px solid transparent; border-bottom: none; font-size: 0.9em; }
+.tab-header-btn.active { background: #fff; border-color: #ccc; font-weight: bold; }
+.tab-content-pane { flex: 1; position: relative; padding: 10px; display: none; }
+.tab-content-pane.active { display: block; }
