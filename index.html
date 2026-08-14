@@ -5,40 +5,55 @@
     <title>Build-GuiForge</title>
     <link rel="stylesheet" href="css/winforms.css">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; flex-direction: column; background: #1e1e1e; color: #d4d4d4; }
-        #toolbar { padding: 15px; background: #252526; border-bottom: 1px solid #333; display: flex; gap: 10px; align-items: center; }
-        #workspace { display: flex; flex: 1; overflow: hidden; }
-        #canvas-container { flex: 2; padding: 20px; background: #333; display: flex; justify-content: center; align-items: center; overflow: auto; }
-        #live-preview-canvas { width: 600px; min-height: 400px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
-        #code-panel { flex: 1; background: #1e1e1e; border-left: 1px solid #333; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; }
-        pre { background: #000; padding: 10px; color: #4af626; border-radius: 5px; overflow-x: auto; flex: 1; }
-        input, button { padding: 8px; border: 1px solid #555; background: #3c3c3c; color: #fff; border-radius: 4px; }
-        button { cursor: pointer; background: #0078d4; border: none; }
-        button:hover { background: #106ebe; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; background: #1e1e1e; color: #d4d4d4; }
+        
+        /* The Toolbox (Left) */
+        #toolbox { width: 200px; background: #252526; border-right: 1px solid #333; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .tool-btn { padding: 10px; background: #3c3c3c; border: 1px solid #555; color: white; cursor: pointer; text-align: left; border-radius: 4px; }
+        .tool-btn:hover { background: #505050; }
+
+        /* The Canvas (Center) */
+        #workspace { flex: 1; padding: 20px; background: #333; display: flex; justify-content: center; align-items: center; overflow: auto; }
+        #live-preview-canvas { width: 600px; min-height: 400px; position: relative; } /* position: relative is crucial for moving elements later */
+        
+        /* The Properties Grid (Right) */
+        #properties-panel { width: 300px; background: #252526; border-left: 1px solid #333; display: flex; flex-direction: column; }
+        #props-header { padding: 15px; background: #1e1e1e; border-bottom: 1px solid #333; font-weight: bold; }
+        .prop-group { padding: 10px 15px; border-bottom: 1px solid #333; display: flex; flex-direction: column; gap: 5px; }
+        .prop-group label { font-size: 0.85em; color: #aaa; }
+        .prop-group input, .prop-group textarea { width: 100%; padding: 5px; background: #1e1e1e; border: 1px solid #555; color: white; box-sizing: border-box; }
+        .prop-group textarea { resize: vertical; min-height: 80px; font-family: Consolas, monospace; }
+        
+        /* Interactive element styling */
+        .canvas-element { cursor: pointer; }
+        .canvas-element:hover { outline: 1px dashed #0078d4; }
+        .selected-element { outline: 2px solid #0078d4 !important; }
     </style>
 </head>
 <body>
 
-    <div id="toolbar">
-        <label>Fetch Cmdlet Docs:</label>
-        <input type="text" id="moduleInput" value="Microsoft.PowerShell.Management" placeholder="Module">
-        <input type="text" id="cmdletInput" value="Get-Process" placeholder="Cmdlet">
-        <button onclick="loadCmdletDocs()">Generate from Docs</button>
+    <div id="toolbox">
+        <h3 style="margin-top:0;">Toolbox</h3>
+        <button class="tool-btn" onclick="addControl('Button')">➕ Button</button>
+        <button class="tool-btn" onclick="addControl('TextBox')">➕ TextBox</button>
+        <button class="tool-btn" onclick="addControl('Label')">➕ Label</button>
+        <button class="tool-btn" onclick="addControl('CheckBox')">➕ CheckBox</button>
+        <button class="tool-btn" onclick="addControl('ComboBox')">➕ Dropdown</button>
     </div>
 
-    <div id="workspace">
-        <div id="canvas-container" class="theme-winforms">
-            <div id="live-preview-canvas" data-title="Untitled Form">
-                <!-- UI Controls injected here by JS -->
-            </div>
+    <div id="workspace" class="theme-winforms">
+        <div id="live-preview-canvas" data-title="My Custom Tool">
+            <!-- Elements dropped here -->
         </div>
-        <div id="code-panel">
-            <h3>Universal UI JSON</h3>
-            <pre id="json-output">Model empty...</pre>
+    </div>
+
+    <div id="properties-panel">
+        <div id="props-header">Properties</div>
+        <div id="props-content">
+            <div style="padding: 15px; color: #888;">Select an element on the canvas to edit its properties.</div>
         </div>
     </div>
 
     <script src="js/engine.js"></script>
-    <script src="js/fetcher.js"></script>
 </body>
 </html>
