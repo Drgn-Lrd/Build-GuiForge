@@ -1,16 +1,18 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.3";
+const ENGINE_JS_VERSION = "1.4";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
     Title: "My Custom Tool",
-    Theme: "winforms", // Default to WinForms
+    Theme: "winforms",
     Children: []
 };
 
 let selectedControlIndex = null;
+let isDragging = false;
+let dragOffset = { x: 0, y: 0 };
 
-// --- SETTINGS MODAL LOGIC (The Interrogator) ---
+// --- SETTINGS MODAL LOGIC ---
 function openSettings() {
     const list = document.getElementById('version-list-container');
     list.innerHTML = '';
@@ -39,7 +41,9 @@ function addControl(type) {
         Type: type,
         Name: `${type}${universalUIModel.Children.length + 1}`,
         Text: `New ${type}`,
-        Options: type === 'ComboBox' ? 'Item 1, Item 2, Item 3' : undefined,
+        X: 30 + (universalUIModel.Children.length * 15),
+        Y: 30 + (universalUIModel.Children.length * 35),
+        Options: type === 'Dropdown' ? 'Item 1, Item 2, Item 3' : undefined,
         Action: type === 'Button' ? '# Enter PowerShell code here...\nWrite-Host "Clicked!"' : ''
     };
     
@@ -67,9 +71,7 @@ function renderSimulator() {
     const workspace = document.getElementById('workspace');
     const canvas = document.getElementById('live-preview-canvas');
     
-    // Apply the selected Theme to the workspace
     workspace.className = `theme-${universalUIModel.Theme}`;
-    
     canvas.setAttribute('data-title', universalUIModel.Title);
     canvas.innerHTML = '';
     
@@ -78,46 +80,87 @@ function renderSimulator() {
         el.className = 'canvas-element';
         if (index === selectedControlIndex) el.classList.add('selected-element');
         
-        el.onclick = (e) => {
+        el.style.left = `${control.X}px`;
+        el.style.top = `${control.Y}px`;
+        
+        // Mouse drag event binding
+        el.onmousedown = (e) => {
             e.stopPropagation();
             selectControl(index);
+            isDragging = true;
+            const rect = el.getBoundingClientRect();
+            dragOffset.x = e.clientX - rect.left;
+            dragOffset.y = e.clientY - rect.top;
         };
 
         if (control.Type === "Button") {
-            el.innerHTML = `<button type="button" style="width:100%; padding: 5px; cursor: pointer;">${control.Text}</button>`;
+            el.innerHTML = `<button type="button">${control.Text}</button>`;
         } else if (control.Type === "TextBox") {
-            el.innerHTML = `<input type="text" style="width:100%;" value="${control.Text}" readonly>`;
+            el.innerHTML = `<input type="text" value="${control.Text}" readonly>`;
         } else if (control.Type === "Label") {
             el.innerHTML = `<label>${control.Text}</label>`;
         } else if (control.Type === "CheckBox") {
-            el.innerHTML = `<div><input type="checkbox" disabled> <label style="display:inline;">${control.Text}</label></div>`;
-        } else if (control.Type === "ComboBox") {
-            // Parse comma-separated options
+            el.innerHTML = `<div style="display:flex; align-items:center;"><input type="checkbox" disabled> <label>${control.Text}</label></div>`;
+        } else if (control.Type === "Dropdown") {
             const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}</option>`).join('');
-            el.innerHTML = `<select style="width:100%; padding:3px;">${optionsHtml}</select>`;
+            el.innerHTML = `<select>${optionsHtml}</select>`;
         }
         
         canvas.appendChild(el);
     });
 
-    // Clicking empty canvas deselects and shows Form Properties
-    canvas.onclick = () => {
-        selectedControlIndex = null;
-        renderSimulator();
-        renderPropertiesPanel();
+    canvas.onclick = (e) => {
+        if (e.target === canvas) {
+            selectedControlIndex = null;
+            renderSimulator();
+            renderPropertiesPanel();
+        }
     };
 }
+
+// Global mouse drag tracking
+document.onmousemove = (e) => {
+    if (!isDragging || selectedControlIndex === null) return;
+    const canvas = document.getElementById('live-preview-canvas');
+    const rect = canvas.getBoundingClientRect();
+    
+    let newX = e.clientX - rect.left - dragOffset.x;
+    let newY = e.clientY - rect.top - dragOffset.y;
+    
+    // Boundary constraints inside the form canvas
+    newX = Math.max(0, Math.min(newX, canvas.clientWidth - 100));
+    newY = Math.max(0, Math.min(newY, canvas.clientHeight - 30));
+    
+    universalUIModel.Children[selectedControlIndex].X = Math.round(newX);
+    universalUIModel.Children[selectedControlIndex].Y = Math.round(newY);
+    
+    // Move element live without destroying DOM focus
+    const el = document.getElementsByClassName('canvas-element')[selectedControlIndex];
+    if (el) {
+        el.style.left = `${newX}px`;
+        el.style.top = `${newY}px`;
+    }
+    
+    // Update X/Y input values in properties panel if open
+    const inputX = document.getElementById('prop-x');
+    const inputY = document.getElementById('prop-y');
+    if (inputX) inputX.value = Math.round(newX);
+    if (inputY) inputY.value = Math.round(newY);
+};
+
+document.onmouseup = () => {
+    isDragging = false;
+};
 
 function renderPropertiesPanel() {
     const propsContent = document.getElementById('props-content');
     
-    // IF NO CONTROL IS SELECTED: Show Form Properties
     if (selectedControlIndex === null) {
         propsContent.innerHTML = `
             <div style="padding: 10px 15px; background: #333; color: #4af626; font-size: 0.9em; text-transform: uppercase;">Form Properties</div>
             <div class="prop-group">
                 <label>Window Title</label>
-                <input type="text" value="${universalUIModel.Title}" onkeyup="updateFormProperty('Title', this.value)">
+                <input type="text" value="${universalUIModel.Title}" oninput="updateFormProperty('Title', this.value)">
             </div>
             <div class="prop-group">
                 <label>Rendering Theme (Output Type)</label>
@@ -127,15 +170,14 @@ function renderPropertiesPanel() {
                     <option value="html" ${universalUIModel.Theme === 'html' ? 'selected' : ''}>HTML / Web Form</option>
                 </select>
             </div>
-            <div style="padding: 15px; color: #888; font-size: 0.9em;">Click an element on the canvas to edit its specific properties.</div>
+            <div style="padding: 15px; color: #888; font-size: 0.9em;">Click an element on the canvas to edit its properties or drag it around.</div>
         `;
         return;
     }
 
-    // IF CONTROL IS SELECTED: Show Control Properties
     const control = universalUIModel.Children[selectedControlIndex];
     
-    let html = `
+    propsContent.innerHTML = `
         <div style="padding: 10px 15px; background: #333; color: #0078d4; font-size: 0.9em; text-transform: uppercase;">Control Properties</div>
         <div class="prop-group">
             <label>Type</label>
@@ -143,41 +185,38 @@ function renderPropertiesPanel() {
         </div>
         <div class="prop-group">
             <label>Name (ID)</label>
-            <input type="text" value="${control.Name}" onkeyup="updateControlProperty('Name', this.value)">
+            <input type="text" value="${control.Name}" oninput="updateControlProperty('Name', this.value)">
         </div>
         <div class="prop-group">
             <label>Text / Label</label>
-            <input type="text" value="${control.Text}" onkeyup="updateControlProperty('Text', this.value)">
+            <input type="text" value="${control.Text}" oninput="updateControlProperty('Text', this.value)">
         </div>
-    `;
-
-    if (control.Type === "ComboBox") {
-        html += `
+        <div style="display:flex;">
+            <div class="prop-group" style="flex:1;">
+                <label>X Pos</label>
+                <input type="number" id="prop-x" value="${control.X}" oninput="updateControlCoordinate('X', this.value)">
+            </div>
+            <div class="prop-group" style="flex:1;">
+                <label>Y Pos</label>
+                <input type="number" id="prop-y" value="${control.Y}" oninput="updateControlCoordinate('Y', this.value)">
+            </div>
+        </div>
+        ${control.Type === 'Dropdown' ? `
         <div class="prop-group">
             <label>Dropdown Options (Comma separated)</label>
-            <input type="text" value="${control.Options}" onkeyup="updateControlProperty('Options', this.value)">
-        </div>`;
-    }
-
-    if (control.Type === "Button") {
-        html += `
+            <input type="text" value="${control.Options || ''}" oninput="updateControlProperty('Options', this.value)">
+        </div>` : ''}
+        ${control.Type === 'Button' ? `
         <div class="prop-group">
             <label>OnClick Action (PowerShell script)</label>
-            <textarea onkeyup="updateControlProperty('Action', this.value)">${control.Action}</textarea>
-        </div>`;
-    }
-
-    // Add Delete Button at the bottom
-    html += `
+            <textarea oninput="updateControlProperty('Action', this.value)">${control.Action}</textarea>
+        </div>` : ''}
         <div class="prop-group" style="border-bottom: none;">
             <button class="tool-btn danger-btn" onclick="deleteSelectedControl()">🗑️ Delete Element</button>
         </div>
     `;
-
-    propsContent.innerHTML = html;
 }
 
-// Update properties on the Universal Model itself
 function updateFormProperty(property, value) {
     universalUIModel[property] = value;
     renderSimulator();
@@ -186,12 +225,25 @@ function updateFormProperty(property, value) {
 function updateControlProperty(property, value) {
     if (selectedControlIndex !== null) {
         universalUIModel.Children[selectedControlIndex][property] = value;
-        renderSimulator(); // Instantly update the visual canvas
+        // Only re-render if text or options change, avoiding full loss of text input focus
+        if (property === 'Text' || property === 'Options') {
+            renderSimulator();
+        }
     }
 }
 
-// Init
+function updateControlCoordinate(axis, value) {
+    if (selectedControlIndex !== null) {
+        const val = parseInt(value) || 0;
+        universalUIModel.Children[selectedControlIndex][axis] = val;
+        const el = document.getElementsByClassName('canvas-element')[selectedControlIndex];
+        if (el) {
+            el.style[axis === 'X' ? 'left' : 'top'] = `${val}px`;
+        }
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     renderSimulator();
-    renderPropertiesPanel(); // Show Form properties by default on load
+    renderPropertiesPanel();
 });
