@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Build-GuiForge</title>
+    <link rel="stylesheet" href="css/winforms.css">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; flex-direction: column; background: #1e1e1e; color: #d4d4d4; }
+        #toolbar { padding: 15px; background: #252526; border-bottom: 1px solid #333; display: flex; gap: 10px; align-items: center; }
+        #workspace { display: flex; flex: 1; overflow: hidden; }
+        #canvas-container { flex: 2; padding: 20px; background: #333; display: flex; justify-content: center; align-items: center; overflow: auto; }
+        #live-preview-canvas { width: 600px; min-height: 400px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
+        #code-panel { flex: 1; background: #1e1e1e; border-left: 1px solid #333; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; }
+        pre { background: #000; padding: 10px; color: #4af626; border-radius: 5px; overflow-x: auto; flex: 1; }
+        input, button { padding: 8px; border: 1px solid #555; background: #3c3c3c; color: #fff; border-radius: 4px; }
+        button { cursor: pointer; background: #0078d4; border: none; }
+        button:hover { background: #106ebe; }
+    </style>
+</head>
+<body>
+
+    <div id="toolbar">
+        <label>Fetch Cmdlet Docs:</label>
+        <input type="text" id="moduleInput" value="Microsoft.PowerShell.Management" placeholder="Module">
+        <input type="text" id="cmdletInput" value="Get-Process" placeholder="Cmdlet">
+        <button onclick="loadCmdletDocs()">Generate from Docs</button>
+    </div>
+
+    <div id="workspace">
+        <div id="canvas-container" class="theme-winforms">
+            <div id="live-preview-canvas" data-title="Untitled Form">
+                <!-- UI Controls injected here by JS -->
+            </div>
+        </div>
+        <div id="code-panel">
+            <h3>Universal UI JSON</h3>
+            <pre id="json-output">Model empty...</pre>
+        </div>
+    </div>
+
+    <script src="js/engine.js"></script>
+    <script src="js/fetcher.js"></script>
+</body>
+</html>
