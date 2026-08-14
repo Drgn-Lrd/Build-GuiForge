@@ -1,19 +1,20 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
-    Initial stylesheet for the GUI Designer. Establishes the blueprint/
-    drafting-table visual theme (dark slate surfaces, cyan grid canvas,
-    amber selection accents), the app shell grid layout (toolbar, toolbox,
-    canvas, properties pane, status bar), rendering styles for every
-    supported control preview, the properties-pane widgets (section
-    groups, d-pad nudge control, interact toggle, event editor), and the
-    modal styling used by the About and Show Code dialogs.
+    Revision: replaced the dark-blue design-form chrome with a neutral
+    Windows-grey titlebar and real title-bar buttons (minimize/maximize/
+    close, driven by form properties), added per-format canvas skins
+    (skin-winforms/html/wpf/winui) so control appearance actually changes
+    when the format switcher changes, added form-resize-handle styling,
+    the pixel-stepper widget (.px-row/.px-steps/.px-step-btn), and the
+    comment-based help block editor styling (.help-row/.help-list/
+    .param-row).
 */
 
 :root {
-  --stylesheet-version: '1.0';
+  --stylesheet-version: '1.1';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -257,9 +258,9 @@ button, input, select, textarea {
 .design-form {
   position: relative;
   background: var(--bp-canvas);
-  border: 1px solid #24405e;
+  border: 1px solid #c7c9cc;
   border-radius: var(--radius-md);
-  box-shadow: 0 30px 60px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(45,212,191,0.05);
+  box-shadow: 0 30px 60px -20px rgba(0,0,0,0.6);
   outline: none;
 }
 
@@ -268,19 +269,33 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
-  background: #16324d;
-  border-bottom: 1px solid #24405e;
+  padding: 0 4px 0 10px;
+  background: #e8eaed;
+  border-bottom: 1px solid #c7c9cc;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   font-size: 11.5px;
-  color: #bcd6ea;
+  color: #202124;
   user-select: none;
 }
 
-.design-form-titlebar .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #274a68;
+.title-buttons { display: flex; align-items: center; gap: 2px; }
+
+.title-glyph-btn {
+  width: 26px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; color: #202124; border-radius: 2px;
 }
+.title-glyph-btn.close { color: #202124; }
+
+.design-form.no-titlebar .design-form-titlebar {
+  background: #f4f1ea; color: #6b6f76; font-family: var(--bp-font-mono); font-size: 10.5px;
+}
+
+.form-resize-handle { position: absolute; z-index: 20; }
+.frh-e { top: 26px; right: -4px; bottom: 0; width: 8px; cursor: ew-resize; }
+.frh-s { left: 0; right: 0; bottom: -4px; height: 8px; cursor: ns-resize; }
+.frh-se { right: -4px; bottom: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
+.design-form.no-titlebar .frh-e { top: 0; }
 
 .design-surface {
   position: relative;
@@ -371,6 +386,33 @@ button, input, select, textarea {
 .rc-datetime { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 3px 5px; font-size: 12px; }
 .rc-richtext { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 4px; font-size: 12px; overflow: auto; white-space: pre-wrap; }
 .rc-link { color: var(--bp-accent-2); font-size: 12px; text-decoration: underline; padding: 2px; }
+
+/* ---------- Format skins (canvas preview only) ---------- */
+/* WinForms: classic flat/sharp Windows look (the default) */
+.skin-winforms .rc-button { border-radius: 0; border-color: #707070; }
+.skin-winforms .rc-textbox, .skin-winforms .rc-combo, .skin-winforms .rc-listbox,
+.skin-winforms .rc-numeric, .skin-winforms .rc-datetime, .skin-winforms .rc-richtext { border-radius: 0; border-color: #7f9db9; }
+.skin-winforms .rc-groupbox, .skin-winforms .rc-panel { border-radius: 0; }
+
+/* HTML: flat web look, rounded corners, no inset border feel */
+.skin-html .rc-button { border-radius: 6px; border: none; background: #2563eb !important; color: #fff !important; }
+.skin-html .rc-textbox, .skin-html .rc-combo, .skin-html .rc-listbox,
+.skin-html .rc-numeric, .skin-html .rc-datetime, .skin-html .rc-richtext { border-radius: 6px; border-color: #cbd5e1; }
+.skin-html .rc-groupbox, .skin-html .rc-panel { border-radius: 6px; border-color: #d7dbe0; }
+.skin-html .rc-progress-fill { background: #2563eb; }
+
+/* WPF: soft gradient "Aero-lite" look */
+.skin-wpf .rc-button { border-radius: 2px; border-color: #adadad; background: linear-gradient(#fefefe, #e5e5e5) !important; color: #1a1a1a !important; }
+.skin-wpf .rc-textbox, .skin-wpf .rc-combo, .skin-wpf .rc-listbox,
+.skin-wpf .rc-numeric, .skin-wpf .rc-datetime, .skin-wpf .rc-richtext { border-radius: 2px; border-color: #7eb4ea; }
+.skin-wpf .rc-groupbox, .skin-wpf .rc-panel { border-radius: 2px; border-color: #a0b8d0; }
+
+/* WinUI: Fluent rounded corners + soft elevation */
+.skin-winui .rc-button { border-radius: 6px; border-color: #d1d1d1; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.skin-winui .rc-textbox, .skin-winui .rc-combo, .skin-winui .rc-listbox,
+.skin-winui .rc-numeric, .skin-winui .rc-datetime, .skin-winui .rc-richtext { border-radius: 6px; border-color: #d1d1d1; }
+.skin-winui .rc-groupbox, .skin-winui .rc-panel { border-radius: 8px; border-color: #d1d1d1; }
+.skin-winui .rc-check input, .skin-winui .rc-radio input { accent-color: #0067c0; }
 
 /* ---------- Properties pane ---------- */
 
@@ -470,6 +512,19 @@ button, input, select, textarea {
 
 .prop-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--bp-accent-2); }
 
+/* Pixel stepper (X/Y/W/H/FontSize/Form W&H) */
+.px-row { grid-template-columns: 60px 1fr; align-items: start; }
+.px-controls { display: flex; flex-direction: column; gap: 4px; }
+.px-input { width: 100%; }
+.px-steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+.px-step-btn {
+  background: var(--bp-panel-raised); border: 1px solid var(--bp-border);
+  color: var(--bp-accent-2); border-radius: var(--radius-sm);
+  font-size: 10px; padding: 3px 0; cursor: pointer; font-family: var(--bp-font-mono);
+}
+.px-step-btn:hover { border-color: var(--bp-accent-2); }
+.px-step-btn:active { background: var(--bp-accent-2-dim); }
+
 /* Nudge d-pad */
 .nudge-wrap {
   display: flex;
@@ -560,6 +615,20 @@ button, input, select, textarea {
 
 .add-event-row { padding: 8px 0 2px; }
 .add-event-row select { width: 100%; }
+
+/* Comment-based help builder */
+.help-row { grid-template-columns: 96px 1fr; align-items: start; }
+.help-item-label { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--bp-text-muted); cursor: pointer; }
+.help-item-label input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--bp-accent-2); flex-shrink: 0; }
+.help-row textarea { font-family: var(--bp-font-mono); min-height: 44px; }
+.help-list { border-top: 1px solid var(--bp-border-soft); padding-top: 8px; margin-top: 8px; }
+.param-row {
+  border: 1px solid var(--bp-border-soft); border-radius: var(--radius-sm);
+  padding: 6px; margin-bottom: 6px;
+}
+.param-row .help-item-label { justify-content: space-between; }
+.param-name-input { flex: 1; margin: 0 6px; background: var(--bp-panel-raised); border: 1px solid var(--bp-border); color: var(--bp-text); border-radius: var(--radius-sm); padding: 3px 6px; font-size: 11px; }
+.param-row textarea { width: 100%; margin-top: 6px; font-family: var(--bp-font-mono); min-height: 40px; background: var(--bp-panel-raised); border: 1px solid var(--bp-border); color: var(--bp-text); border-radius: var(--radius-sm); padding: 4px 6px; font-size: 11.5px; }
 
 /* ---------- Status bar ---------- */
 
