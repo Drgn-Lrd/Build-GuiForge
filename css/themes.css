@@ -1,5 +1,5 @@
 :root {
-    --themes-css-version: "1.4";
+    --themes-css-version: "1.5";
 }
 
 /* ==========================================
@@ -9,7 +9,6 @@
     background-color: #F0F0F0;
     border: 1px solid #000;
     box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
-    border-top: 30px solid #FFFFFF;
     font-family: 'Microsoft Sans Serif', Tahoma, Arial, sans-serif;
     font-size: 8.25pt;
     color: #000000;
@@ -19,8 +18,8 @@
     content: attr(data-title);
     position: absolute;
     top: -30px;
-    left: 0;
-    right: 0;
+    left: -1px;
+    right: -1px;
     height: 30px;
     background: linear-gradient(to right, #99B4D1 0%, #BFCFE2 100%);
     color: #000;
@@ -28,9 +27,11 @@
     padding-left: 10px;
     font-size: 9pt;
     font-family: 'Segoe UI', sans-serif;
+    border: 1px solid #000;
+    box-sizing: border-box;
 }
 
-.theme-winforms input[type="text"] {
+.theme-winforms input[type="text"], .theme-winforms select {
     background: #FFFFFF;
     border-top: 1px solid #8E8F8F;
     border-left: 1px solid #8E8F8F;
@@ -38,7 +39,7 @@
     border-bottom: 1px solid #FFFFFF;
     box-shadow: inset 1px 1px 0 #000000;
     padding: 2px 4px;
-    height: 20px;
+    height: 22px;
     font-family: inherit;
     font-size: inherit;
     box-sizing: border-box;
@@ -55,7 +56,6 @@
     background-color: #FFFFFF;
     border: 1px solid #1883D7;
     box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-    border-top: 32px solid #FFFFFF;
     font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
     font-size: 9pt;
     color: #000000;
@@ -65,15 +65,17 @@
     content: attr(data-title);
     position: absolute;
     top: -32px;
-    left: 0;
-    right: 0;
+    left: -1px;
+    right: -1px;
     height: 32px;
     background: #FFFFFF;
     color: #000;
     line-height: 32px;
     padding-left: 15px;
     font-size: 10pt;
+    border: 1px solid #1883D7;
     border-bottom: 1px solid #EAEAEA;
+    box-sizing: border-box;
 }
 
 .theme-wpf input[type="text"], .theme-wpf select {
@@ -86,7 +88,7 @@
     width: 100%;
 }
 
-.theme-wpf button { background: #DDDDDD; border: 1px solid #707070; padding: 5px 15px; width: 100%; }
+.theme-wpf button { background: #DDDDDD; border: 1px solid #707070; padding: 5px 15px; width: 100%; cursor: pointer; }
 .theme-wpf input[type="checkbox"] { margin-right: 8px; }
 
 /* ==========================================
@@ -97,7 +99,6 @@
     border: 1px solid #DDDDDD;
     border-radius: 0 0 8px 8px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    border-top: 40px solid #F1F3F4;
     font-family: system-ui, -apple-system, sans-serif;
     font-size: 14px;
     color: #333333;
@@ -107,8 +108,8 @@
     content: attr(data-title);
     position: absolute;
     top: -40px;
-    left: 0;
-    right: 0;
+    left: -1px;
+    right: -1px;
     height: 40px;
     background: #DEE1E6;
     border-radius: 8px 8px 0 0;
@@ -117,6 +118,8 @@
     padding-left: 20px;
     font-size: 14px;
     font-weight: 500;
+    border: 1px solid #DDDDDD;
+    box-sizing: border-box;
 }
 
 .theme-html input[type="text"], .theme-html select {
