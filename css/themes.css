@@ -1,5 +1,5 @@
 :root {
-    --themes-css-version: "1.7";
+    --themes-css-version: "1.8";
 }
 
 /* ==========================================
@@ -14,7 +14,7 @@
     color: #000000;
 }
 
-.theme-winforms .window-frame::before {
+.theme-winforms.show-chrome #live-preview-canvas::before {
     content: attr(data-title);
     position: absolute;
     top: -30px;
@@ -36,10 +36,11 @@
     position: absolute;
     top: -26px;
     right: 5px;
-    display: flex;
+    display: none;
     gap: 2px;
     z-index: 20;
 }
+.theme-winforms.show-chrome .window-controls { display: flex; }
 
 .theme-winforms .win-btn {
     width: 20px;
@@ -94,7 +95,7 @@
     color: #000000;
 }
 
-.theme-wpf .window-frame::before {
+.theme-wpf.show-chrome #live-preview-canvas::before {
     content: attr(data-title);
     position: absolute;
     top: -32px;
@@ -115,10 +116,11 @@
     position: absolute;
     top: -30px;
     right: 5px;
-    display: flex;
+    display: none;
     gap: 5px;
     z-index: 20;
 }
+.theme-wpf.show-chrome .window-controls { display: flex; }
 
 .theme-wpf .win-btn {
     width: 24px;
@@ -168,7 +170,7 @@
     color: #333333;
 }
 
-.theme-html .window-frame::before {
+.theme-html.show-chrome #live-preview-canvas::before {
     content: attr(data-title);
     position: absolute;
     top: -40px;
@@ -190,10 +192,11 @@
     position: absolute;
     top: -35px;
     right: 10px;
-    display: flex;
+    display: none;
     gap: 8px;
     z-index: 20;
 }
+.theme-html.show-chrome .window-controls { display: flex; }
 
 .theme-html .win-btn {
     width: 20px;
@@ -239,10 +242,9 @@
     box-sizing: border-box;
 }
 
-/* Tabs UI Styling */
-.tab-container { display: flex; flex-direction: column; width: 100%; height: 100%; }
-.tab-headers { display: flex; background: rgba(0,0,0,0.05); border-bottom: 1px solid #ccc; }
-.tab-header-btn { padding: 6px 12px; cursor: pointer; border: 1px solid transparent; border-bottom: none; font-size: 0.9em; }
-.tab-header-btn.active { background: #fff; border-color: #ccc; font-weight: bold; }
-.tab-content-pane { flex: 1; position: relative; padding: 10px; display: none; }
-.tab-content-pane.active { display: block; }
+/* TabControl UI Styling */
+.tabcontrol-wrapper { display: flex; flex-direction: column; width: 100%; height: 100%; border: 1px solid #ccc; background: #fff; box-sizing: border-box; }
+.tabcontrol-headers { display: flex; background: #e0e0e0; border-bottom: 1px solid #ccc; }
+.tabcontrol-tab { padding: 5px 12px; font-size: 0.85em; cursor: pointer; border-right: 1px solid #ccc; background: #f0f0f0; }
+.tabcontrol-tab.active { background: #fff; font-weight: bold; border-bottom: 1px solid #fff; margin-bottom: -1px; }
+.tabcontrol-content { flex: 1; padding: 10px; position: relative; }
