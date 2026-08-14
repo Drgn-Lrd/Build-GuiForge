@@ -1,0 +1,128 @@
+<!--
+    index.html
+    Written by: Johnathon Largent
+    Version 1.0
+
+    Initial page for the GUI Designer. Lays out the app shell (toolbar with
+    format switcher / Show Code / About, toolbox of draggable controls,
+    the design canvas/form, and the properties pane), plus the Show Code
+    and About modals. Structure and interaction logic live in engine.js;
+    visual theme lives in styles.css. This page is the first of what will
+    become a small multi-page HTML front end, hence engine.js/styles.css
+    being factored out as shared files from the start.
+
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GUI Designer</title>
+<link rel="stylesheet" href="styles.css">
+<script>window.PAGE_VERSION = '1.0';</script>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="brand">
+      <span class="brand-mark">GUI DESIGNER</span>
+      <span class="brand-sub">drafting table</span>
+    </div>
+    <div class="toolbar-divider"></div>
+    <div class="format-switch" id="formatSwitch">
+      <button data-format="html" class="active">HTML</button>
+      <button data-format="winforms">WinForms</button>
+      <button data-format="wpf">WPF</button>
+      <button data-format="winui">WinUI</button>
+    </div>
+    <div class="toolbar-spacer"></div>
+    <button class="btn btn-ghost btn-danger" id="btnDelete" title="Delete selected (Del)">Delete</button>
+    <button class="btn btn-ghost" id="btnClearAll" title="Remove all controls">Clear</button>
+    <button class="btn btn-accent" id="btnShowCode">Show Code</button>
+    <button class="btn icon-btn" id="btnAbout" title="About / Version Info">i</button>
+  </div>
+
+  <!-- Toolbox -->
+  <div class="toolbox">
+    <div id="toolboxList"></div>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-area">
+    <div class="design-form" id="designForm">
+      <div class="design-form-titlebar">
+        <span class="dot"></span>
+        <span id="formTitleText">MyForm</span>
+      </div>
+      <div class="design-surface" id="designSurface"></div>
+    </div>
+  </div>
+
+  <!-- Properties pane -->
+  <div class="props-pane">
+    <div class="props-header" id="propsHeader"></div>
+    <div id="propsBody"></div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span id="statusSelection">No selection</span>
+    <span class="grow"></span>
+    <span id="statusCount">0 control(s)</span>
+    <span id="statusGrid">grid 5px &middot; snap on</span>
+    <span id="statusVersion">engine v1.0</span>
+  </div>
+
+</div>
+
+<!-- Show Code modal -->
+<div class="modal-overlay" id="codeModalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Generated code</h2>
+      <button class="btn icon-btn btn-ghost" id="codeModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="code-tabs">
+        <button data-tab="html" class="active">HTML</button>
+        <button data-tab="winforms">WinForms (PowerShell)</button>
+        <button data-tab="wpf">WPF (XAML)</button>
+        <button data-tab="winui">WinUI (scaffold)</button>
+      </div>
+      <div class="scaffold-note" id="scaffoldNote" style="display:none;"></div>
+      <pre class="code-output" id="codeOutput"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="btnCopyCode">Copy code</button>
+    </div>
+  </div>
+</div>
+
+<!-- About modal -->
+<div class="modal-overlay" id="aboutModalOverlay">
+  <div class="modal" style="width:420px;">
+    <div class="modal-header">
+      <h2>About</h2>
+      <button class="btn icon-btn btn-ghost" id="aboutModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <dl class="about-grid">
+        <dt>Application</dt><dd>GUI Designer</dd>
+        <dt>Author</dt><dd>Johnathon Largent</dd>
+        <dt>Page version</dt><dd id="aboutPageVersion">1.0</dd>
+        <dt>Engine version</dt><dd id="aboutEngineVersion">1.0</dd>
+        <dt>Stylesheet version</dt><dd id="aboutStyleVersion">1.0</dd>
+      </dl>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-accent" id="aboutModalClose2">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+</body>
+</html>
