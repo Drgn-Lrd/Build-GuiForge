@@ -1,163 +1,62 @@
 :root {
-    --themes-css-version: "1.12";
+    --themes-css-version: "1.13";
 }
-
-#workspace { padding-top: 50px !important; padding-bottom: 50px !important; }
 
 /* ==========================================
-   THEME: WINFORMS
+   WINDOW CONTAINER & CHROME STYLING
 ========================================== */
-.theme-winforms #live-preview-canvas {
+#live-preview-canvas {
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     background-color: #F0F0F0;
-    border: 1px solid #0055EA;
-    box-shadow: 2px 2px 10px rgba(0,0,0,0.5);
-    font-family: 'Microsoft Sans Serif', Tahoma, Arial, sans-serif;
-    font-size: 8.25pt;
-    color: #000000;
+    box-sizing: border-box;
 }
 
-.theme-winforms.show-chrome #live-preview-canvas::before {
-    content: attr(data-title);
-    position: absolute;
-    top: -30px;
-    left: -1px;
-    right: -1px;
+.window-titlebar {
     height: 30px;
-    background: linear-gradient(to right, #0054E3 0%, #3281F7 100%);
-    color: #FFFFFF;
-    line-height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     padding-left: 10px;
     font-size: 9pt;
     font-family: 'Segoe UI', sans-serif;
-    font-weight: bold;
-    border: 1px solid #000;
-    box-sizing: border-box;
+    user-select: none;
 }
 
-.theme-winforms .window-controls {
-    position: absolute;
-    top: -26px;
-    right: 5px;
-    display: none;
-    gap: 2px;
-    z-index: 20;
-}
-.theme-winforms.show-chrome .window-controls { display: flex; }
+.window-title-text { font-weight: bold; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
-.theme-winforms .win-btn {
-    width: 20px;
-    height: 18px;
-    background: #E1E1E1;
-    border: 1px solid #707070;
-    font-size: 9px;
-    line-height: 14px;
+.window-controls { display: flex; height: 100%; }
+.win-btn {
+    width: 35px;
+    height: 100%;
+    background: transparent;
+    border: none;
+    font-size: 10px;
     text-align: center;
     cursor: pointer;
-    color: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-/* ==========================================
-   THEME: WPF
-========================================== */
-.theme-wpf #live-preview-canvas {
-    background-color: #FFFFFF;
-    border: 1px solid #1883D7;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-    font-size: 9pt;
-    color: #000000;
-}
+/* WinForms Theme */
+.theme-winforms #live-preview-canvas { border: 1px solid #0055EA; }
+.theme-winforms .window-titlebar { background: linear-gradient(to right, #0054E3 0%, #3281F7 100%); color: #FFFFFF; border-bottom: 1px solid #000; }
+.theme-winforms .win-btn:hover { background: rgba(255,255,255,0.2); }
 
-.theme-wpf.show-chrome #live-preview-canvas::before {
-    content: attr(data-title);
-    position: absolute;
-    top: -32px;
-    left: -1px;
-    right: -1px;
-    height: 32px;
-    background: #FFFFFF;
-    color: #000;
-    line-height: 32px;
-    padding-left: 15px;
-    font-size: 10pt;
-    border: 1px solid #1883D7;
-    border-bottom: 1px solid #EAEAEA;
-    box-sizing: border-box;
-}
-
-.theme-wpf .window-controls {
-    position: absolute;
-    top: -30px;
-    right: 5px;
-    display: none;
-    gap: 5px;
-    z-index: 20;
-}
-.theme-wpf.show-chrome .window-controls { display: flex; }
-
-.theme-wpf .win-btn {
-    width: 24px;
-    height: 24px;
-    background: transparent;
-    border: none;
-    font-size: 12px;
-    cursor: pointer;
-    color: #333;
-}
+/* WPF Theme */
+.theme-wpf #live-preview-canvas { background: #FFFFFF; border: 1px solid #1883D7; }
+.theme-wpf .window-titlebar { background: #FFFFFF; color: #000000; border-bottom: 1px solid #EAEAEA; }
 .theme-wpf .win-btn:hover { background: #E5E5E5; }
 
+/* HTML Theme */
+.theme-html #live-preview-canvas { background: #FFFFFF; border: 1px solid #DDDDDD; border-radius: 6px; overflow: hidden; }
+.theme-html .window-titlebar { background: #DEE1E6; color: #5F6368; font-weight: 500; border-bottom: 1px solid #DDDDDD; }
+.theme-html .win-btn:hover { background: #CED4DA; }
+
 /* ==========================================
-   THEME: HTML
+   CONTROLS & RESIZING
 ========================================== */
-.theme-html #live-preview-canvas {
-    background-color: #FFFFFF;
-    border: 1px solid #DDDDDD;
-    border-radius: 0 0 8px 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    font-family: system-ui, -apple-system, sans-serif;
-    font-size: 14px;
-    color: #333333;
-}
-
-.theme-html.show-chrome #live-preview-canvas::before {
-    content: attr(data-title);
-    position: absolute;
-    top: -40px;
-    left: -1px;
-    right: -1px;
-    height: 40px;
-    background: #DEE1E6;
-    border-radius: 8px 8px 0 0;
-    color: #5F6368;
-    line-height: 40px;
-    padding-left: 20px;
-    font-size: 14px;
-    font-weight: 500;
-    border: 1px solid #DDDDDD;
-    box-sizing: border-box;
-}
-
-.theme-html .window-controls {
-    position: absolute;
-    top: -35px;
-    right: 10px;
-    display: none;
-    gap: 8px;
-    z-index: 20;
-}
-.theme-html.show-chrome .window-controls { display: flex; }
-
-.theme-html .win-btn {
-    width: 20px;
-    height: 20px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    font-weight: bold;
-    color: #5F6368;
-}
-
-/* Base Form Control Styles */
 input[type="text"], select {
     background: #FFFFFF;
     border: 1px solid #8E8F8F;
@@ -168,7 +67,39 @@ input[type="text"], select {
 
 button { width: 100%; cursor: pointer; }
 
-/* Interactive Menus */
+.canvas-element {
+    position: absolute;
+    cursor: move;
+    box-sizing: border-box;
+}
+.canvas-element.selected-element {
+    border: 1px dashed #0078d4;
+}
+
+/* Clean Edge Resizing Handles */
+.resize-handle {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: #0078d4;
+    z-index: 10;
+}
+.handle-se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+.handle-e { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; width: 6px; height: 20px; }
+.handle-s { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; width: 20px; height: 6px; }
+
+#canvas-resize-se {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+    background: linear-gradient(135deg, transparent 50%, #666 50%);
+    z-index: 30;
+}
+
+/* Menus & Tabs */
 .menu-bar {
     display: flex;
     padding: 2px 5px;
@@ -181,7 +112,6 @@ button { width: 100%; cursor: pointer; }
     background: inherit;
     border-bottom: 1px solid rgba(0,0,0,0.15);
 }
-
 .menu-item-wrapper { position: relative; display: inline-block; }
 .menu-label { cursor: pointer; padding: 2px 6px; border-radius: 3px; }
 .menu-label:hover { background: rgba(0,0,0,0.1); }
@@ -190,29 +120,8 @@ button { width: 100%; cursor: pointer; }
 .menu-dropdown-content div:hover { background-color: #0078d4; color: white; }
 .menu-item-wrapper.active .menu-dropdown-content { display: block; }
 
-/* Canvas Resizing Handles */
-.canvas-element { position: absolute; cursor: move; box-sizing: border-box; }
-.canvas-element:hover { outline: 1px dashed #0078d4; }
-.selected-element { outline: 2px solid #0078d4 !important; z-index: 5; }
-
-.resize-handle {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 12px;
-    height: 12px;
-    cursor: nwse-resize;
-    background: #0078d4;
-    z-index: 10;
-}
-
-#canvas-resize-handle {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 16px;
-    height: 16px;
-    cursor: nwse-resize;
-    background: #555;
-    z-index: 30;
-}
+.tabcontrol-wrapper { display: flex; flex-direction: column; width: 100%; height: 100%; border: 1px solid #ccc; background: #fff; box-sizing: border-box; }
+.tabcontrol-headers { display: flex; background: #e0e0e0; border-bottom: 1px solid #ccc; }
+.tabcontrol-tab { padding: 5px 12px; font-size: 0.85em; cursor: pointer; border-right: 1px solid #ccc; background: #f0f0f0; }
+.tabcontrol-tab.active { background: #fff; font-weight: bold; border-bottom: 1px solid #fff; margin-bottom: -1px; }
+.tabcontrol-content { flex: 1; padding: 10px; position: relative; }
