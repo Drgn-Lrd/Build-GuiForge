@@ -1,24 +1,36 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
-    Revision: WinForms is now the default target format, and switching
-    the format switcher now re-skins the canvas preview (distinct
-    WinForms/HTML/WPF/WinUI control looks) instead of only affecting the
-    Show Code output. Default control colors now follow standard Windows
-    system colors (grey control face, white text-entry surfaces, black
-    text) instead of the old dark-blue theme. Added: Form-level chrome
-    properties (title bar buttons, resizable, start position, topmost),
-    mouse-resize handles on the design form itself, a reusable pixel
-    stepper (+-1/5/10) used for X/Y/W/H/FontSize/form size, Dock/Anchor/
-    Cursor properties on every control, and a comment-based help block
-    builder (.SYNOPSIS/.DESCRIPTION/.PARAMETER/.EXAMPLE/.NOTES) on the
-    Form properties tab whose output now heads every generated file,
-    replacing the placeholder developer header used in the first pass.
+    Revision: six properties-pane fixes. (1) Sections with only one row
+    (e.g. Button-specific, GroupBox-specific) no longer render a
+    collapse toggle - they display flat. (2) Interact toggle moved out
+    of the collapsible accordion into a fixed block under the selection
+    header, and the actual bug fixed: CheckBox/RadioButton/ComboBox/
+    TrackBar no longer hardcode `disabled`, so toggling Interact now
+    really lets you check a box, pick a dropdown item, or drag a slider,
+    with the result written back to that control's props. (3) Section
+    open/closed state now persists in state.sectionOpen across re-
+    renders instead of resetting to collapsed on every property edit.
+    (4) Added a TOOLTIPS dictionary; every property label across Layout,
+    Behavior, Appearance, type-specific, Events, and Form-level fields
+    now has an explanatory title attribute, including explicit text for
+    Dock, Anchor, Z-Index, and Cursor. (5) Added a directional arrow
+    stepper (left/up/down/right at the current nudge step) plus Center-
+    X / Center-Y / Center-Both buttons to the Layout section, and wired
+    up the previously-decorative center cell of the Nudge d-pad to do
+    the same. (6) Added a MenuStrip control: defaults to preset File/
+    View/Help top-level menus (each with preset sub-items), every menu
+    and sub-item has an enable/disable checkbox plus an editable label,
+    and users can add fully custom top-level menus and custom sub-items
+    via the new menu editor. MenuStrip generates real output for HTML
+    (nested nav/ul with hover dropdowns), WinForms (ToolStripMenuItem
+    tree wired as MainMenuStrip), WPF (Menu/MenuItem/Separator), and
+    WinUI (MenuBar/MenuBarItem/MenuFlyoutItem/MenuFlyoutSeparator).
 */
 
-const ENGINE_VERSION = '1.1';
+const ENGINE_VERSION = '1.2';
 
 /* =========================================================================
    Control catalog
@@ -53,6 +65,37 @@ const TYPE_BACKCOLOR_OVERRIDES = {
   TextBox: '#FFFFFF', ComboBox: '#FFFFFF', ListBox: '#FFFFFF',
   RichTextBox: '#FFFFFF', NumericUpDown: '#FFFFFF', DateTimePicker: '#FFFFFF',
 };
+
+// Default MenuStrip content: preset top-level menus (checkbox-enabled), each
+// with its own preset sub-items (also checkbox-enabled) plus room for the
+// user to add fully custom top-level menus and custom sub-items.
+const PRESET_MENU_DEFAULT = [
+  {
+    id: 'file', label: 'File', enabled: true, preset: true,
+    items: [
+      { id: 'file_new', label: 'New', enabled: true, preset: true },
+      { id: 'file_open', label: 'Open...', enabled: true, preset: true },
+      { id: 'file_save', label: 'Save', enabled: true, preset: true },
+      { id: 'file_sep1', label: '-', enabled: true, preset: true },
+      { id: 'file_exit', label: 'Exit', enabled: true, preset: true },
+    ],
+  },
+  {
+    id: 'view', label: 'View', enabled: true, preset: true,
+    items: [
+      { id: 'view_zoomin', label: 'Zoom In', enabled: true, preset: true },
+      { id: 'view_zoomout', label: 'Zoom Out', enabled: true, preset: true },
+      { id: 'view_reset', label: 'Reset Zoom', enabled: true, preset: true },
+    ],
+  },
+  {
+    id: 'help', label: 'Help', enabled: true, preset: true,
+    items: [
+      { id: 'help_docs', label: 'Documentation', enabled: true, preset: true },
+      { id: 'help_about', label: 'About', enabled: true, preset: true },
+    ],
+  },
+];
 
 const CONTROL_DEFS = {
   Button: {
@@ -181,6 +224,14 @@ const CONTROL_DEFS = {
     ],
     events: ['LinkClicked'],
   },
+  MenuStrip: {
+    label: 'MenuStrip', glyph: 'Mn', defaultW: 400, defaultH: 26,
+    props: [
+      ['menuItems', 'Menu Items', 'menuEditor', PRESET_MENU_DEFAULT],
+    ],
+    events: [],
+    isMenuStrip: true,
+  },
 };
 
 const TOOLBOX_GROUPS = [
@@ -188,6 +239,7 @@ const TOOLBOX_GROUPS = [
   { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
   { heading: 'Containers', types: ['Panel', 'GroupBox'] },
   { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
+  { heading: 'Menus', types: ['MenuStrip'] },
 ];
 
 /* =========================================================================
@@ -202,6 +254,7 @@ const state = {
   snapEnabled: true,
   nudgeStep: 5,
   currentFormat: 'winforms',
+  sectionOpen: {},       // title -> bool, persists collapse state across re-renders
   form: {
     text: 'MyForm',
     width: 640,
@@ -235,9 +288,10 @@ function createControl(type, x, y, parentId) {
   const def = CONTROL_DEFS[type];
   const name = nextName(type);
   const props = {};
-  def.props.forEach(([key, , , def0]) => { props[key] = def0; });
-  COMMON_APPEARANCE_PROPS.forEach(([key, , , def0]) => { props[key] = def0; });
-  COMMON_BEHAVIOR_PROPS.forEach(([key, , , def0]) => { props[key] = def0; });
+  const cloneDefault = (v) => (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+  def.props.forEach(([key, , , def0]) => { props[key] = cloneDefault(def0); });
+  COMMON_APPEARANCE_PROPS.forEach(([key, , , def0]) => { props[key] = cloneDefault(def0); });
+  COMMON_BEHAVIOR_PROPS.forEach(([key, , , def0]) => { props[key] = cloneDefault(def0); });
   if (TYPE_BACKCOLOR_OVERRIDES[type]) props.backColor = TYPE_BACKCOLOR_OVERRIDES[type];
   const events = {};
   def.events.forEach(evt => { events[evt] = null; }); // null = not wired up yet
@@ -401,21 +455,24 @@ function renderInner(c) {
       break;
     }
     case 'CheckBox': {
-      wrap.innerHTML = `<label class="rc-check" style="${fontStyleFor(p)}color:${p.foreColor};"><input type="checkbox" ${p.checked ? 'checked' : ''} disabled>${escapeHtml(p.text)}</label>`;
+      wrap.innerHTML = `<label class="rc-check" style="${fontStyleFor(p)}color:${p.foreColor};"><input type="checkbox" ${p.checked ? 'checked' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</label>`;
+      if (c.interact) wrap.querySelector('input').addEventListener('change', (e) => { p.checked = e.target.checked; });
       break;
     }
     case 'RadioButton': {
-      wrap.innerHTML = `<label class="rc-radio" style="${fontStyleFor(p)}color:${p.foreColor};"><input type="radio" ${p.checked ? 'checked' : ''} disabled>${escapeHtml(p.text)}</label>`;
+      wrap.innerHTML = `<label class="rc-radio" style="${fontStyleFor(p)}color:${p.foreColor};"><input type="radio" ${p.checked ? 'checked' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</label>`;
+      if (c.interact) wrap.querySelector('input').addEventListener('change', (e) => { p.checked = e.target.checked; });
       break;
     }
     case 'ComboBox': {
       const items = (p.items || '').split('\n').filter(Boolean);
-      wrap.innerHTML = `<select class="rc-combo" style="${fontStyleFor(p)}" disabled>${items.map((it, i) => `<option ${i === p.selectedIndex ? 'selected' : ''}>${escapeHtml(it)}</option>`).join('')}</select>`;
+      wrap.innerHTML = `<select class="rc-combo" style="${fontStyleFor(p)}" ${c.interact ? '' : 'disabled'}>${items.map((it, i) => `<option ${i === p.selectedIndex ? 'selected' : ''}>${escapeHtml(it)}</option>`).join('')}</select>`;
+      if (c.interact) wrap.querySelector('select').addEventListener('change', (e) => { p.selectedIndex = e.target.selectedIndex; });
       break;
     }
     case 'ListBox': {
       const items = (p.items || '').split('\n').filter(Boolean);
-      wrap.innerHTML = `<select class="rc-listbox" style="${fontStyleFor(p)}" multiple disabled>${items.map(it => `<option>${escapeHtml(it)}</option>`).join('')}</select>`;
+      wrap.innerHTML = `<select class="rc-listbox" style="${fontStyleFor(p)}" multiple ${c.interact ? '' : 'disabled'}>${items.map(it => `<option>${escapeHtml(it)}</option>`).join('')}</select>`;
       break;
     }
     case 'Panel': {
@@ -436,7 +493,12 @@ function renderInner(c) {
       break;
     }
     case 'TrackBar': {
-      wrap.innerHTML = `<div class="rc-track"><input type="range" min="${p.min}" max="${p.max}" value="${p.value}" disabled></div>`;
+      wrap.innerHTML = `<div class="rc-track"><input type="range" min="${p.min}" max="${p.max}" value="${p.value}" ${c.interact ? '' : 'disabled'}></div>`;
+      if (c.interact) wrap.querySelector('input').addEventListener('input', (e) => { p.value = Number(e.target.value); });
+      break;
+    }
+    case 'MenuStrip': {
+      wrap.appendChild(renderMenuStripPreview(p));
       break;
     }
     case 'NumericUpDown': {
@@ -457,6 +519,27 @@ function renderInner(c) {
     }
   }
   return wrap;
+}
+
+function renderMenuStripPreview(p) {
+  const bar = document.createElement('div');
+  bar.className = 'rc-menustrip';
+  (p.menuItems || []).filter(m => m.enabled).forEach(m => {
+    const top = document.createElement('div');
+    top.className = 'rc-menustrip-item';
+    top.textContent = m.label;
+    const sub = document.createElement('div');
+    sub.className = 'rc-menustrip-sub';
+    (m.items || []).filter(it => it.enabled).forEach(it => {
+      const row = document.createElement('div');
+      if (it.label === '-') { row.className = 'rc-menustrip-sep'; }
+      else { row.className = 'rc-menustrip-subitem'; row.textContent = it.label; }
+      sub.appendChild(row);
+    });
+    if (sub.children.length) top.appendChild(sub);
+    bar.appendChild(top);
+  });
+  return bar;
 }
 
 function escapeHtml(s) {
@@ -674,6 +757,54 @@ const EVENT_SNIPPETS = [
   { label: 'Enable/disable another control', code: `$OtherControlName.Enabled = $true` },
 ];
 
+const TOOLTIPS = {
+  name: 'Variable/element name used to reference this control in generated code.',
+  x: 'Horizontal position (pixels) from the left edge of its parent.',
+  y: 'Vertical position (pixels) from the top edge of its parent.',
+  w: 'Width in pixels.',
+  h: 'Height in pixels.',
+  z: 'Z-Index: stacking order. Higher values render on top of lower ones when controls overlap.',
+  visible: 'Whether the control is shown at runtime. Hidden controls still exist and can be shown later from code.',
+  enabled: 'Whether the control accepts input at runtime. Disabled controls are usually greyed out.',
+  tabIndex: 'Keyboard tab order. Lower numbers are reached first when pressing Tab.',
+  toolTip: 'Text shown in a small popup when the mouse hovers over this control at runtime.',
+  dock: 'Dock: stretches the control to fill an edge (or all) of its parent, and keeps it there as the parent resizes.',
+  anchor: 'Anchor: pins the control a fixed distance from the chosen parent edges, so it moves/stretches with those edges when the parent resizes. Anchor is ignored while Dock is set to anything other than None.',
+  cursor: 'Mouse pointer shown when hovering over this control at runtime.',
+  backColor: 'Background/fill color of the control.',
+  foreColor: 'Text/foreground color of the control.',
+  fontFamily: 'Font used for this control\'s text (this control only, not a shared/global font).',
+  fontSize: 'Font size in points for this control\'s text.',
+  fontBold: 'Renders this control\'s text in bold.',
+  fontItalic: 'Renders this control\'s text in italics.',
+  borderStyle: 'Border drawn around the control: None, a flat single line, or a 3D sunken/raised edge.',
+  text: 'The main text/caption/content shown on this control.',
+  textAlign: 'Horizontal alignment of the text within the control.',
+  multiline: 'Allows the text box to wrap and hold multiple lines instead of a single line.',
+  readOnly: 'Prevents the user from editing the text at runtime (still selectable/copyable).',
+  passwordChar: 'Character shown in place of typed text (e.g. *) to mask input like a password field.',
+  maxLength: 'Maximum number of characters the user can type. 0 = unlimited.',
+  checked: 'Whether this box/radio starts checked/selected.',
+  groupName: 'Radio buttons sharing the same Group Name are mutually exclusive (only one can be checked at a time).',
+  items: 'The list of selectable entries, one per line.',
+  selectedIndex: 'Index (0-based) of the item selected by default. -1 means nothing selected.',
+  dropDownStyle: 'Whether the user can type a custom value, must pick from the list, or sees the list inline.',
+  selectionMode: 'How many items the user can select at once: none, exactly one, or multiple.',
+  imageSource: 'File path or URL of the image to display.',
+  sizeMode: 'How the image is scaled/positioned to fit the control\'s bounds.',
+  min: 'Minimum value allowed.',
+  max: 'Maximum value allowed.',
+  value: 'Current/starting value.',
+  tickFrequency: 'How often (in value units) a tick mark is drawn along the slider.',
+  increment: 'Amount the value changes per step (e.g. each click of the up/down arrows).',
+  decimalPlaces: 'Number of digits shown after the decimal point.',
+  format: 'How the date/time value is displayed.',
+  url: 'The web address this link opens when clicked.',
+  menuItems: 'Configure this menu bar: check a top-level menu to include it, check individual entries to include them, edit labels, or add your own custom menus and items.',
+};
+
+function tt(key) { return TOOLTIPS[key] || ''; }
+
 function renderProps() {
   const pane = document.getElementById('propsBody');
   const header = document.getElementById('propsHeader');
@@ -688,6 +819,11 @@ function renderProps() {
 
   header.innerHTML = `<div><div class="sel-type">${ctrl.type}</div><div class="sel-name">${escapeHtml(ctrl.name)}</div></div>`;
 
+  // Interact is never collapsible and never buried in an accordion — it's a
+  // fixed control right under the header so it's always reachable in one
+  // click, since it's the one you need in a hurry to test a dropdown/checkbox.
+  pane.appendChild(buildInteractFixedBlock(ctrl));
+
   pane.appendChild(section('Layout', buildLayoutRows(ctrl), true));
   pane.appendChild(section('Nudge', buildNudgeSection(ctrl), true));
   pane.appendChild(section('Behavior', buildPropRows(ctrl, COMMON_BEHAVIOR_PROPS), false));
@@ -698,23 +834,39 @@ function renderProps() {
     pane.appendChild(section(ctrl.type + '-specific', buildPropRows(ctrl, def.props), false));
   }
 
-  pane.appendChild(section('Interact', buildInteractSection(ctrl), false));
-
   if (def.events.length) {
     pane.appendChild(section('Events', buildEventsSection(ctrl), false));
   }
 }
 
 function section(title, bodyEl, startOpen) {
+  // Sections with only a single row of content aren't worth collapsing —
+  // there's nothing to hide, so render them flat with a static (non-
+  // clickable) label instead of a toggle header.
+  const rowCount = bodyEl.children.length;
+  const singleRow = rowCount <= 1;
+
   const wrap = document.createElement('div');
-  wrap.className = 'prop-section' + (startOpen ? '' : ' collapsed');
   const head = document.createElement('div');
-  head.className = 'prop-section-title';
-  head.innerHTML = `<span>${title}</span><span>${startOpen ? '\u2212' : '+'}</span>`;
-  head.addEventListener('click', () => {
-    wrap.classList.toggle('collapsed');
-    head.querySelector('span:last-child').textContent = wrap.classList.contains('collapsed') ? '+' : '\u2212';
-  });
+
+  if (singleRow) {
+    wrap.className = 'prop-section single-row';
+    head.className = 'prop-section-title static';
+    head.innerHTML = `<span>${title}</span>`;
+  } else {
+    if (!(title in state.sectionOpen)) state.sectionOpen[title] = !!startOpen;
+    const isOpen = state.sectionOpen[title];
+    wrap.className = 'prop-section' + (isOpen ? '' : ' collapsed');
+    head.className = 'prop-section-title';
+    head.innerHTML = `<span>${title}</span><span>${isOpen ? '\u2212' : '+'}</span>`;
+    head.addEventListener('click', () => {
+      wrap.classList.toggle('collapsed');
+      const nowOpen = !wrap.classList.contains('collapsed');
+      state.sectionOpen[title] = nowOpen;
+      head.querySelector('span:last-child').textContent = nowOpen ? '\u2212' : '+';
+    });
+  }
+
   const body = document.createElement('div');
   body.className = 'prop-section-body';
   body.appendChild(bodyEl);
@@ -730,6 +882,7 @@ function pixelStepperRow(label, value, onChange, opts) {
   row.className = 'prop-row px-row';
   const labelEl = document.createElement('label');
   labelEl.textContent = label;
+  if (opts.tooltip) labelEl.title = opts.tooltip;
   const controls = document.createElement('div');
   controls.className = 'px-controls';
 
@@ -765,24 +918,74 @@ function pixelStepperRow(label, value, onChange, opts) {
   return row;
 }
 
+function parentBounds(ctrl) {
+  const parent = ctrl.parentId ? getControl(ctrl.parentId) : null;
+  return parent ? { w: parent.w, h: parent.h } : { w: state.form.width, h: state.form.height };
+}
+
+function centerControl(ctrl, axis) {
+  const b = parentBounds(ctrl);
+  if (axis === 'x' || axis === 'both') ctrl.x = snap((b.w - ctrl.w) / 2);
+  if (axis === 'y' || axis === 'both') ctrl.y = snap((b.h - ctrl.h) / 2);
+  render();
+}
+
+function positionArrowRow(ctrl) {
+  const row = document.createElement('div');
+  row.className = 'prop-row pos-arrow-row';
+  row.title = 'Move the control by the current nudge step, or center it within its parent.';
+  const label = document.createElement('label');
+  label.textContent = 'Position';
+  const cluster = document.createElement('div');
+  cluster.className = 'pos-arrow-cluster';
+
+  const step = state.nudgeStep;
+  const mk = (glyph, title, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pos-arrow-btn';
+    b.textContent = glyph;
+    b.title = title;
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  cluster.appendChild(mk('\u2190', `Move left ${step}px`, () => { ctrl.x = snap(ctrl.x - step); render(); }));
+  cluster.appendChild(mk('\u2191', `Move up ${step}px`, () => { ctrl.y = snap(ctrl.y - step); render(); }));
+  cluster.appendChild(mk('\u2193', `Move down ${step}px`, () => { ctrl.y = snap(ctrl.y + step); render(); }));
+  cluster.appendChild(mk('\u2192', `Move right ${step}px`, () => { ctrl.x = snap(ctrl.x + step); render(); }));
+
+  const centerWrap = document.createElement('div');
+  centerWrap.className = 'pos-center-cluster';
+  centerWrap.appendChild(mk('\u21c6 X', 'Center horizontally within parent', () => centerControl(ctrl, 'x')));
+  centerWrap.appendChild(mk('\u21c5 Y', 'Center vertically within parent', () => centerControl(ctrl, 'y')));
+  centerWrap.appendChild(mk('\u2316', 'Center within parent (both axes)', () => centerControl(ctrl, 'both')));
+
+  row.appendChild(label);
+  row.appendChild(cluster);
+  row.appendChild(centerWrap);
+  return row;
+}
+
 function buildLayoutRows(ctrl) {
   const frag = document.createElement('div');
   const nameRow = document.createElement('div');
   nameRow.className = 'prop-row';
-  nameRow.innerHTML = `<label>Name</label><input type="text" value="${escapeHtml(ctrl.name)}">`;
+  nameRow.innerHTML = `<label title="${escapeHtml(tt('name'))}">Name</label><input type="text" value="${escapeHtml(ctrl.name)}">`;
   nameRow.querySelector('input').addEventListener('change', (e) => {
     ctrl.name = e.target.value.trim() || ctrl.name;
     render();
   });
   frag.appendChild(nameRow);
 
+  frag.appendChild(positionArrowRow(ctrl));
+
   [['x', 'X'], ['y', 'Y'], ['w', 'Width'], ['h', 'Height']].forEach(([key, label]) => {
-    frag.appendChild(pixelStepperRow(label, ctrl[key], (v) => { ctrl[key] = snap(v); render(); }, { min: key === 'w' || key === 'h' ? 12 : -9999 }));
+    frag.appendChild(pixelStepperRow(label, ctrl[key], (v) => { ctrl[key] = snap(v); render(); }, { min: key === 'w' || key === 'h' ? 12 : -9999, tooltip: tt(key) }));
   });
 
   const zRow = document.createElement('div');
   zRow.className = 'prop-row';
-  zRow.innerHTML = `<label>Z-Index</label><input type="number" value="${ctrl.z}">`;
+  zRow.innerHTML = `<label title="${escapeHtml(tt('z'))}">Z-Index</label><input type="number" value="${ctrl.z}">`;
   zRow.querySelector('input').addEventListener('change', (e) => { ctrl.z = Number(e.target.value) || 0; render(); });
   frag.appendChild(zRow);
 
@@ -799,13 +1002,14 @@ function buildNudgeSection(ctrl) {
   dpad.innerHTML = `
     <button class="d-up" title="Up">\u2191</button>
     <button class="d-left" title="Left">\u2190</button>
-    <button class="d-center"></button>
+    <button class="d-center" title="Center within parent (both axes)">\u2316</button>
     <button class="d-right" title="Right">\u2192</button>
     <button class="d-down" title="Down">\u2193</button>`;
   dpad.querySelector('.d-up').addEventListener('click', () => nudge('up'));
   dpad.querySelector('.d-down').addEventListener('click', () => nudge('down'));
   dpad.querySelector('.d-left').addEventListener('click', () => nudge('left'));
   dpad.querySelector('.d-right').addEventListener('click', () => nudge('right'));
+  dpad.querySelector('.d-center').addEventListener('click', () => centerControl(ctrl, 'both'));
 
   const steps = document.createElement('div');
   steps.className = 'step-options';
@@ -832,8 +1036,14 @@ function buildNudgeSection(ctrl) {
 function buildPropRows(ctrl, propDefs) {
   const frag = document.createElement('div');
   propDefs.forEach(([key, label, type, , extra]) => {
+    const tipAttr = escapeHtml(tt(key));
+
+    if (type === 'menuEditor') {
+      frag.appendChild(buildMenuEditorRow(ctrl, key, label));
+      return;
+    }
     if (type === 'px') {
-      frag.appendChild(pixelStepperRow(label, ctrl.props[key], (v) => { ctrl.props[key] = v; render(); }, { min: 1 }));
+      frag.appendChild(pixelStepperRow(label, ctrl.props[key], (v) => { ctrl.props[key] = v; render(); }, { min: 1, tooltip: tt(key) }));
       return;
     }
     const row = document.createElement('div');
@@ -841,7 +1051,7 @@ function buildPropRows(ctrl, propDefs) {
     const val = ctrl.props[key];
 
     if (type === 'textarea') {
-      row.innerHTML = `<label>${label}</label><textarea>${escapeHtml(val)}</textarea>`;
+      row.innerHTML = `<label title="${tipAttr}">${label}</label><textarea>${escapeHtml(val)}</textarea>`;
       const ta = row.querySelector('textarea');
       ta.addEventListener('change', () => { ctrl.props[key] = ta.value; render(); });
       if (extra && extra.itemsEditor) {
@@ -851,20 +1061,20 @@ function buildPropRows(ctrl, propDefs) {
         row.appendChild(hint);
       }
     } else if (type === 'checkbox') {
-      row.innerHTML = `<label>${label}</label><input type="checkbox" ${val ? 'checked' : ''}>`;
+      row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="checkbox" ${val ? 'checked' : ''}>`;
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = e.target.checked; render(); });
     } else if (type === 'color') {
-      row.innerHTML = `<label>${label}</label><input type="color" value="${val}">`;
+      row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="color" value="${val}">`;
       row.querySelector('input').addEventListener('input', (e) => { ctrl.props[key] = e.target.value; render(); });
     } else if (type === 'select') {
       const opts = extra.options.map(o => `<option ${o === val ? 'selected' : ''}>${o}</option>`).join('');
-      row.innerHTML = `<label>${label}</label><select>${opts}</select>`;
+      row.innerHTML = `<label title="${tipAttr}">${label}</label><select>${opts}</select>`;
       row.querySelector('select').addEventListener('change', (e) => { ctrl.props[key] = e.target.value; render(); });
     } else if (type === 'number') {
-      row.innerHTML = `<label>${label}</label><input type="number" value="${val}">`;
+      row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="number" value="${val}">`;
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = Number(e.target.value) || 0; render(); });
     } else {
-      row.innerHTML = `<label>${label}</label><input type="text" value="${escapeHtml(val)}">`;
+      row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="text" value="${escapeHtml(val)}">`;
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = e.target.value; render(); });
     }
     frag.appendChild(row);
@@ -872,16 +1082,144 @@ function buildPropRows(ctrl, propDefs) {
   return frag;
 }
 
-function buildInteractSection(ctrl) {
-  const frag = document.createElement('div');
+/* =========================================================================
+   MenuStrip editor: checkbox-enabled preset menus + custom menu/item support
+   ========================================================================= */
+
+function buildMenuEditorRow(ctrl, key, label) {
+  const wrap = document.createElement('div');
+  wrap.className = 'menu-editor';
+
+  const heading = document.createElement('div');
+  heading.className = 'menu-editor-heading';
+  heading.title = tt(key);
+  heading.textContent = label;
+  wrap.appendChild(heading);
+
+  const menus = ctrl.props[key];
+
+  menus.forEach((menu, mi) => {
+    wrap.appendChild(buildMenuTopItem(ctrl, key, menus, menu, mi));
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn btn-ghost menu-add-btn';
+  addBtn.textContent = '+ Add custom menu';
+  addBtn.title = 'Add a new top-level menu (fully custom, not a preset).';
+  addBtn.addEventListener('click', () => {
+    menus.push({ id: 'menu' + Math.random().toString(36).slice(2, 8), label: 'NewMenu', enabled: true, preset: false, items: [] });
+    render();
+  });
+  wrap.appendChild(addBtn);
+
+  return wrap;
+}
+
+function buildMenuTopItem(ctrl, key, menus, menu, mi) {
+  const box = document.createElement('div');
+  box.className = 'menu-editor-item';
+
+  const head = document.createElement('div');
+  head.className = 'menu-editor-item-head';
+
+  const chk = document.createElement('input');
+  chk.type = 'checkbox';
+  chk.checked = !!menu.enabled;
+  chk.title = 'Include this menu in the generated code.';
+  chk.addEventListener('change', (e) => { menu.enabled = e.target.checked; render(); });
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'menu-editor-label-input';
+  nameInput.value = menu.label;
+  nameInput.addEventListener('change', (e) => { menu.label = e.target.value.trim() || menu.label; render(); });
+
+  const tag = document.createElement('span');
+  tag.className = 'menu-editor-tag';
+  tag.textContent = menu.preset ? 'preset' : 'custom';
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+  delBtn.textContent = '\u2715';
+  delBtn.title = 'Remove this menu entirely.';
+  delBtn.addEventListener('click', () => { menus.splice(mi, 1); render(); });
+
+  head.appendChild(chk);
+  head.appendChild(nameInput);
+  head.appendChild(tag);
+  head.appendChild(delBtn);
+  box.appendChild(head);
+
+  const itemsWrap = document.createElement('div');
+  itemsWrap.className = 'menu-editor-subitems';
+  menu.items.forEach((it, ii) => {
+    itemsWrap.appendChild(buildMenuSubItem(menu, it, ii));
+  });
+
+  const addItemBtn = document.createElement('button');
+  addItemBtn.type = 'button';
+  addItemBtn.className = 'btn btn-ghost menu-add-item-btn';
+  addItemBtn.textContent = '+ Add item';
+  addItemBtn.title = 'Add a custom entry under this menu.';
+  addItemBtn.addEventListener('click', () => {
+    menu.items.push({ id: 'item' + Math.random().toString(36).slice(2, 8), label: 'New Item', enabled: true, preset: false });
+    render();
+  });
+  itemsWrap.appendChild(addItemBtn);
+
+  box.appendChild(itemsWrap);
+  return box;
+}
+
+function buildMenuSubItem(menu, it, ii) {
+  const row = document.createElement('div');
+  row.className = 'menu-editor-subitem-row';
+
+  const chk = document.createElement('input');
+  chk.type = 'checkbox';
+  chk.checked = !!it.enabled;
+  chk.title = 'Include this entry in the generated menu.';
+  chk.addEventListener('change', (e) => { it.enabled = e.target.checked; render(); });
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'menu-editor-label-input';
+  nameInput.value = it.label;
+  nameInput.title = it.label === '-' ? 'A single dash renders as a separator line.' : '';
+  nameInput.addEventListener('change', (e) => { it.label = e.target.value.trim() || it.label; render(); });
+
+  const tag = document.createElement('span');
+  tag.className = 'menu-editor-tag';
+  tag.textContent = it.preset ? 'preset' : 'custom';
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+  delBtn.textContent = '\u2715';
+  delBtn.title = 'Remove this entry.';
+  delBtn.addEventListener('click', () => { menu.items.splice(ii, 1); render(); });
+
+  row.appendChild(chk);
+  row.appendChild(nameInput);
+  row.appendChild(tag);
+  row.appendChild(delBtn);
+  return row;
+}
+
+function buildInteractFixedBlock(ctrl) {
+  const wrap = document.createElement('div');
+  wrap.className = 'interact-fixed';
   const row = document.createElement('div');
   row.className = 'toggle-row';
+  row.title = 'When on, clicks/keys go to the real control (e.g. open a dropdown or check a box) instead of selecting/dragging it in the designer.';
   row.innerHTML = `
     <span class="toggle-label">Pause editing &amp; interact with control</span>
     <label class="switch"><input type="checkbox" ${ctrl.interact ? 'checked' : ''}><span class="track"></span></label>`;
   row.querySelector('input').addEventListener('change', (e) => { ctrl.interact = e.target.checked; render(); });
-  frag.appendChild(row);
-  return frag;
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function buildEventsSection(ctrl) {
@@ -903,7 +1241,7 @@ function buildEventsSection(ctrl) {
 
     const fnRow = document.createElement('div');
     fnRow.className = 'prop-row';
-    fnRow.innerHTML = `<label>Function</label><input type="text" value="${escapeHtml(data.fn)}">`;
+    fnRow.innerHTML = `<label title="Name of the function/handler that runs when ${evtName} fires.">Function</label><input type="text" value="${escapeHtml(data.fn)}">`;
     fnRow.querySelector('input').addEventListener('change', (e) => { data.fn = e.target.value; ctrl.events[evtName] = data; });
 
     const snippetRow = document.createElement('div');
@@ -923,7 +1261,7 @@ function buildEventsSection(ctrl) {
 
     const codeRow = document.createElement('div');
     codeRow.className = 'prop-row';
-    codeRow.innerHTML = `<label>Code</label><textarea placeholder="PowerShell / JS handler body">${escapeHtml(data.code)}</textarea>`;
+    codeRow.innerHTML = `<label title="Handler body executed inline when ${evtName} fires. Leave blank if using a .ps1 file instead.">Code</label><textarea placeholder="PowerShell / JS handler body">${escapeHtml(data.code)}</textarea>`;
     const codeTa = codeRow.querySelector('textarea');
     codeTa.addEventListener('change', () => { data.code = codeTa.value; ctrl.events[evtName] = data; });
 
@@ -937,7 +1275,7 @@ function buildEventsSection(ctrl) {
 
     const ps1Row = document.createElement('div');
     ps1Row.className = 'prop-row';
-    ps1Row.innerHTML = `<label>Or .ps1 file</label><input type="text" placeholder="handlers\\${ctrl.name}_${evtName}.ps1" value="${escapeHtml(data.ps1)}">`;
+    ps1Row.innerHTML = `<label title="Path to an external .ps1 script to dot-source and call instead of inline code.">Or .ps1 file</label><input type="text" placeholder="handlers\\${ctrl.name}_${evtName}.ps1" value="${escapeHtml(data.ps1)}">`;
     ps1Row.querySelector('input').addEventListener('change', (e) => { data.ps1 = e.target.value; ctrl.events[evtName] = data; });
 
     body.appendChild(fnRow);
@@ -980,7 +1318,7 @@ function buildFormProps() {
 
   const titleRow = document.createElement('div');
   titleRow.className = 'prop-row';
-  titleRow.innerHTML = `<label>Title</label><input type="text" value="${escapeHtml(state.form.text)}">`;
+  titleRow.innerHTML = `<label title="Text shown in the window's title bar.">Title</label><input type="text" value="${escapeHtml(state.form.text)}">`;
   titleRow.querySelector('input').addEventListener('change', (e) => { state.form.text = e.target.value; render(); });
   frag.appendChild(titleRow);
 
@@ -989,7 +1327,7 @@ function buildFormProps() {
 
   const colorRow = document.createElement('div');
   colorRow.className = 'prop-row';
-  colorRow.innerHTML = `<label>Back Color</label><input type="color" value="${state.form.backColor}">`;
+  colorRow.innerHTML = `<label title="Background fill color of the form's client area.">Back Color</label><input type="color" value="${state.form.backColor}">`;
   colorRow.querySelector('input').addEventListener('input', (e) => { state.form.backColor = e.target.value; render(); });
   frag.appendChild(colorRow);
 
@@ -1009,9 +1347,17 @@ function buildFormProps() {
 function buildFormChromeRows() {
   const frag = document.createElement('div');
 
+  const chromeTips = {
+    minimizeBox: 'Shows the minimize (_) button in the title bar.',
+    maximizeBox: 'Shows the maximize (\u25a1) button in the title bar.',
+    closeBox: 'Shows the close (\u00d7) button in the title bar.',
+    resizable: 'Allows the user to resize the window by dragging its edges.',
+    topMost: 'Keeps the window above all other windows.',
+  };
   [['minimizeBox', 'Minimize Button'], ['maximizeBox', 'Maximize Button'], ['closeBox', 'Close Button'], ['resizable', 'Resizable'], ['topMost', 'Always On Top']].forEach(([key, label]) => {
     const row = document.createElement('div');
     row.className = 'toggle-row';
+    row.title = chromeTips[key];
     row.innerHTML = `<span class="toggle-label">${label}</span><label class="switch"><input type="checkbox" ${state.form[key] ? 'checked' : ''}><span class="track"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => { state.form[key] = e.target.checked; render(); });
     frag.appendChild(row);
@@ -1020,7 +1366,7 @@ function buildFormChromeRows() {
   const startRow = document.createElement('div');
   startRow.className = 'prop-row';
   const opts = ['CenterScreen', 'Manual', 'CenterParent', 'WindowsDefaultLocation', 'WindowsDefaultBounds'];
-  startRow.innerHTML = `<label>Start Position</label><select>${opts.map(o => `<option ${o === state.form.startPosition ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  startRow.innerHTML = `<label title="Where the window appears on screen the first time it opens.">Start Position</label><select>${opts.map(o => `<option ${o === state.form.startPosition ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
   startRow.querySelector('select').addEventListener('change', (e) => { state.form.startPosition = e.target.value; });
   frag.appendChild(startRow);
 
@@ -1228,6 +1574,18 @@ function orderedControls() {
 
 function cssColor(hex) { return hex; }
 
+function menuStripHtml(c, styleBase) {
+  const menus = (c.props.menuItems || []).filter(m => m.enabled);
+  const li = (m) => {
+    const items = (m.items || []).filter(it => it.enabled);
+    const subUl = items.length
+      ? `<ul>${items.map(it => it.label === '-' ? `<li class="menu-sep"></li>` : `<li>${escapeHtml(it.label)}</li>`).join('')}</ul>`
+      : '';
+    return `<li>${escapeHtml(m.label)}${subUl}</li>`;
+  };
+  return `<nav id="${c.name}" class="menu-strip" style="${styleBase}"><ul>${menus.map(li).join('')}</ul></nav>`;
+}
+
 function generateHTML() {
   const f = state.form;
   const ctrls = orderedControls();
@@ -1279,6 +1637,8 @@ function generateHTML() {
         return `<textarea id="${c.name}" style="${styleBase}background:${p.backColor};color:${p.foreColor};"${evtAttr('TextChanged', 'input')}>${escapeHtml(p.text)}</textarea>`;
       case 'LinkLabel':
         return `<a id="${c.name}" href="${escapeHtml(p.url)}" style="${styleBase}color:${p.foreColor};"${evtAttr('LinkClicked', 'click')}>${escapeHtml(p.text)}</a>`;
+      case 'MenuStrip':
+        return menuStripHtml(c, styleBase);
       default:
         return '';
     }
@@ -1300,6 +1660,15 @@ function generateHTML() {
 <style>
   body { margin: 0; font-family: Segoe UI, sans-serif; }
   #${'form_root'} { position: relative; width: ${f.width}px; height: ${f.height}px; background: ${f.backColor}; overflow: hidden; }
+  .menu-strip { background: #F0F0F0; border-bottom: 1px solid #ACA899; }
+  .menu-strip > ul { list-style: none; margin: 0; padding: 0; display: flex; height: 100%; }
+  .menu-strip > ul > li { position: relative; padding: 0 10px; display: flex; align-items: center; font-size: 12px; cursor: default; }
+  .menu-strip > ul > li:hover { background: #C1D2EE; }
+  .menu-strip li > ul { display: none; position: absolute; top: 100%; left: 0; list-style: none; margin: 0; padding: 4px 0; background: #FFFFFF; border: 1px solid #ACA899; min-width: 140px; z-index: 50; }
+  .menu-strip li:hover > ul { display: block; }
+  .menu-strip li > ul li { padding: 4px 18px; font-size: 12px; white-space: nowrap; }
+  .menu-strip li > ul li:hover { background: #C1D2EE; }
+  .menu-strip li > ul li.menu-sep { height: 1px; margin: 4px 0; padding: 0; background: #ddd; }
 </style>
 </head>
 <body>
@@ -1347,7 +1716,7 @@ function generateWinForms() {
       RadioButton: 'RadioButton', ComboBox: 'ComboBox', ListBox: 'ListBox', Panel: 'Panel',
       GroupBox: 'GroupBox', PictureBox: 'PictureBox', ProgressBar: 'ProgressBar',
       TrackBar: 'TrackBar', NumericUpDown: 'NumericUpDown', DateTimePicker: 'DateTimePicker',
-      RichTextBox: 'RichTextBox', LinkLabel: 'LinkLabel',
+      RichTextBox: 'RichTextBox', LinkLabel: 'LinkLabel', MenuStrip: 'MenuStrip',
     }[c.type];
 
     lines.push(`# ${c.name} (${c.type})`);
@@ -1424,6 +1793,26 @@ function generateWinForms() {
       case 'DateTimePicker':
         lines.push(`$${c.name}.Format = [System.Windows.Forms.DateTimePickerFormat]::${p.format}`);
         break;
+      case 'MenuStrip': {
+        const menus = (p.menuItems || []).filter(m => m.enabled);
+        menus.forEach(m => {
+          const menuVar = `${c.name}_${m.id}`;
+          lines.push(`$${menuVar} = New-Object System.Windows.Forms.ToolStripMenuItem`);
+          lines.push(`$${menuVar}.Text = "${(m.label || '').replace(/"/g, '""')}"`);
+          (m.items || []).filter(it => it.enabled).forEach(it => {
+            if (it.label === '-') {
+              lines.push(`$${menuVar}.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null`);
+            } else {
+              const itemVar = `${menuVar}_${it.id.replace(new RegExp('^' + m.id + '_'), '')}`;
+              lines.push(`$${itemVar} = New-Object System.Windows.Forms.ToolStripMenuItem`);
+              lines.push(`$${itemVar}.Text = "${(it.label || '').replace(/"/g, '""')}"`);
+              lines.push(`$${menuVar}.DropDownItems.Add($${itemVar}) | Out-Null`);
+            }
+          });
+          lines.push(`$${c.name}.Items.Add($${menuVar}) | Out-Null`);
+        });
+        break;
+      }
     }
 
     // events
@@ -1436,6 +1825,7 @@ function generateWinForms() {
     });
 
     lines.push(`$${(c.parentId ? '' + getControl(c.parentId).name : 'Form')}.Controls.Add($${c.name})`);
+    if (c.type === 'MenuStrip') lines.push(`$Form.MainMenuStrip = $${c.name}`);
     lines.push('');
   });
 
@@ -1445,6 +1835,18 @@ function generateWinForms() {
 }
 
 function xamlColorAttr(hex) { return hex; }
+
+function wpfMenuXaml(c, common) {
+  const menus = (c.props.menuItems || []).filter(m => m.enabled);
+  const menuItem = (m) => {
+    const items = (m.items || []).filter(it => it.enabled);
+    const children = items.length
+      ? `\n      ${items.map(it => it.label === '-' ? `<Separator />` : `<MenuItem Header="${escapeHtml(it.label)}" />`).join('\n      ')}\n    `
+      : '';
+    return `<MenuItem Header="${escapeHtml(m.label)}">${children}</MenuItem>`;
+  };
+  return `<Menu ${common}>\n    ${menus.map(menuItem).join('\n    ')}\n  </Menu>`;
+}
 
 function generateWPF() {
   const f = state.form;
@@ -1475,6 +1877,7 @@ function generateWPF() {
       case 'TrackBar': return `<Slider ${common} Minimum="${p.min}" Maximum="${p.max}" Value="${p.value}" />`;
       case 'PictureBox': return `<Image ${common} Source="${escapeHtml(p.imageSource)}" Stretch="Uniform" />`;
       case 'LinkLabel': return `<TextBlock ${common} Text="${escapeHtml(p.text)}" Foreground="#2dd4bf" TextDecorations="Underline" />`;
+      case 'MenuStrip': return wpfMenuXaml(c, common);
       default: return `<${tag} ${common} />`;
     }
   };
@@ -1493,20 +1896,39 @@ function generateWPF() {
   return header + xaml;
 }
 
+function winuiMenuXaml(c) {
+  const menus = (c.props.menuItems || []).filter(m => m.enabled);
+  const menuItem = (m) => {
+    const items = (m.items || []).filter(it => it.enabled);
+    const children = items.length
+      ? `\n      ${items.map(it => it.label === '-' ? `<MenuFlyoutSeparator />` : `<MenuFlyoutItem Text="${escapeHtml(it.label)}" />`).join('\n      ')}\n    `
+      : '';
+    return `<MenuBarItem Title="${escapeHtml(m.label)}">${children}</MenuBarItem>`;
+  };
+  return `<MenuBar x:Name="${c.name}">\n    ${menus.map(menuItem).join('\n    ')}\n  </MenuBar>`;
+}
+
 function generateWinUI() {
   const f = state.form;
   const header = helpBlockAsHtmlComment() + `<!-- WinUI export is a roadmap item: control -> markup mapping, Fluent
-     styling, and event wiring are not implemented yet. This is a page
-     shell with a TODO list of placed controls for manual porting. -->
+     styling, and event wiring are not implemented yet, except MenuStrip
+     which maps to a real MenuBar/MenuBarItem/MenuFlyoutItem tree below.
+     Everything else is a page shell with a TODO list for manual porting. -->
 `;
-  const todoList = state.controls.map(c => `    <!-- TODO: port ${c.name} (${c.type}) at ${c.x},${c.y} ${c.w}x${c.h} -->`).join('\n');
+  const menuControls = state.controls.filter(c => c.type === 'MenuStrip');
+  const otherControls = state.controls.filter(c => c.type !== 'MenuStrip');
+  const menuXaml = menuControls.map(winuiMenuXaml).join('\n  ');
+  const todoList = otherControls.map(c => `    <!-- TODO: port ${c.name} (${c.type}) at ${c.x},${c.y} ${c.w}x${c.h} -->`).join('\n');
   const xaml = `<Page
     x:Class="App.${(f.text || 'MainPage').replace(/[^a-zA-Z0-9]/g, '')}"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <Grid Background="${f.backColor}" Width="${f.width}" Height="${f.height}">
+  <StackPanel Background="${f.backColor}" Width="${f.width}" Height="${f.height}">
+    ${menuXaml}
+    <Grid>
 ${todoList}
-  </Grid>
+    </Grid>
+  </StackPanel>
 </Page>`;
   return header + xaml;
 }
