@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.7";
+const ENGINE_JS_VERSION = "1.8";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -7,12 +7,8 @@ let universalUIModel = {
     Theme: "winforms",
     ShowControlBox: true,
     Width: 650,
-    Height: 450,
-    Tabs: [
-        { Title: "General", Children: [] },
-        { Title: "Advanced", Children: [] }
-    ],
-    ActiveTab: 0,
+    Height: 480,
+    Children: [],
     GlobalMenu: "File, Edit, View, Help"
 };
 
@@ -44,23 +40,22 @@ function closeSettings() {
 
 // --- CORE ENGINE LOGIC ---
 function addControl(type) {
-    const activeChildren = universalUIModel.Tabs[universalUIModel.ActiveTab].Children;
     const newControl = {
         Type: type,
-        Name: `${type}${activeChildren.length + 1}`,
-        Text: type === 'MenuBar' ? 'File, Edit, Help' : `New ${type}`,
-        X: 20 + (activeChildren.length * 10),
-        Y: 20 + (activeChildren.length * 25),
-        Width: 150,
-        Height: type === 'TextBox' || type === 'Dropdown' ? 24 : 30,
+        Name: `${type}${universalUIModel.Children.length + 1}`,
+        Text: type === 'MenuBar' ? 'File, Edit, Help' : (type === 'TabControl' ? 'Tab 1, Tab 2' : `New ${type}`),
+        X: 20 + (universalUIModel.Children.length * 10),
+        Y: 40 + (universalUIModel.Children.length * 20),
+        Width: type === 'TabControl' ? 400 : 150,
+        Height: type === 'TabControl' ? 250 : (type === 'TextBox' || type === 'Dropdown' ? 24 : 30),
         Interactive: false,
-        Options: type === 'Dropdown' || type === 'MenuBar' ? 'Item 1, Item 2, Item 3' : undefined,
+        Options: type === 'Dropdown' || type === 'MenuBar' || type === 'TabControl' ? 'Item 1, Item 2' : undefined,
         Action: type === 'Button' ? '# Enter PowerShell code here...\nWrite-Host "Clicked!"' : ''
     };
     
-    activeChildren.push(newControl);
+    universalUIModel.Children.push(newControl);
     renderSimulator();
-    selectControl(activeChildren.length - 1);
+    selectControl(universalUIModel.Children.length - 1);
 }
 
 function selectControl(index) {
@@ -71,62 +66,42 @@ function selectControl(index) {
 
 function deleteSelectedControl() {
     if (selectedControlIndex !== null) {
-        universalUIModel.Tabs[universalUIModel.ActiveTab].Children.splice(selectedControlIndex, 1);
+        universalUIModel.Children.splice(selectedControlIndex, 1);
         selectedControlIndex = null;
         renderSimulator();
         renderPropertiesPanel();
     }
 }
 
-function addTab() {
-    universalUIModel.Tabs.push({ Title: `Tab ${universalUIModel.Tabs.length + 1}`, Children: [] });
-    universalUIModel.ActiveTab = universalUIModel.Tabs.length - 1;
-    selectedControlIndex = null;
-    renderSimulator();
-    renderPropertiesPanel();
-}
-
 function renderSimulator() {
     const workspace = document.getElementById('workspace');
     const canvas = document.getElementById('live-preview-canvas');
     
-    workspace.className = `theme-${universalUIModel.Theme}`;
+    let themeClass = `theme-${universalUIModel.Theme}`;
+    if (universalUIModel.ShowControlBox) {
+        themeClass += ` show-chrome`;
+    }
+    workspace.className = themeClass;
+    
     canvas.style.width = `${universalUIModel.Width}px`;
     canvas.style.height = `${universalUIModel.Height}px`;
+    canvas.setAttribute('data-title', universalUIModel.Title);
     
-    let canvasInnerHtml = `<div class="window-frame" data-title="${universalUIModel.Title}" style="position:relative; width:100%; height:100%;">`;
-    
-    if (universalUIModel.ShowControlBox && universalUIModel.Theme !== 'html') {
-        canvasInnerHtml += `
-            <div class="window-controls">
-                <button class="win-btn">_</button>
-                <button class="win-btn">□</button>
-                <button class="win-btn">×</button>
-            </div>`;
-    }
+    let canvasInnerHtml = `
+        <div class="window-controls">
+            <button class="win-btn">_</button>
+            <button class="win-btn">□</button>
+            <button class="win-btn">×</button>
+        </div>`;
 
-    // Global Top Menu Bar if specified
     if (universalUIModel.GlobalMenu) {
         const menus = universalUIModel.GlobalMenu.split(',').map(m => `<span>${m.trim()}</span>`).join('');
         canvasInnerHtml += `<div class="menu-bar">${menus}</div>`;
     }
 
-    // Render Tabs Structure
-    canvasInnerHtml += `<div class="tab-container"><div class="tab-headers">`;
-    universalUIModel.Tabs.forEach((tab, tIdx) => {
-        canvasInnerHtml += `<div class="tab-header-btn ${tIdx === universalUIModel.ActiveTab ? 'active' : ''}" onclick="switchTab(${tIdx})">${tab.Title}</div>`;
-    });
-    canvasInnerHtml += `<button onclick="addTab()" style="padding:2px 8px; margin:2px; cursor:pointer;">+</button></div>`;
-
-    // Active Tab Content Pane
-    canvasInnerHtml += `<div class="tab-content-pane active" id="active-tab-pane"></div></div></div>`;
     canvas.innerHTML = canvasInnerHtml;
 
-    // Inject active tab controls
-    const pane = document.getElementById('active-tab-pane');
-    const activeChildren = universalUIModel.Tabs[universalUIModel.ActiveTab].Children;
-
-    activeChildren.forEach((control, index) => {
+    universalUIModel.Children.forEach((control, index) => {
         let el = document.createElement('div');
         el.className = 'canvas-element';
         if (index === selectedControlIndex) el.classList.add('selected-element');
@@ -143,9 +118,9 @@ function renderSimulator() {
             selectControl(index);
             isDragging = true;
             
-            const paneRect = pane.getBoundingClientRect();
-            dragOffset.x = (e.clientX - paneRect.left) - control.X;
-            dragOffset.y = (e.clientY - paneRect.top) - control.Y;
+            const canvasRect = canvas.getBoundingClientRect();
+            dragOffset.x = (e.clientX - canvasRect.left) - control.X;
+            dragOffset.y = (e.clientY - canvasRect.top) - control.Y;
         };
 
         if (control.Type === "Button") {
@@ -157,20 +132,28 @@ function renderSimulator() {
         } else if (control.Type === "CheckBox") {
             el.innerHTML = `<div style="display:flex; align-items:center; width:100%; height:100%;"><input type="checkbox"> <label>${control.Text}</label></div>`;
         } else if (control.Type === "RadioButton") {
-            el.innerHTML = `<div style="display:flex; align-items:center; width:100%; height:100%;"><input type="radio" name="group_tab"> <label>${control.Text}</label></div>`;
+            el.innerHTML = `<div style="display:flex; align-items:center; width:100%; height:100%;"><input type="radio" name="group_main"> <label>${control.Text}</label></div>`;
         } else if (control.Type === "Dropdown") {
             const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}</option>`).join('');
             el.innerHTML = `<select style="width:100%; height:100%;">${optionsHtml}</select>`;
         } else if (control.Type === "MenuBar") {
             const menusHtml = (control.Options || control.Text || '').split(',').map(m => `<span>${m.trim()}</span>`).join('');
             el.innerHTML = `<div class="menu-bar" style="width:100%; height:100%;">${menusHtml}</div>`;
+        } else if (control.Type === "TabControl") {
+            const tabsArr = (control.Options || 'Tab 1, Tab 2').split(',').map(t => t.trim());
+            let tabsHtml = `<div class="tabcontrol-wrapper"><div class="tabcontrol-headers">`;
+            tabsArr.forEach((t, ti) => {
+                tabsHtml += `<div class="tabcontrol-tab ${ti === 0 ? 'active' : ''}">${t}</div>`;
+            });
+            tabsHtml += `</div><div class="tabcontrol-content"></div></div>`;
+            el.innerHTML = tabsHtml;
         }
         
-        pane.appendChild(el);
+        canvas.appendChild(el);
     });
 
-    pane.onclick = (e) => {
-        if (e.target === pane) {
+    canvas.onclick = (e) => {
+        if (e.target === canvas) {
             selectedControlIndex = null;
             renderSimulator();
             renderPropertiesPanel();
@@ -178,28 +161,19 @@ function renderSimulator() {
     };
 }
 
-function switchTab(index) {
-    universalUIModel.ActiveTab = index;
-    selectedControlIndex = null;
-    renderSimulator();
-    renderPropertiesPanel();
-}
-
 document.onmousemove = (e) => {
     if (!isDragging || selectedControlIndex === null) return;
-    const pane = document.getElementById('active-tab-pane');
-    if (!pane) return;
-    const paneRect = pane.getBoundingClientRect();
+    const canvas = document.getElementById('live-preview-canvas');
+    const canvasRect = canvas.getBoundingClientRect();
     
-    let newX = (e.clientX - paneRect.left) - dragOffset.x;
-    let newY = (e.clientY - paneRect.top) - dragOffset.y;
+    let newX = (e.clientX - canvasRect.left) - dragOffset.x;
+    let newY = (e.clientY - canvasRect.top) - dragOffset.y;
     
-    newX = Math.max(0, Math.min(newX, pane.clientWidth - 50));
-    newY = Math.max(0, Math.min(newY, pane.clientHeight - 20));
+    newX = Math.max(0, Math.min(newX, canvas.clientWidth - 50));
+    newY = Math.max(0, Math.min(newY, canvas.clientHeight - 20));
     
-    const activeChildren = universalUIModel.Tabs[universalUIModel.ActiveTab].Children;
-    activeChildren[selectedControlIndex].X = Math.round(newX);
-    activeChildren[selectedControlIndex].Y = Math.round(newY);
+    universalUIModel.Children[selectedControlIndex].X = Math.round(newX);
+    universalUIModel.Children[selectedControlIndex].Y = Math.round(newY);
     
     const el = document.getElementsByClassName('canvas-element')[selectedControlIndex];
     if (el) {
@@ -214,12 +188,11 @@ document.onmouseup = () => {
 
 function nudgeControl(dx, dy) {
     if (selectedControlIndex !== null) {
-        const activeChildren = universalUIModel.Tabs[universalUIModel.ActiveTab].Children;
-        const control = activeChildren[selectedControlIndex];
-        const pane = document.getElementById('active-tab-pane');
+        const control = universalUIModel.Children[selectedControlIndex];
+        const canvas = document.getElementById('live-preview-canvas');
         
-        control.X = Math.max(0, Math.min(control.X + dx, pane.clientWidth - 50));
-        control.Y = Math.max(0, Math.min(control.Y + dy, pane.clientHeight - 20));
+        control.X = Math.max(0, Math.min(control.X + dx, canvas.clientWidth - 50));
+        control.Y = Math.max(0, Math.min(control.Y + dy, canvas.clientHeight - 20));
         
         renderSimulator();
         renderPropertiesPanel();
@@ -265,7 +238,7 @@ function renderPropertiesPanel() {
         return;
     }
 
-    const control = universalUIModel.Tabs[universalUIModel.ActiveTab].Children[selectedControlIndex];
+    const control = universalUIModel.Children[selectedControlIndex];
     
     propsContent.innerHTML = `
         <div style="padding: 10px 15px; background: #333; color: #0078d4; font-size: 0.9em; text-transform: uppercase;">Control Properties</div>
@@ -320,9 +293,9 @@ function renderPropertiesPanel() {
                 Interact Mode (Test Control)
             </label>
         </div>
-        ${control.Type === 'Dropdown' || control.Type === 'MenuBar' ? `
+        ${control.Type === 'Dropdown' || control.Type === 'MenuBar' || control.Type === 'TabControl' ? `
         <div class="prop-group">
-            <label>Options / Items (Comma separated)</label>
+            <label>Items / Tabs (Comma separated)</label>
             <input type="text" value="${control.Options || ''}" oninput="updateControlProperty('Options', this.value)">
         </div>` : ''}
         ${control.Type === 'Button' ? `
@@ -343,8 +316,7 @@ function updateFormProperty(property, value) {
 
 function updateControlProperty(property, value) {
     if (selectedControlIndex !== null) {
-        const activeChildren = universalUIModel.Tabs[universalUIModel.ActiveTab].Children;
-        activeChildren[selectedControlIndex][property] = value;
+        universalUIModel.Children[selectedControlIndex][property] = value;
         if (property === 'Text' || property === 'Options') {
             renderSimulator();
         }
@@ -353,15 +325,13 @@ function updateControlProperty(property, value) {
 
 function updateControlDimension(dimension, value) {
     if (selectedControlIndex !== null) {
-        const activeChildren = universalUIModel.Tabs[universalUIModel.ActiveTab].Children;
-        activeChildren[selectedControlIndex][dimension] = Math.max(20, parseInt(value) || 50);
+        universalUIModel.Children[selectedControlIndex][dimension] = Math.max(20, parseInt(value) || 50);
         renderSimulator();
     }
 }
 
 function toggleInteractive(index, isChecked) {
-    const activeChildren = universalUIModel.Tabs[universalUIModel.ActiveTab].Children;
-    activeChildren[index].Interactive = isChecked;
+    universalUIModel.Children[index].Interactive = isChecked;
     renderSimulator();
 }
 
