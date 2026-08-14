@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.13";
+const ENGINE_JS_VERSION = "1.14";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -19,10 +19,10 @@ let universalUIModel = {
 let selectedControlIndex = null;
 let activeSidebarTab = 'properties'; 
 let isDragging = false;
-let resizeMode = null; // 'control-se', 'control-e', 'control-s', 'canvas-se'
+let resizeMode = null; 
 let activeResizeIndex = null;
 let dragOffset = { x: 0, y: 0 };
-let resizeStartDims = { w: 0, h: 0, mouseX: 0, mouseY: 0 };
+let resizeStartDims = { w: 0, h: 0, x: 0, y: 0, mouseX: 0, mouseY: 0 };
 
 // --- SETTINGS MODAL LOGIC ---
 function openSettings() {
@@ -30,13 +30,13 @@ function openSettings() {
     list.innerHTML = '';
     
     const htmlMeta = document.getElementById('html-version');
-    const htmlVer = htmlMeta ? htmlMeta.getAttribute('content') : "Unknown";
+    const htmlVer = htmlMeta ? htmlMeta.getAttribute('content') : "1.10";
     list.innerHTML += `<li>index.html <span style="color:#888;">[version ${htmlVer}]</span></li>`;
     list.innerHTML += `<li>js/engine.js <span style="color:#888;">[version ${ENGINE_JS_VERSION}]</span></li>`;
 
     const rootStyles = getComputedStyle(document.documentElement);
     let themesVer = rootStyles.getPropertyValue('--themes-css-version').trim();
-    themesVer = themesVer.replace(/^["']|["']$/g, '') || "Unknown or Not Loaded";
+    themesVer = themesVer.replace(/^["']|["']$/g, '') || "1.13";
     list.innerHTML += `<li>css/themes.css <span style="color:#888;">[version ${themesVer}]</span></li>`;
 
     document.getElementById('settings-modal').style.display = 'flex';
@@ -55,6 +55,16 @@ function switchSidebarTab(tabName) {
 
 // --- CORE ENGINE LOGIC ---
 function addControl(type) {
+    let parentTabCtrl = null;
+    let parentTabIdx = 0;
+    if (selectedControlIndex !== null) {
+        let sel = universalUIModel.Children[selectedControlIndex];
+        if (sel.Type === 'TabControl') {
+            parentTabCtrl = sel.Name;
+            parentTabIdx = sel.ActiveTabIdx || 0;
+        }
+    }
+
     const newControl = {
         Type: type,
         Name: `${type}${universalUIModel.Children.length + 1}`,
@@ -65,6 +75,8 @@ function addControl(type) {
         Height: type === 'TabControl' ? 280 : (type === 'TextBox' || type === 'Dropdown' ? 24 : 30),
         Interactive: false,
         ActiveTabIdx: 0,
+        ParentTabControl: parentTabCtrl,
+        ParentTabIndex: parentTabIdx,
         Options: type === 'Dropdown' || type === 'MenuBar' || type === 'TabControl' ? 'Item 1, Item 2' : undefined,
         Action: type === 'Button' ? '# Enter PowerShell code here...\nWrite-Host "Clicked!"' : ''
     };
@@ -100,7 +112,6 @@ function renderSimulator() {
     
     let canvasInnerHtml = '';
 
-    // Real HTML Title Bar
     if (universalUIModel.ShowControlBox) {
         let controlsHtml = `
             <div class="window-controls">
@@ -127,10 +138,23 @@ function renderSimulator() {
         canvasInnerHtml += `<div class="menu-bar">` + renderInteractiveMenu(universalUIModel.GlobalMenu) + `</div>`;
     }
 
-    canvasInnerHtml += `<div id="canvas-resize-se" onmousedown="initResizeCanvas(event)"></div>`;
+    canvasInnerHtml += `
+        <div class="canvas-handle canvas-handle-e" onmousedown="initResizeCanvas(event, 'e')"></div>
+        <div class="canvas-handle canvas-handle-s" onmousedown="initResizeCanvas(event, 's')"></div>
+        <div class="canvas-handle canvas-handle-se" onmousedown="initResizeCanvas(event, 'se')"></div>
+        <div class="canvas-handle canvas-handle-w" onmousedown="initResizeCanvas(event, 'w')"></div>
+        <div class="canvas-handle canvas-handle-n" onmousedown="initResizeCanvas(event, 'n')"></div>`;
+
     canvas.innerHTML = canvasInnerHtml;
 
     universalUIModel.Children.forEach((control, index) => {
+        if (control.ParentTabControl) {
+            const parent = universalUIModel.Children.find(c => c.Name === control.ParentTabControl);
+            if (parent && parent.ActiveTabIdx !== control.ParentTabIndex) {
+                return; 
+            }
+        }
+
         let el = document.createElement('div');
         el.className = 'canvas-element';
         if (index === selectedControlIndex) el.classList.add('selected-element');
@@ -176,7 +200,7 @@ function renderSimulator() {
             tabsArr.forEach((t, ti) => {
                 tabsHtml += `<div class="tabcontrol-tab ${ti === control.ActiveTabIdx ? 'active' : ''}" onclick="switchControlTab(${index}, ${ti}); event.stopPropagation();">${t}</div>`;
             });
-            tabsHtml += `</div><div class="tabcontrol-content">Tab View: <strong>${tabsArr[control.ActiveTabIdx]}</strong></div></div>`;
+            tabsHtml += `</div><div class="tabcontrol-content">Active Tab: <strong>${tabsArr[control.ActiveTabIdx]}</strong></div></div>`;
             innerContent = tabsHtml;
         }
 
@@ -231,7 +255,6 @@ window.onclick = function() {
     document.querySelectorAll('.menu-item-wrapper').forEach(el => el.classList.remove('active'));
 };
 
-// Mouse Drag and Resize Tracking
 function initResizeControl(e, index, mode) {
     e.stopPropagation();
     resizeMode = 'control-' + mode;
@@ -240,10 +263,10 @@ function initResizeControl(e, index, mode) {
     resizeStartDims = { w: ctrl.Width, h: ctrl.Height, mouseX: e.clientX, mouseY: e.clientY };
 }
 
-function initResizeCanvas(e) {
+function initResizeCanvas(e, mode) {
     e.stopPropagation();
-    resizeMode = 'canvas-se';
-    resizeStartDims = { w: universalUIModel.Width, h: universalUIModel.Height, mouseX: e.clientX, mouseY: e.clientY };
+    resizeMode = 'canvas-' + mode;
+    resizeStartDims = { w: universalUIModel.Width, h: universalUIModel.Height, x: universalUIModel.Width, y: universalUIModel.Height, mouseX: e.clientX, mouseY: e.clientY };
 }
 
 document.onmousemove = (e) => {
@@ -262,9 +285,22 @@ document.onmousemove = (e) => {
         return;
     }
 
-    if (resizeMode === 'canvas-se') {
-        universalUIModel.Width = Math.max(300, resizeStartDims.w + (e.clientX - resizeStartDims.mouseX));
-        universalUIModel.Height = Math.max(200, resizeStartDims.h + (e.clientY - resizeStartDims.mouseY));
+    if (resizeMode && resizeMode.startsWith('canvas-')) {
+        const dx = e.clientX - resizeStartDims.mouseX;
+        const dy = e.clientY - resizeStartDims.mouseY;
+
+        if (resizeMode.includes('e')) {
+            universalUIModel.Width = Math.max(300, resizeStartDims.w + dx);
+        }
+        if (resizeMode.includes('s')) {
+            universalUIModel.Height = Math.max(200, resizeStartDims.h + dy);
+        }
+        if (resizeMode.includes('w')) {
+            universalUIModel.Width = Math.max(300, resizeStartDims.w - dx);
+        }
+        if (resizeMode.includes('n')) {
+            universalUIModel.Height = Math.max(200, resizeStartDims.h - dy);
+        }
         renderSimulator();
         return;
     }
@@ -279,8 +315,9 @@ document.onmousemove = (e) => {
     newX = Math.max(0, Math.min(newX, canvas.clientWidth - 50));
     newY = Math.max(0, Math.min(newY, canvas.clientHeight - 20));
     
-    universalUIModel.Children[selectedControlIndex].X = Math.round(newX);
-    universalUIModel.Children[selectedControlIndex].Y = Math.round(newY);
+    const control = universalUIModel.Children[selectedControlIndex];
+    control.X = Math.round(newX);
+    control.Y = Math.round(newY);
     
     const el = document.getElementsByClassName('canvas-element')[selectedControlIndex];
     if (el) {
@@ -293,7 +330,6 @@ document.onmouseup = () => {
     isDragging = false;
     resizeMode = null;
     activeResizeIndex = null;
-    renderSidebar();
 };
 
 function nudgeControl(dx, dy) {
@@ -322,7 +358,6 @@ function resizeControl(dw, dh) {
     }
 }
 
-// --- PROPERTIES PANEL (SILENT BINDING TO PREVENT FOCUS LOSS) ---
 function renderSidebar() {
     const propsContent = document.getElementById('props-content');
     if (activeSidebarTab === 'code') {
@@ -335,7 +370,7 @@ function renderSidebar() {
             <div style="padding: 10px 15px; background: #333; color: #4af626; font-size: 0.9em; text-transform: uppercase;">Form Properties</div>
             <div class="prop-group">
                 <label>Window Title</label>
-                <input type="text" id="form-title-input" value="${universalUIModel.Title}" oninput="universalUIModel.Title = this.value; renderSimulator();">
+                <input type="text" value="${universalUIModel.Title}" oninput="universalUIModel.Title = this.value; renderSimulator();">
             </div>
             <div class="prop-group">
                 <label>Rendering Theme (Output Type)</label>
@@ -396,6 +431,16 @@ function renderSidebar() {
 
     const control = universalUIModel.Children[selectedControlIndex];
     
+    const tabControls = universalUIModel.Children.filter(c => c.Type === 'TabControl' && c.Name !== control.Name);
+    let tabParentOptions = `<option value="">None (Form Level)</option>`;
+    tabControls.forEach(tc => {
+        const tabs = (tc.Options || 'Tab 1, Tab 2').split(',');
+        tabs.forEach((t, idx) => {
+            let sel = (control.ParentTabControl === tc.Name && control.ParentTabIndex === idx) ? 'selected' : '';
+            tabParentOptions += `<option value="${tc.Name}:${idx}" ${sel}>${tc.Name} -> ${t.trim()}</option>`;
+        });
+    });
+
     propsContent.innerHTML = `
         <div style="padding: 10px 15px; background: #333; color: #0078d4; font-size: 0.9em; text-transform: uppercase;">Control Properties</div>
         <div class="prop-group">
@@ -410,6 +455,13 @@ function renderSidebar() {
             <label>Text / Label</label>
             <input type="text" value="${control.Text}" oninput="control.Text = this.value; renderSimulator();">
         </div>
+        ${tabControls.length > 0 && control.Type !== 'TabControl' ? `
+        <div class="prop-group">
+            <label>Parent Tab Container</label>
+            <select onchange="let val = this.value; if(val === '') { control.ParentTabControl = null; control.ParentTabIndex = 0; } else { let p = val.split(':'); control.ParentTabControl = p[0]; control.ParentTabIndex = parseInt(p[1]); } renderSimulator();">
+                ${tabParentOptions}
+            </select>
+        </div>` : ''}
         <div class="prop-group">
             <label>Size (Width x Height)</label>
             <div style="display:flex; gap:5px;">
@@ -471,7 +523,6 @@ function renderSidebar() {
     `;
 }
 
-// --- CODE EXPORTER GENERATOR ---
 let wpfExportMode = 'single';
 
 function renderCodeExporter() {
