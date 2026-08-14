@@ -1,6 +1,9 @@
 :root {
-    --themes-css-version: "1.8";
+    --themes-css-version: "1.9";
 }
+
+/* Workspace padding adjustment to give room for window chrome */
+#workspace { padding-top: 45px !important; }
 
 /* ==========================================
    THEME: WINFORMS
@@ -83,6 +86,13 @@
     box-sizing: border-box;
 }
 
+.theme-winforms .menu-dropdown-item {
+    position: relative;
+    cursor: pointer;
+    padding: 2px 6px;
+}
+.theme-winforms .menu-dropdown-item:hover { background: #316AC5; color: #fff; }
+
 /* ==========================================
    THEME: WPF
 ========================================== */
@@ -156,6 +166,12 @@
     width: 100%;
     box-sizing: border-box;
 }
+
+.theme-wpf .menu-dropdown-item {
+    cursor: pointer;
+    padding: 2px 8px;
+}
+.theme-wpf .menu-dropdown-item:hover { background: #E5E5E5; }
 
 /* ==========================================
    THEME: HTML
@@ -241,6 +257,13 @@
     width: 100%;
     box-sizing: border-box;
 }
+
+.theme-html .menu-dropdown-item {
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+.theme-html .menu-dropdown-item:hover { background: #E2E6EA; }
 
 /* TabControl UI Styling */
 .tabcontrol-wrapper { display: flex; flex-direction: column; width: 100%; height: 100%; border: 1px solid #ccc; background: #fff; box-sizing: border-box; }
