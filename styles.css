@@ -1,20 +1,133 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
-    Revision: replaced the dark-blue design-form chrome with a neutral
-    Windows-grey titlebar and real title-bar buttons (minimize/maximize/
-    close, driven by form properties), added per-format canvas skins
-    (skin-winforms/html/wpf/winui) so control appearance actually changes
-    when the format switcher changes, added form-resize-handle styling,
-    the pixel-stepper widget (.px-row/.px-steps/.px-step-btn), and the
-    comment-based help block editor styling (.help-row/.help-list/
-    .param-row).
+    Revision: styling to match engine.js 1.2. Added .single-row section
+    styling (static, non-clickable title for one-row sections), the
+    fixed .interact-fixed block (Interact toggle now lives outside the
+    accordion), .pos-arrow-row/.pos-arrow-cluster/.pos-center-cluster
+    for the new directional position stepper + Center buttons, the
+    .rc-menustrip* canvas preview styles for the new MenuStrip control
+    (horizontal bar with real hover dropdowns), and the .menu-editor*
+    family of styles for the MenuStrip property editor (checkbox-driven
+    preset/custom menu and sub-item rows, add/remove controls).
 */
 
+/* Single-row sections (auto-flattened, no collapse toggle) */
+.prop-section.single-row .prop-section-title.static { cursor: default; }
+.prop-section.single-row .prop-section-title.static:hover { color: var(--bp-text-faint); }
+
+/* Interact toggle: fixed block, not part of the accordion */
+.interact-fixed {
+  padding: 4px 12px 10px;
+  border-bottom: 1px solid var(--bp-border-soft);
+  background: var(--bp-panel-raised);
+}
+.interact-fixed .toggle-row { padding: 6px 0 2px; }
+
+/* Directional position stepper + center buttons (Layout section) */
+.pos-arrow-row { grid-template-columns: 60px 1fr; align-items: center; }
+.pos-arrow-cluster, .pos-center-cluster {
+  display: inline-flex;
+  gap: 3px;
+  margin-right: 8px;
+}
+.pos-arrow-btn {
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-accent-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  min-width: 22px;
+  padding: 3px 6px;
+  font-family: var(--bp-font-mono);
+}
+.pos-arrow-btn:hover { border-color: var(--bp-accent-2); }
+.pos-arrow-btn:active { background: var(--bp-accent-2-dim); }
+.pos-center-cluster { border-left: 1px solid var(--bp-border-soft); padding-left: 8px; }
+
+/* MenuStrip canvas preview */
+.rc-menustrip {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  background: #F0F0F0;
+  border-bottom: 1px solid #ACA899;
+  font-size: 12px;
+  color: #000;
+  font-family: Segoe UI, sans-serif;
+}
+.rc-menustrip-item {
+  position: relative;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  cursor: default;
+}
+.rc-menustrip-item:hover { background: #C1D2EE; }
+.rc-menustrip-item:hover .rc-menustrip-sub { display: block; }
+.rc-menustrip-sub {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: #FFFFFF;
+  border: 1px solid #ACA899;
+  min-width: 140px;
+  padding: 4px 0;
+  z-index: 200;
+}
+.rc-menustrip-subitem { padding: 4px 18px; white-space: nowrap; }
+.rc-menustrip-subitem:hover { background: #C1D2EE; }
+.rc-menustrip-sep { height: 1px; margin: 4px 0; background: #ddd; }
+
+/* MenuStrip property editor (preset + custom menus/items with checkboxes) */
+.menu-editor { padding: 2px 0; }
+.menu-editor-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
+.menu-editor-item {
+  border: 1px solid var(--bp-border-soft);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  background: var(--bp-panel-raised);
+}
+.menu-editor-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--bp-border-soft);
+}
+.menu-editor-item-head input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--bp-accent-2); flex-shrink: 0; }
+.menu-editor-label-input {
+  flex: 1;
+  background: var(--bp-panel);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font-size: 11.5px;
+}
+.menu-editor-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--bp-text-faint);
+  border: 1px solid var(--bp-border);
+  border-radius: 3px;
+  padding: 2px 5px;
+  flex-shrink: 0;
+}
+.menu-del-btn { flex-shrink: 0; padding: 3px 7px; font-size: 11px; }
+.menu-editor-subitems { padding: 6px 8px 8px 26px; display: flex; flex-direction: column; gap: 5px; }
+.menu-editor-subitem-row { display: flex; align-items: center; gap: 6px; }
+.menu-editor-subitem-row input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--bp-accent-2); flex-shrink: 0; }
+.menu-add-btn, .menu-add-item-btn { width: 100%; margin-top: 2px; font-size: 11px; padding: 5px; }
+.menu-add-item-btn { width: auto; }
+
 :root {
-  --stylesheet-version: '1.1';
+  --stylesheet-version: '1.2';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
