@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.14";
+const ENGINE_JS_VERSION = "1.13";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -30,13 +30,13 @@ function openSettings() {
     list.innerHTML = '';
     
     const htmlMeta = document.getElementById('html-version');
-    const htmlVer = htmlMeta ? htmlMeta.getAttribute('content') : "1.10";
+    const htmlVer = htmlMeta ? htmlMeta.getAttribute('content') : "Unknown";
     list.innerHTML += `<li>index.html <span style="color:#888;">[version ${htmlVer}]</span></li>`;
     list.innerHTML += `<li>js/engine.js <span style="color:#888;">[version ${ENGINE_JS_VERSION}]</span></li>`;
 
     const rootStyles = getComputedStyle(document.documentElement);
     let themesVer = rootStyles.getPropertyValue('--themes-css-version').trim();
-    themesVer = themesVer.replace(/^["']|["']$/g, '') || "1.13";
+    themesVer = themesVer.replace(/^["']|["']$/g, '') || "Unknown or Not Loaded";
     list.innerHTML += `<li>css/themes.css <span style="color:#888;">[version ${themesVer}]</span></li>`;
 
     document.getElementById('settings-modal').style.display = 'flex';
