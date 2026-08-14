@@ -1,5 +1,5 @@
 :root {
-    --themes-css-version: "1.5";
+    --themes-css-version: "1.6";
 }
 
 /* ==========================================
@@ -47,7 +47,16 @@
 }
 
 .theme-winforms label { display: inline-block; }
-.theme-winforms input[type="checkbox"] { margin-right: 5px; }
+.theme-winforms input[type="checkbox"], .theme-winforms input[type="radio"] { margin-right: 5px; }
+
+.theme-winforms .menu-bar {
+    background: #F0F0F0;
+    border-bottom: 1px solid #ACA899;
+    display: flex;
+    padding: 2px 5px;
+    gap: 15px;
+    font-size: 8.5pt;
+}
 
 /* ==========================================
    THEME: WPF
@@ -89,7 +98,16 @@
 }
 
 .theme-wpf button { background: #DDDDDD; border: 1px solid #707070; padding: 5px 15px; width: 100%; cursor: pointer; }
-.theme-wpf input[type="checkbox"] { margin-right: 8px; }
+.theme-wpf input[type="checkbox"], .theme-wpf input[type="radio"] { margin-right: 8px; }
+
+.theme-wpf .menu-bar {
+    background: #F5F5F5;
+    border-bottom: 1px solid #E0E0E0;
+    display: flex;
+    padding: 4px 10px;
+    gap: 20px;
+    font-size: 9pt;
+}
 
 /* ==========================================
    THEME: HTML
@@ -143,4 +161,13 @@
     width: 100%;
     cursor: pointer;
 }
-.theme-html input[type="checkbox"] { margin-right: 10px; }
+.theme-html input[type="checkbox"], .theme-html input[type="radio"] { margin-right: 10px; }
+
+.theme-html .menu-bar {
+    background: #F8F9FA;
+    border-bottom: 1px solid #DEE1E6;
+    display: flex;
+    padding: 8px 15px;
+    gap: 20px;
+    font-size: 14px;
+}
