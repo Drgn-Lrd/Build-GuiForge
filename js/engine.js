@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.12";
+const ENGINE_JS_VERSION = "1.13";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -19,8 +19,8 @@ let universalUIModel = {
 let selectedControlIndex = null;
 let activeSidebarTab = 'properties'; 
 let isDragging = false;
-let isResizingControl = false;
-let isResizingCanvas = false;
+let resizeMode = null; // 'control-se', 'control-e', 'control-s', 'canvas-se'
+let activeResizeIndex = null;
 let dragOffset = { x: 0, y: 0 };
 let resizeStartDims = { w: 0, h: 0, mouseX: 0, mouseY: 0 };
 
@@ -94,28 +94,40 @@ function renderSimulator() {
     const workspace = document.getElementById('workspace');
     const canvas = document.getElementById('live-preview-canvas');
     
-    let themeClass = `theme-${universalUIModel.Theme}`;
-    if (universalUIModel.ShowControlBox) {
-        themeClass += ` show-chrome`;
-    }
-    workspace.className = themeClass;
-    
+    workspace.className = `theme-${universalUIModel.Theme}`;
     canvas.style.width = `${universalUIModel.Width}px`;
     canvas.style.height = `${universalUIModel.Height}px`;
-    canvas.setAttribute('data-title', universalUIModel.Title);
     
-    let canvasInnerHtml = `
-        <div class="window-controls">
-            <button class="win-btn" title="Minimize">_</button>
-            <button class="win-btn" title="Maximize">□</button>
-            <button class="win-btn" title="Close">×</button>
-        </div>
-        <div id="canvas-resize-handle" onmousedown="initResizeCanvas(event)"></div>`;
+    let canvasInnerHtml = '';
+
+    // Real HTML Title Bar
+    if (universalUIModel.ShowControlBox) {
+        let controlsHtml = `
+            <div class="window-controls">
+                <button class="win-btn" title="Minimize">_</button>
+                <button class="win-btn" title="Maximize">□</button>
+                <button class="win-btn" title="Close">×</button>
+            </div>`;
+        if (universalUIModel.Theme === 'html') {
+            controlsHtml = `
+            <div class="window-controls">
+                <button class="win-btn" title="Minimize">&#x2212;</button>
+                <button class="win-btn" title="Maximize">&#x25A2;</button>
+                <button class="win-btn" title="Close">&#x2715;</button>
+            </div>`;
+        }
+        canvasInnerHtml += `
+            <div class="window-titlebar">
+                <span class="window-title-text">${universalUIModel.Title}</span>
+                ${controlsHtml}
+            </div>`;
+    }
 
     if (universalUIModel.ShowGlobalMenu && universalUIModel.GlobalMenu) {
         canvasInnerHtml += `<div class="menu-bar">` + renderInteractiveMenu(universalUIModel.GlobalMenu) + `</div>`;
     }
 
+    canvasInnerHtml += `<div id="canvas-resize-se" onmousedown="initResizeCanvas(event)"></div>`;
     canvas.innerHTML = canvasInnerHtml;
 
     universalUIModel.Children.forEach((control, index) => {
@@ -164,12 +176,15 @@ function renderSimulator() {
             tabsArr.forEach((t, ti) => {
                 tabsHtml += `<div class="tabcontrol-tab ${ti === control.ActiveTabIdx ? 'active' : ''}" onclick="switchControlTab(${index}, ${ti}); event.stopPropagation();">${t}</div>`;
             });
-            tabsHtml += `</div><div class="tabcontrol-content" style="padding-bottom:20px;">Tab View: <strong>${tabsArr[control.ActiveTabIdx]}</strong></div></div>`;
+            tabsHtml += `</div><div class="tabcontrol-content">Tab View: <strong>${tabsArr[control.ActiveTabIdx]}</strong></div></div>`;
             innerContent = tabsHtml;
         }
 
         if (index === selectedControlIndex) {
-            innerContent += `<div class="resize-handle" onmousedown="initResizeControl(event, ${index})"></div>`;
+            innerContent += `
+                <div class="resize-handle handle-se" onmousedown="initResizeControl(event, ${index}, 'se')"></div>
+                <div class="resize-handle handle-e" onmousedown="initResizeControl(event, ${index}, 'e')"></div>
+                <div class="resize-handle handle-s" onmousedown="initResizeControl(event, ${index}, 's')"></div>`;
         }
 
         el.innerHTML = innerContent;
@@ -217,30 +232,37 @@ window.onclick = function() {
 };
 
 // Mouse Drag and Resize Tracking
-function initResizeControl(e, index) {
+function initResizeControl(e, index, mode) {
     e.stopPropagation();
-    isResizingControl = true;
-    selectedControlIndex = index;
+    resizeMode = 'control-' + mode;
+    activeResizeIndex = index;
     const ctrl = universalUIModel.Children[index];
     resizeStartDims = { w: ctrl.Width, h: ctrl.Height, mouseX: e.clientX, mouseY: e.clientY };
 }
 
 function initResizeCanvas(e) {
     e.stopPropagation();
-    isResizingCanvas = true;
+    resizeMode = 'canvas-se';
     resizeStartDims = { w: universalUIModel.Width, h: universalUIModel.Height, mouseX: e.clientX, mouseY: e.clientY };
 }
 
 document.onmousemove = (e) => {
-    if (isResizingControl && selectedControlIndex !== null) {
-        const ctrl = universalUIModel.Children[selectedControlIndex];
-        ctrl.Width = Math.max(40, resizeStartDims.w + (e.clientX - resizeStartDims.mouseX));
-        ctrl.Height = Math.max(20, resizeStartDims.h + (e.clientY - resizeStartDims.mouseY));
+    if (resizeMode && resizeMode.startsWith('control-') && activeResizeIndex !== null) {
+        const ctrl = universalUIModel.Children[activeResizeIndex];
+        const dx = e.clientX - resizeStartDims.mouseX;
+        const dy = e.clientY - resizeStartDims.mouseY;
+        
+        if (resizeMode === 'control-se' || resizeMode === 'control-e') {
+            ctrl.Width = Math.max(40, resizeStartDims.w + dx);
+        }
+        if (resizeMode === 'control-se' || resizeMode === 'control-s') {
+            ctrl.Height = Math.max(20, resizeStartDims.h + dy);
+        }
         renderSimulator();
         return;
     }
 
-    if (isResizingCanvas) {
+    if (resizeMode === 'canvas-se') {
         universalUIModel.Width = Math.max(300, resizeStartDims.w + (e.clientX - resizeStartDims.mouseX));
         universalUIModel.Height = Math.max(200, resizeStartDims.h + (e.clientY - resizeStartDims.mouseY));
         renderSimulator();
@@ -269,8 +291,8 @@ document.onmousemove = (e) => {
 
 document.onmouseup = () => {
     isDragging = false;
-    isResizingControl = false;
-    isResizingCanvas = false;
+    resizeMode = null;
+    activeResizeIndex = null;
     renderSidebar();
 };
 
@@ -300,6 +322,7 @@ function resizeControl(dw, dh) {
     }
 }
 
+// --- PROPERTIES PANEL (SILENT BINDING TO PREVENT FOCUS LOSS) ---
 function renderSidebar() {
     const propsContent = document.getElementById('props-content');
     if (activeSidebarTab === 'code') {
@@ -312,11 +335,11 @@ function renderSidebar() {
             <div style="padding: 10px 15px; background: #333; color: #4af626; font-size: 0.9em; text-transform: uppercase;">Form Properties</div>
             <div class="prop-group">
                 <label>Window Title</label>
-                <input type="text" value="${universalUIModel.Title}" oninput="updateFormProperty('Title', this.value)">
+                <input type="text" id="form-title-input" value="${universalUIModel.Title}" oninput="universalUIModel.Title = this.value; renderSimulator();">
             </div>
             <div class="prop-group">
                 <label>Rendering Theme (Output Type)</label>
-                <select onchange="updateFormProperty('Theme', this.value)">
+                <select onchange="universalUIModel.Theme = this.value; renderSimulator();">
                     <option value="winforms" ${universalUIModel.Theme === 'winforms' ? 'selected' : ''}>PowerShell WinForms</option>
                     <option value="wpf" ${universalUIModel.Theme === 'wpf' ? 'selected' : ''}>PowerShell WPF</option>
                     <option value="html" ${universalUIModel.Theme === 'html' ? 'selected' : ''}>HTML / Web Form</option>
@@ -325,13 +348,13 @@ function renderSidebar() {
             <div class="prop-group">
                 <label>Window Dimensions (Width x Height)</label>
                 <div style="display:flex; gap:5px;">
-                    <input type="number" value="${universalUIModel.Width}" oninput="updateFormProperty('Width', parseInt(this.value)||400)">
-                    <input type="number" value="${universalUIModel.Height}" oninput="updateFormProperty('Height', parseInt(this.value)||300)">
+                    <input type="number" value="${universalUIModel.Width}" oninput="universalUIModel.Width = parseInt(this.value)||400; renderSimulator();">
+                    <input type="number" value="${universalUIModel.Height}" oninput="universalUIModel.Height = parseInt(this.value)||300; renderSimulator();">
                 </div>
             </div>
             <div class="prop-group">
                 <label>Startup Position</label>
-                <select onchange="updateFormProperty('StartPosition', this.value)">
+                <select onchange="universalUIModel.StartPosition = this.value;">
                     <option value="CenterScreen" ${universalUIModel.StartPosition === 'CenterScreen' ? 'selected' : ''}>Center Screen</option>
                     <option value="Manual" ${universalUIModel.StartPosition === 'Manual' ? 'selected' : ''}>Manual (Default)</option>
                     <option value="WindowsDefaultLocation" ${universalUIModel.StartPosition === 'WindowsDefaultLocation' ? 'selected' : ''}>Windows Default</option>
@@ -339,7 +362,7 @@ function renderSidebar() {
             </div>
             <div class="prop-group">
                 <label>Border Style / Resizability</label>
-                <select onchange="updateFormProperty('FormBorderStyle', this.value)">
+                <select onchange="universalUIModel.FormBorderStyle = this.value;">
                     <option value="Sizable" ${universalUIModel.FormBorderStyle === 'Sizable' ? 'selected' : ''}>Sizable (Resizable)</option>
                     <option value="FixedSingle" ${universalUIModel.FormBorderStyle === 'FixedSingle' ? 'selected' : ''}>Fixed Single (Non-Resizable)</option>
                     <option value="None" ${universalUIModel.FormBorderStyle === 'None' ? 'selected' : ''}>None</option>
@@ -347,23 +370,23 @@ function renderSidebar() {
             </div>
             <div class="prop-group">
                 <label>Global Top Menu Bar Items (e.g. File (Open, Save, Exit), Edit, Help)</label>
-                <input type="text" value="${universalUIModel.GlobalMenu}" oninput="updateFormProperty('GlobalMenu', this.value)">
+                <input type="text" value="${universalUIModel.GlobalMenu}" oninput="universalUIModel.GlobalMenu = this.value; renderSimulator();">
             </div>
             <div class="prop-group">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                    <input type="checkbox" ${universalUIModel.ShowGlobalMenu ? 'checked' : ''} onchange="updateFormProperty('ShowGlobalMenu', this.checked)" style="width:auto;"> 
+                    <input type="checkbox" ${universalUIModel.ShowGlobalMenu ? 'checked' : ''} onchange="universalUIModel.ShowGlobalMenu = this.checked; renderSimulator();" style="width:auto;"> 
                     Show Global Top Menu Bar
                 </label>
             </div>
             <div class="prop-group">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                    <input type="checkbox" ${universalUIModel.TopMost ? 'checked' : ''} onchange="updateFormProperty('TopMost', this.checked)" style="width:auto;"> 
+                    <input type="checkbox" ${universalUIModel.TopMost ? 'checked' : ''} onchange="universalUIModel.TopMost = this.checked;" style="width:auto;"> 
                     TopMost (Always on Top)
                 </label>
             </div>
             <div class="prop-group">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                    <input type="checkbox" ${universalUIModel.ShowControlBox ? 'checked' : ''} onchange="updateFormProperty('ShowControlBox', this.checked)" style="width:auto;"> 
+                    <input type="checkbox" ${universalUIModel.ShowControlBox ? 'checked' : ''} onchange="universalUIModel.ShowControlBox = this.checked; renderSimulator();" style="width:auto;"> 
                     Show Window Title Bar & Buttons
                 </label>
             </div>
@@ -381,17 +404,17 @@ function renderSidebar() {
         </div>
         <div class="prop-group">
             <label>Name (ID)</label>
-            <input type="text" value="${control.Name}" oninput="updateControlProperty('Name', this.value)">
+            <input type="text" value="${control.Name}" oninput="control.Name = this.value;">
         </div>
         <div class="prop-group">
             <label>Text / Label</label>
-            <input type="text" value="${control.Text}" oninput="updateControlProperty('Text', this.value)">
+            <input type="text" value="${control.Text}" oninput="control.Text = this.value; renderSimulator();">
         </div>
         <div class="prop-group">
             <label>Size (Width x Height)</label>
             <div style="display:flex; gap:5px;">
-                <input type="number" value="${control.Width}" oninput="updateControlDimension('Width', this.value)">
-                <input type="number" value="${control.Height}" oninput="updateControlDimension('Height', this.value)">
+                <input type="number" value="${control.Width}" oninput="control.Width = Math.max(20, parseInt(this.value)||50); renderSimulator();">
+                <input type="number" value="${control.Height}" oninput="control.Height = Math.max(20, parseInt(this.value)||30); renderSimulator();">
             </div>
             <div style="display:flex; gap:4px; margin-top:5px;">
                 <button class="nudge-btn" onclick="resizeControl(-10, 0)">Width -10</button>
@@ -428,19 +451,19 @@ function renderSidebar() {
         </div>
         <div class="prop-group">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                <input type="checkbox" ${control.Interactive ? 'checked' : ''} onchange="toggleInteractive(${selectedControlIndex}, this.checked)" style="width:auto;"> 
+                <input type="checkbox" ${control.Interactive ? 'checked' : ''} onchange="control.Interactive = this.checked; renderSimulator();" style="width:auto;"> 
                 Interact Mode (Test Control)
             </label>
         </div>
         ${control.Type === 'Dropdown' || control.Type === 'MenuBar' || control.Type === 'TabControl' ? `
         <div class="prop-group">
             <label>Items / Tabs / Submenus (Comma separated)</label>
-            <input type="text" value="${control.Options || ''}" oninput="updateControlProperty('Options', this.value)">
+            <input type="text" value="${control.Options || ''}" oninput="control.Options = this.value; renderSimulator();">
         </div>` : ''}
         ${control.Type === 'Button' ? `
         <div class="prop-group">
             <label>OnClick Action (PowerShell script)</label>
-            <textarea oninput="updateControlProperty('Action', this.value)">${control.Action}</textarea>
+            <textarea oninput="control.Action = this.value;">${control.Action}</textarea>
         </div>` : ''}
         <div class="prop-group" style="border-bottom: none;">
             <button class="tool-btn danger-btn" onclick="deleteSelectedControl()">🗑️ Delete Element</button>
@@ -500,14 +523,16 @@ function generatePowerShellWinFormsCode() {
             part = part.trim();
             const subMatch = part.match(/(.*?)\((.*?)\)/);
             if (subMatch) {
-                let pName = subMatch[1].trim().replace(/[^a-zA-Z0-9]/g, '');
+                let parentText = subMatch[1].trim();
+                let pName = parentText.replace(/[^a-zA-Z0-9]/g, '');
                 code += `$m_${pName} = New-Object System.Windows.Forms.MenuItem\n`;
-                code += `$m_${pName}.Text = '${subMatch[1].trim()}'\n`;
+                code += `$m_${pName}.Text = '${parentText}'\n`;
                 subMatch[2].split(',').forEach(sub => {
-                    let sName = sub.trim().replace(/[^a-zA-Z0-9]/g, '');
+                    let subText = sub.trim();
+                    let sName = subText.replace(/[^a-zA-Z0-9]/g, '');
                     code += `$sub_${sName} = New-Object System.Windows.Forms.MenuItem\n`;
-                    code += `$sub_${sName}.Text = '${sub.trim()}'\n`;
-                    code += `$sub_${sName}.Add_Click({ Write-Host "Clicked ${sub.trim()}" })\n`;
+                    code += `$sub_${sName}.Text = '${subText}'\n`;
+                    code += `$sub_${sName}.Add_Click({ Write-Host "Clicked ${subText}" })\n`;
                     code += `$m_${pName}.MenuItems.Add($sub_${sName}) | Out-Null\n`;
                 });
                 code += `$mainMenu.MenuItems.Add($m_${pName}) | Out-Null\n\n`;
@@ -611,32 +636,6 @@ function generateHTMLCode() {
     });
     html += `</body>\n</html>`;
     return html;
-}
-
-function updateFormProperty(property, value) {
-    universalUIModel[property] = value;
-    renderSimulator();
-}
-
-function updateControlProperty(property, value) {
-    if (selectedControlIndex !== null) {
-        universalUIModel.Children[selectedControlIndex][property] = value;
-        if (property === 'Text' || property === 'Options') {
-            renderSimulator();
-        }
-    }
-}
-
-function updateControlDimension(dimension, value) {
-    if (selectedControlIndex !== null) {
-        universalUIModel.Children[selectedControlIndex][dimension] = Math.max(20, parseInt(value) || 50);
-        renderSimulator();
-    }
-}
-
-function toggleInteractive(index, isChecked) {
-    universalUIModel.Children[index].Interactive = isChecked;
-    renderSimulator();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
