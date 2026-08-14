@@ -1,16 +1,12 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
-    Initial page for the GUI Designer. Lays out the app shell (toolbar with
-    format switcher / Show Code / About, toolbox of draggable controls,
-    the design canvas/form, and the properties pane), plus the Show Code
-    and About modals. Structure and interaction logic live in engine.js;
-    visual theme lives in styles.css. This page is the first of what will
-    become a small multi-page HTML front end, hence engine.js/styles.css
-    being factored out as shared files from the start.
-
+    Revision: WinForms is now the default/first entry in the format
+    switcher and Show Code tabs (was HTML). Title bar now renders real
+    min/max/close buttons via a dedicated container instead of a static
+    decorative dot.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -19,7 +15,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="styles.css">
-<script>window.PAGE_VERSION = '1.0';</script>
+<script>window.PAGE_VERSION = '1.1';</script>
 </head>
 <body>
 
@@ -33,8 +29,8 @@
     </div>
     <div class="toolbar-divider"></div>
     <div class="format-switch" id="formatSwitch">
-      <button data-format="html" class="active">HTML</button>
-      <button data-format="winforms">WinForms</button>
+      <button data-format="winforms" class="active">WinForms</button>
+      <button data-format="html">HTML</button>
       <button data-format="wpf">WPF</button>
       <button data-format="winui">WinUI</button>
     </div>
@@ -54,8 +50,9 @@
   <div class="canvas-area">
     <div class="design-form" id="designForm">
       <div class="design-form-titlebar">
-        <span class="dot"></span>
         <span id="formTitleText">MyForm</span>
+        <span class="toolbar-spacer"></span>
+        <span class="title-buttons" id="formTitleButtons"></span>
       </div>
       <div class="design-surface" id="designSurface"></div>
     </div>
@@ -87,8 +84,8 @@
     </div>
     <div class="modal-body">
       <div class="code-tabs">
-        <button data-tab="html" class="active">HTML</button>
-        <button data-tab="winforms">WinForms (PowerShell)</button>
+        <button data-tab="winforms" class="active">WinForms (PowerShell)</button>
+        <button data-tab="html">HTML</button>
         <button data-tab="wpf">WPF (XAML)</button>
         <button data-tab="winui">WinUI (scaffold)</button>
       </div>
