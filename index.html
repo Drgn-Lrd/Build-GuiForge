@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="file-version" id="html-version" content="1.2">
     <title>Build-GuiForge</title>
     <link rel="stylesheet" href="css/winforms.css">
     <style>
@@ -16,12 +17,13 @@
         
         #properties-panel { width: 300px; background: #252526; border-left: 1px solid #333; display: flex; flex-direction: column; }
         #props-header { padding: 15px; background: #1e1e1e; border-bottom: 1px solid #333; font-weight: bold; }
+        #props-content { flex: 1; overflow-y: auto; }
         .prop-group { padding: 10px 15px; border-bottom: 1px solid #333; display: flex; flex-direction: column; gap: 5px; }
         .prop-group label { font-size: 0.85em; color: #aaa; }
         .prop-group input, .prop-group textarea { width: 100%; padding: 5px; background: #1e1e1e; border: 1px solid #555; color: white; box-sizing: border-box; }
         .prop-group textarea { resize: vertical; min-height: 80px; font-family: Consolas, monospace; }
         
-        .canvas-element { cursor: pointer; }
+        .canvas-element { cursor: pointer; margin-bottom: 5px; }
         .canvas-element:hover { outline: 1px dashed #0078d4; }
         .selected-element { outline: 2px solid #0078d4 !important; }
 
