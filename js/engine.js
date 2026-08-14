@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.11";
+const ENGINE_JS_VERSION = "1.12";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -19,7 +19,10 @@ let universalUIModel = {
 let selectedControlIndex = null;
 let activeSidebarTab = 'properties'; 
 let isDragging = false;
+let isResizingControl = false;
+let isResizingCanvas = false;
 let dragOffset = { x: 0, y: 0 };
+let resizeStartDims = { w: 0, h: 0, mouseX: 0, mouseY: 0 };
 
 // --- SETTINGS MODAL LOGIC ---
 function openSettings() {
@@ -61,7 +64,7 @@ function addControl(type) {
         Width: type === 'TabControl' ? 450 : 160,
         Height: type === 'TabControl' ? 280 : (type === 'TextBox' || type === 'Dropdown' ? 24 : 30),
         Interactive: false,
-        ActiveTabIdx: 0, // For TabControls
+        ActiveTabIdx: 0,
         Options: type === 'Dropdown' || type === 'MenuBar' || type === 'TabControl' ? 'Item 1, Item 2' : undefined,
         Action: type === 'Button' ? '# Enter PowerShell code here...\nWrite-Host "Clicked!"' : ''
     };
@@ -106,7 +109,8 @@ function renderSimulator() {
             <button class="win-btn" title="Minimize">_</button>
             <button class="win-btn" title="Maximize">□</button>
             <button class="win-btn" title="Close">×</button>
-        </div>`;
+        </div>
+        <div id="canvas-resize-handle" onmousedown="initResizeCanvas(event)"></div>`;
 
     if (universalUIModel.ShowGlobalMenu && universalUIModel.GlobalMenu) {
         canvasInnerHtml += `<div class="menu-bar">` + renderInteractiveMenu(universalUIModel.GlobalMenu) + `</div>`;
@@ -136,21 +140,22 @@ function renderSimulator() {
             dragOffset.y = (e.clientY - canvasRect.top) - control.Y;
         };
 
+        let innerContent = '';
         if (control.Type === "Button") {
-            el.innerHTML = `<button type="button" style="width:100%; height:100%;">${control.Text}</button>`;
+            innerContent = `<button type="button" style="width:100%; height:100%;">${control.Text}</button>`;
         } else if (control.Type === "TextBox") {
-            el.innerHTML = `<input type="text" style="width:100%; height:100%;" value="${control.Text}">`;
+            innerContent = `<input type="text" style="width:100%; height:100%;" value="${control.Text}">`;
         } else if (control.Type === "Label") {
-            el.innerHTML = `<label style="width:100%; height:100%; display:inline-block;">${control.Text}</label>`;
+            innerContent = `<label style="width:100%; height:100%; display:inline-block;">${control.Text}</label>`;
         } else if (control.Type === "CheckBox") {
-            el.innerHTML = `<div style="display:flex; align-items:center; width:100%; height:100%;"><input type="checkbox"> <label>${control.Text}</label></div>`;
+            innerContent = `<div style="display:flex; align-items:center; width:100%; height:100%;"><input type="checkbox"> <label>${control.Text}</label></div>`;
         } else if (control.Type === "RadioButton") {
-            el.innerHTML = `<div style="display:flex; align-items:center; width:100%; height:100%;"><input type="radio" name="group_main"> <label>${control.Text}</label></div>`;
+            innerContent = `<div style="display:flex; align-items:center; width:100%; height:100%;"><input type="radio" name="group_main"> <label>${control.Text}</label></div>`;
         } else if (control.Type === "Dropdown") {
             const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}</option>`).join('');
-            el.innerHTML = `<select style="width:100%; height:100%;">${optionsHtml}</select>`;
+            innerContent = `<select style="width:100%; height:100%;">${optionsHtml}</select>`;
         } else if (control.Type === "MenuBar") {
-            el.innerHTML = `<div class="menu-bar" style="width:100%; height:100%;">` + renderInteractiveMenu(control.Options || control.Text) + `</div>`;
+            innerContent = `<div class="menu-bar" style="width:100%; height:100%;">` + renderInteractiveMenu(control.Options || control.Text) + `</div>`;
         } else if (control.Type === "TabControl") {
             const tabsArr = (control.Options || 'Tab 1, Tab 2').split(',').map(t => t.trim());
             if (control.ActiveTabIdx >= tabsArr.length) control.ActiveTabIdx = 0;
@@ -159,10 +164,15 @@ function renderSimulator() {
             tabsArr.forEach((t, ti) => {
                 tabsHtml += `<div class="tabcontrol-tab ${ti === control.ActiveTabIdx ? 'active' : ''}" onclick="switchControlTab(${index}, ${ti}); event.stopPropagation();">${t}</div>`;
             });
-            tabsHtml += `</div><div class="tabcontrol-content" style="padding-bottom:30px;">Active Tab: <strong>${tabsArr[control.ActiveTabIdx]}</strong></div></div>`;
-            el.innerHTML = tabsHtml;
+            tabsHtml += `</div><div class="tabcontrol-content" style="padding-bottom:20px;">Tab View: <strong>${tabsArr[control.ActiveTabIdx]}</strong></div></div>`;
+            innerContent = tabsHtml;
         }
-        
+
+        if (index === selectedControlIndex) {
+            innerContent += `<div class="resize-handle" onmousedown="initResizeControl(event, ${index})"></div>`;
+        }
+
+        el.innerHTML = innerContent;
         canvas.appendChild(el);
     });
 
@@ -206,7 +216,37 @@ window.onclick = function() {
     document.querySelectorAll('.menu-item-wrapper').forEach(el => el.classList.remove('active'));
 };
 
+// Mouse Drag and Resize Tracking
+function initResizeControl(e, index) {
+    e.stopPropagation();
+    isResizingControl = true;
+    selectedControlIndex = index;
+    const ctrl = universalUIModel.Children[index];
+    resizeStartDims = { w: ctrl.Width, h: ctrl.Height, mouseX: e.clientX, mouseY: e.clientY };
+}
+
+function initResizeCanvas(e) {
+    e.stopPropagation();
+    isResizingCanvas = true;
+    resizeStartDims = { w: universalUIModel.Width, h: universalUIModel.Height, mouseX: e.clientX, mouseY: e.clientY };
+}
+
 document.onmousemove = (e) => {
+    if (isResizingControl && selectedControlIndex !== null) {
+        const ctrl = universalUIModel.Children[selectedControlIndex];
+        ctrl.Width = Math.max(40, resizeStartDims.w + (e.clientX - resizeStartDims.mouseX));
+        ctrl.Height = Math.max(20, resizeStartDims.h + (e.clientY - resizeStartDims.mouseY));
+        renderSimulator();
+        return;
+    }
+
+    if (isResizingCanvas) {
+        universalUIModel.Width = Math.max(300, resizeStartDims.w + (e.clientX - resizeStartDims.mouseX));
+        universalUIModel.Height = Math.max(200, resizeStartDims.h + (e.clientY - resizeStartDims.mouseY));
+        renderSimulator();
+        return;
+    }
+
     if (!isDragging || selectedControlIndex === null) return;
     const canvas = document.getElementById('live-preview-canvas');
     const canvasRect = canvas.getBoundingClientRect();
@@ -229,6 +269,9 @@ document.onmousemove = (e) => {
 
 document.onmouseup = () => {
     isDragging = false;
+    isResizingControl = false;
+    isResizingCanvas = false;
+    renderSidebar();
 };
 
 function nudgeControl(dx, dy) {
@@ -406,7 +449,7 @@ function renderSidebar() {
 }
 
 // --- CODE EXPORTER GENERATOR ---
-let wpfExportMode = 'single'; // 'single' or 'xaml'
+let wpfExportMode = 'single';
 
 function renderCodeExporter() {
     const propsContent = document.getElementById('props-content');
@@ -457,20 +500,23 @@ function generatePowerShellWinFormsCode() {
             part = part.trim();
             const subMatch = part.match(/(.*?)\((.*?)\)/);
             if (subMatch) {
-                code += `$m_${subMatch[1].trim()} = New-Object System.Windows.Forms.MenuItem\n`;
-                code += `$m_${subMatch[1].trim()}.Text = '${subMatch[1].trim()}'\n`;
+                let pName = subMatch[1].trim().replace(/[^a-zA-Z0-9]/g, '');
+                code += `$m_${pName} = New-Object System.Windows.Forms.MenuItem\n`;
+                code += `$m_${pName}.Text = '${subMatch[1].trim()}'\n`;
                 subMatch[2].split(',').forEach(sub => {
-                    code += `$sub_${sub.trim()} = New-Object System.Windows.Forms.MenuItem\n`;
-                    code += `$sub_${sub.trim()}.Text = '${sub.trim()}'\n`;
-                    code += `$sub_${sub.trim()}.Add_Click({ Write-Host "Clicked ${sub.trim()}" })\n`;
-                    code += `$m_${subMatch[1].trim()}.MenuItems.Add($sub_${sub.trim()}) | Out-Null\n`;
+                    let sName = sub.trim().replace(/[^a-zA-Z0-9]/g, '');
+                    code += `$sub_${sName} = New-Object System.Windows.Forms.MenuItem\n`;
+                    code += `$sub_${sName}.Text = '${sub.trim()}'\n`;
+                    code += `$sub_${sName}.Add_Click({ Write-Host "Clicked ${sub.trim()}" })\n`;
+                    code += `$m_${pName}.MenuItems.Add($sub_${sName}) | Out-Null\n`;
                 });
-                code += `$mainMenu.MenuItems.Add($m_${subMatch[1].trim()}) | Out-Null\n\n`;
+                code += `$mainMenu.MenuItems.Add($m_${pName}) | Out-Null\n\n`;
             } else {
-                code += `$m_${part} = New-Object System.Windows.Forms.MenuItem\n`;
-                code += `$m_${part}.Text = '${part}'\n`;
-                code += `$m_${part}.Add_Click({ Write-Host "Clicked ${part}" })\n`;
-                code += `$mainMenu.MenuItems.Add($m_${part}) | Out-Null\n\n`;
+                let mName = part.replace(/[^a-zA-Z0-9]/g, '');
+                code += `$m_${mName} = New-Object System.Windows.Forms.MenuItem\n`;
+                code += `$m_${mName}.Text = '${part}'\n`;
+                code += `$m_${mName}.Add_Click({ Write-Host "Clicked ${part}" })\n`;
+                code += `$mainMenu.MenuItems.Add($m_${mName}) | Out-Null\n\n`;
             }
         });
         code += `$form.Menu = $mainMenu\n\n`;
@@ -526,15 +572,30 @@ function generatePowerShellWinFormsCode() {
 }
 
 function generatePowerShellWPFCode() {
+    let xamlChildren = '';
+    universalUIModel.Children.forEach(c => {
+        if (c.Type === 'Button') {
+            xamlChildren += `        <Button Content="${c.Text}" Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}" />\n`;
+        } else if (c.Type === 'TextBox') {
+            xamlChildren += `        <TextBox Text="${c.Text}" Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}" />\n`;
+        } else if (c.Type === 'Label') {
+            xamlChildren += `        <Label Content="${c.Text}" Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}" />\n`;
+        } else if (c.Type === 'CheckBox') {
+            xamlChildren += `        <CheckBox Content="${c.Text}" Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}" />\n`;
+        } else if (c.Type === 'RadioButton') {
+            xamlChildren += `        <RadioButton Content="${c.Text}" Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}" />\n`;
+        }
+    });
+
     if (wpfExportMode === 'xaml') {
-        return `[xml]$xaml = Get-Content "$PSScriptRoot/form.xaml"\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n$form.ShowDialog()`;
+        return `# --- form.xaml ---\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n\n# --- run.ps1 ---\n[xml]$xaml = Get-Content "$PSScriptRoot/form.xaml"\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
     } else {
-        return `# Single Script WPF Implementation\n[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')\n[xml]$xaml = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n    </Canvas>\n</Window>\n"@\n$reader=(New-Object System.Xml.XmlNodeReader $xaml)\n$form=[Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
+        return `[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')\n[xml]$xaml = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n"@\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
     }
 }
 
 function generateHTMLCode() {
-    let html = `<!DOCTYPE html>\n<html>\n<head>\n    <title>${universalUIModel.Title}</title>\n    <style>body { font-family: sans-serif; }</style>\n</head>\n<body>\n`;
+    let html = `<!DOCTYPE html>\n<html>\n<head>\n    <title>${universalUIModel.Title}</title>\n    <style>body { font-family: sans-serif; position: relative; width: ${universalUIModel.Width}px; height: ${universalUIModel.Height}px; }</style>\n</head>\n<body>\n`;
     universalUIModel.Children.forEach(c => {
         if (c.Type === 'Button') {
             html += `    <button style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${c.Text}</button>\n`;
@@ -542,6 +603,10 @@ function generateHTMLCode() {
             html += `    <input type="text" value="${c.Text}" style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;" />\n`;
         } else if (c.Type === 'Label') {
             html += `    <label style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${c.Text}</label>\n`;
+        } else if (c.Type === 'CheckBox') {
+            html += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;"><input type="checkbox"/> <label>${c.Text}</label></div>\n`;
+        } else if (c.Type === 'RadioButton') {
+            html += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;"><input type="radio"/> <label>${c.Text}</label></div>\n`;
         }
     });
     html += `</body>\n</html>`;
