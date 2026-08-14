@@ -1,8 +1,8 @@
 :root {
-    --themes-css-version: "1.10";
+    --themes-css-version: "1.12";
 }
 
-#workspace { padding-top: 50px !important; }
+#workspace { padding-top: 50px !important; padding-bottom: 50px !important; }
 
 /* ==========================================
    THEME: WINFORMS
@@ -56,37 +56,6 @@
     color: #000;
 }
 
-.theme-winforms input[type="text"], .theme-winforms select {
-    background: #FFFFFF;
-    border-top: 1px solid #8E8F8F;
-    border-left: 1px solid #8E8F8F;
-    border-right: 1px solid #FFFFFF;
-    border-bottom: 1px solid #FFFFFF;
-    box-shadow: inset 1px 1px 0 #000000;
-    padding: 2px 4px;
-    height: 22px;
-    font-family: inherit;
-    font-size: inherit;
-    box-sizing: border-box;
-    width: 100%;
-}
-
-.theme-winforms label { display: inline-block; }
-.theme-winforms input[type="checkbox"], .theme-winforms input[type="radio"] { margin-right: 5px; }
-
-.theme-winforms .menu-bar {
-    background: #F0F0F0;
-    border-bottom: 1px solid #ACA899;
-    display: flex;
-    padding: 2px 5px;
-    gap: 10px;
-    font-size: 8.5pt;
-    width: 100%;
-    box-sizing: border-box;
-    position: relative;
-    z-index: 25;
-}
-
 /* ==========================================
    THEME: WPF
 ========================================== */
@@ -136,38 +105,6 @@
     color: #333;
 }
 .theme-wpf .win-btn:hover { background: #E5E5E5; }
-
-.theme-wpf input[type="text"], .theme-wpf select {
-    background: #FFFFFF;
-    border: 1px solid #CCCCCC;
-    padding: 5px;
-    font-family: inherit;
-    font-size: inherit;
-    box-sizing: border-box;
-    width: 100%;
-}
-
-.theme-wpf button { background: #DDDDDD; border: 1px solid #707070; padding: 5px 15px; width: 100%; cursor: pointer; }
-.theme-wpf input[type="checkbox"], .theme-wpf input[type="radio"] { margin-right: 8px; }
-
-.theme-wpf .menu-bar {
-    background: #F5F5F5;
-    border-bottom: 1px solid #E0E0E0;
-    display: flex;
-    padding: 4px 10px;
-    gap: 15px;
-    font-size: 9pt;
-    width: 100%;
-    box-sizing: border-box;
-    position: relative;
-    z-index: 25;
-}
-
-.theme-wpf .menu-dropdown-item {
-    cursor: pointer;
-    padding: 2px 8px;
-}
-.theme-wpf .menu-dropdown-item:hover { background: #E5E5E5; }
 
 /* ==========================================
    THEME: HTML
@@ -220,43 +157,31 @@
     color: #5F6368;
 }
 
-.theme-html input[type="text"], .theme-html select {
+/* Base Form Control Styles */
+input[type="text"], select {
     background: #FFFFFF;
-    border: 1px solid #CED4DA;
-    border-radius: 4px;
-    padding: 6px 10px;
-    font-family: inherit;
-    font-size: inherit;
+    border: 1px solid #8E8F8F;
+    padding: 2px 4px;
     box-sizing: border-box;
     width: 100%;
 }
 
-.theme-html button {
-    background: #0D6EFD;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    padding: 6px 12px;
-    font-weight: 500;
-    width: 100%;
-    cursor: pointer;
-}
-.theme-html input[type="checkbox"], .theme-html input[type="radio"] { margin-right: 10px; }
+button { width: 100%; cursor: pointer; }
 
-.theme-html .menu-bar {
-    background: #F8F9FA;
-    border-bottom: 1px solid #DEE1E6;
+/* Interactive Menus */
+.menu-bar {
     display: flex;
-    padding: 8px 15px;
-    gap: 20px;
-    font-size: 14px;
+    padding: 2px 5px;
+    gap: 10px;
+    font-size: 8.5pt;
     width: 100%;
     box-sizing: border-box;
     position: relative;
     z-index: 25;
+    background: inherit;
+    border-bottom: 1px solid rgba(0,0,0,0.15);
 }
 
-/* Interactive Dropdown Menu Styling */
 .menu-item-wrapper { position: relative; display: inline-block; }
 .menu-label { cursor: pointer; padding: 2px 6px; border-radius: 3px; }
 .menu-label:hover { background: rgba(0,0,0,0.1); }
@@ -265,9 +190,29 @@
 .menu-dropdown-content div:hover { background-color: #0078d4; color: white; }
 .menu-item-wrapper.active .menu-dropdown-content { display: block; }
 
-/* TabControl UI Styling */
-.tabcontrol-wrapper { display: flex; flex-direction: column; width: 100%; height: 100%; border: 1px solid #ccc; background: #fff; box-sizing: border-box; }
-.tabcontrol-headers { display: flex; background: #e0e0e0; border-bottom: 1px solid #ccc; }
-.tabcontrol-tab { padding: 5px 12px; font-size: 0.85em; cursor: pointer; border-right: 1px solid #ccc; background: #f0f0f0; }
-.tabcontrol-tab.active { background: #fff; font-weight: bold; border-bottom: 1px solid #fff; margin-bottom: -1px; }
-.tabcontrol-content { flex: 1; padding: 10px; position: relative; }
+/* Canvas Resizing Handles */
+.canvas-element { position: absolute; cursor: move; box-sizing: border-box; }
+.canvas-element:hover { outline: 1px dashed #0078d4; }
+.selected-element { outline: 2px solid #0078d4 !important; z-index: 5; }
+
+.resize-handle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 12px;
+    height: 12px;
+    cursor: nwse-resize;
+    background: #0078d4;
+    z-index: 10;
+}
+
+#canvas-resize-handle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    background: #555;
+    z-index: 30;
+}
