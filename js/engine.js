@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.9";
+const ENGINE_JS_VERSION = "1.10";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -16,6 +16,7 @@ let universalUIModel = {
 };
 
 let selectedControlIndex = null;
+let activeSidebarTab = 'properties'; // 'properties' or 'code'
 let isDragging = false;
 let dragOffset = { x: 0, y: 0 };
 
@@ -41,6 +42,14 @@ function closeSettings() {
     document.getElementById('settings-modal').style.display = 'none';
 }
 
+// --- SIDEBAR SWITCHING ---
+function switchSidebarTab(tabName) {
+    activeSidebarTab = tabName;
+    document.getElementById('btn-tab-props').style.background = tabName === 'properties' ? '#333' : '#252526';
+    document.getElementById('btn-tab-code').style.background = tabName === 'code' ? '#333' : '#252526';
+    renderSidebar();
+}
+
 // --- CORE ENGINE LOGIC ---
 function addControl(type) {
     const newControl = {
@@ -58,13 +67,14 @@ function addControl(type) {
     
     universalUIModel.Children.push(newControl);
     renderSimulator();
+    renderSidebar();
     selectControl(universalUIModel.Children.length - 1);
 }
 
 function selectControl(index) {
     selectedControlIndex = index;
     renderSimulator();
-    renderPropertiesPanel();
+    renderSidebar();
 }
 
 function deleteSelectedControl() {
@@ -72,7 +82,7 @@ function deleteSelectedControl() {
         universalUIModel.Children.splice(selectedControlIndex, 1);
         selectedControlIndex = null;
         renderSimulator();
-        renderPropertiesPanel();
+        renderSidebar();
     }
 }
 
@@ -98,7 +108,7 @@ function renderSimulator() {
         </div>`;
 
     if (universalUIModel.GlobalMenu) {
-        canvasInnerHtml += `<div class="menu-bar">` + parseMenuStructure(universalUIModel.GlobalMenu) + `</div>`;
+        canvasInnerHtml += `<div class="menu-bar">` + renderInteractiveMenu(universalUIModel.GlobalMenu) + `</div>`;
     }
 
     canvas.innerHTML = canvasInnerHtml;
@@ -139,7 +149,7 @@ function renderSimulator() {
             const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}</option>`).join('');
             el.innerHTML = `<select style="width:100%; height:100%;">${optionsHtml}</select>`;
         } else if (control.Type === "MenuBar") {
-            el.innerHTML = `<div class="menu-bar" style="width:100%; height:100%;">` + parseMenuStructure(control.Options || control.Text) + `</div>`;
+            el.innerHTML = `<div class="menu-bar" style="width:100%; height:100%;">` + renderInteractiveMenu(control.Options || control.Text) + `</div>`;
         } else if (control.Type === "TabControl") {
             const tabsArr = (control.Options || 'Tab 1, Tab 2').split(',').map(t => t.trim());
             let tabsHtml = `<div class="tabcontrol-wrapper"><div class="tabcontrol-headers">`;
@@ -157,29 +167,36 @@ function renderSimulator() {
         if (e.target === canvas) {
             selectedControlIndex = null;
             renderSimulator();
-            renderPropertiesPanel();
+            renderSidebar();
         }
     };
 }
 
-// Helper to parse submenus like "File (Open, Save, Exit)"
-function parseMenuStructure(menuString) {
+function renderInteractiveMenu(menuString) {
     if (!menuString) return '';
     let html = '';
-    // Simple parser matching items or parent with parentheses
     const parts = menuString.split(/,(?![^(]*\))/);
     parts.forEach(part => {
         part = part.trim();
         const subMatch = part.match(/(.*?)\((.*?)\)/);
         if (subMatch) {
             const parentName = subMatch[1].trim();
-            html += `<div class="menu-dropdown-item"><strong>${parentName} ▼</strong></div>`;
+            const subItems = subMatch[2].split(',').map(s => `<div onclick="alert('Clicked menu item: ${s.trim()}')">${s.trim()}</div>`).join('');
+            html += `
+                <div class="menu-item-wrapper" onclick="this.classList.toggle('active'); event.stopPropagation();">
+                    <span class="menu-label">${parentName} ▼</span>
+                    <div class="menu-dropdown-content">${subItems}</div>
+                </div>`;
         } else {
-            html += `<div class="menu-dropdown-item">${part}</div>`;
+            html += `<div class="menu-item-wrapper"><span class="menu-label" onclick="alert('Clicked menu item: ${part}')">${part}</span></div>`;
         }
     });
     return html;
 }
+
+window.onclick = function() {
+    document.querySelectorAll('.menu-item-wrapper').forEach(el => el.classList.remove('active'));
+};
 
 document.onmousemove = (e) => {
     if (!isDragging || selectedControlIndex === null) return;
@@ -215,12 +232,16 @@ function nudgeControl(dx, dy) {
         control.Y = Math.max(0, Math.min(control.Y + dy, canvas.clientHeight - 20));
         
         renderSimulator();
-        renderPropertiesPanel();
+        renderSidebar();
     }
 }
 
-function renderPropertiesPanel() {
+function renderSidebar() {
     const propsContent = document.getElementById('props-content');
+    if (activeSidebarTab === 'code') {
+        renderCodeExporter();
+        return;
+    }
     
     if (selectedControlIndex === null) {
         propsContent.innerHTML = `
@@ -351,6 +372,92 @@ function renderPropertiesPanel() {
     `;
 }
 
+function renderCodeExporter() {
+    const propsContent = document.getElementById('props-content');
+    let generatedCode = "";
+
+    if (universalUIModel.Theme === 'winforms') {
+        generatedCode = generatePowerShellWinFormsCode();
+    } else if (universalUIModel.Theme === 'wpf') {
+        generatedCode = generatePowerShellWPFCode();
+    } else {
+        generatedCode = generateHTMLCode();
+    }
+
+    propsContent.innerHTML = `
+        <div style="padding: 10px 15px; background: #333; color: #4af626; font-size: 0.9em; text-transform: uppercase;">Generated Code Exporter</div>
+        <div class="prop-group">
+            <label>Ready-to-use PowerShell Script</label>
+            <textarea readonly style="height: 300px; font-size: 11px;">${generatedCode}</textarea>
+        </div>
+        <div class="prop-group" style="border-bottom: none;">
+            <button class="tool-btn" onclick="navigator.clipboard.writeText(this.previousElementSibling.previousElementSibling.querySelector('textarea').value); alert('Code copied to clipboard!');" style="text-align:center; background:#0078d4;">📋 Copy Code to Clipboard</button>
+        </div>
+    `;
+}
+
+function generatePowerShellWinFormsCode() {
+    let code = `Add-Type -AssemblyName System.Windows.Forms\nAdd-Type -AssemblyName System.Drawing\n\n`;
+    code += `$form = New-Object System.Windows.Forms.Form\n`;
+    code += `$form.Text = '${universalUIModel.Title}'\n`;
+    code += `$form.Width = ${universalUIModel.Width}\n`;
+    code += `$form.Height = ${universalUIModel.Height}\n`;
+    code += `$form.StartPosition = [System.Windows.Forms.FormStartPosition]::${universalUIModel.StartPosition}\n`;
+    code += `$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::${universalUIModel.FormBorderStyle}\n`;
+    code += `$form.TopMost = $${universalUIModel.TopMost}\n`;
+    code += `$form.ControlBox = $${universalUIModel.ShowControlBox}\n\n`;
+
+    universalUIModel.Children.forEach(c => {
+        if (c.Type === 'Button') {
+            code += `$${c.Name} = New-Object System.Windows.Forms.Button\n`;
+            code += `$${c.Name}.Text = '${c.Text}'\n`;
+            code += `$${c.Name}.Location = New-Object System.Drawing.Point(${c.X}, ${c.Y})\n`;
+            code += `$${c.Name}.Size = New-Object System.Drawing.Size(${c.Width}, ${c.Height})\n`;
+            if (c.Action) {
+                code += `$${c.Name}.Add_Click({ \n${c.Action}\n })\n`;
+            }
+            code += `$form.Controls.Add($${c.Name})\n\n`;
+        } else if (c.Type === 'TextBox') {
+            code += `$${c.Name} = New-Object System.Windows.Forms.TextBox\n`;
+            code += `$${c.Name}.Text = '${c.Text}'\n`;
+            code += `$${c.Name}.Location = New-Object System.Drawing.Point(${c.X}, ${c.Y})\n`;
+            code += `$${c.Name}.Size = New-Object System.Drawing.Size(${c.Width}, ${c.Height})\n`;
+            code += `$form.Controls.Add($${c.Name})\n\n`;
+        } else if (c.Type === 'Label') {
+            code += `$${c.Name} = New-Object System.Windows.Forms.Label\n`;
+            code += `$${c.Name}.Text = '${c.Text}'\n`;
+            code += `$${c.Name}.Location = New-Object System.Drawing.Point(${c.X}, ${c.Y})\n`;
+            code += `$${c.Name}.Size = New-Object System.Drawing.Size(${c.Width}, ${c.Height})\n`;
+            code += `$form.Controls.Add($${c.Name})\n\n`;
+        } else if (c.Type === 'CheckBox') {
+            code += `$${c.Name} = New-Object System.Windows.Forms.CheckBox\n`;
+            code += `$${c.Name}.Text = '${c.Text}'\n`;
+            code += `$${c.Name}.Location = New-Object System.Drawing.Point(${c.X}, ${c.Y})\n`;
+            code += `$${c.Name}.Size = New-Object System.Drawing.Size(${c.Width}, ${c.Height})\n`;
+            code += `$form.Controls.Add($${c.Name})\n\n`;
+        } else if (c.Type === 'Dropdown') {
+            code += `$${c.Name} = New-Object System.Windows.Forms.ComboBox\n`;
+            (c.Options || '').split(',').forEach(opt => {
+                code += `$${c.Name}.Items.Add('${opt.trim()}')\n`;
+            });
+            code += `$${c.Name}.Location = New-Object System.Drawing.Point(${c.X}, ${c.Y})\n`;
+            code += `$${c.Name}.Size = New-Object System.Drawing.Size(${c.Width}, ${c.Height})\n`;
+            code += `$form.Controls.Add($${c.Name})\n\n`;
+        }
+    });
+
+    code += `[void]$form.ShowDialog()`;
+    return code;
+}
+
+function generatePowerShellWPFCode() {
+    return `# WPF XAML Exporter template\n[xml]$xaml = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n    </Canvas>\n</Window>\n"@\n# Load XAML in PowerShell...`;
+}
+
+function generateHTMLCode() {
+    return `<!DOCTYPE html>\n<html>\n<head><title>${universalUIModel.Title}</title></head>\n<body>\n    <!-- Generated HTML Form -->\n</body>\n</html>`;
+}
+
 function updateFormProperty(property, value) {
     universalUIModel[property] = value;
     renderSimulator();
@@ -358,8 +465,7 @@ function updateFormProperty(property, value) {
 
 function updateControlProperty(property, value) {
     if (selectedControlIndex !== null) {
-        const activeChildren = universalUIModel.Children;
-        activeChildren[selectedControlIndex][property] = value;
+        universalUIModel.Children[selectedControlIndex][property] = value;
         if (property === 'Text' || property === 'Options') {
             renderSimulator();
         }
@@ -380,5 +486,5 @@ function toggleInteractive(index, isChecked) {
 
 document.addEventListener('DOMContentLoaded', () => {
     renderSimulator();
-    renderPropertiesPanel();
+    renderSidebar();
 });
