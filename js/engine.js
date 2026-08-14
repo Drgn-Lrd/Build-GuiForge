@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.4";
+const ENGINE_JS_VERSION = "1.5";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -43,6 +43,7 @@ function addControl(type) {
         Text: `New ${type}`,
         X: 30 + (universalUIModel.Children.length * 15),
         Y: 30 + (universalUIModel.Children.length * 35),
+        Interactive: false,
         Options: type === 'Dropdown' ? 'Item 1, Item 2, Item 3' : undefined,
         Action: type === 'Button' ? '# Enter PowerShell code here...\nWrite-Host "Clicked!"' : ''
     };
@@ -79,28 +80,31 @@ function renderSimulator() {
         let el = document.createElement('div');
         el.className = 'canvas-element';
         if (index === selectedControlIndex) el.classList.add('selected-element');
+        if (control.Interactive) el.classList.add('interactive');
         
         el.style.left = `${control.X}px`;
         el.style.top = `${control.Y}px`;
         
-        // Mouse drag event binding
+        // Accurate Mouse drag binding relative to canvas
         el.onmousedown = (e) => {
+            if (control.Interactive) return; // Don't drag if testing interaction
             e.stopPropagation();
             selectControl(index);
             isDragging = true;
-            const rect = el.getBoundingClientRect();
-            dragOffset.x = e.clientX - rect.left;
-            dragOffset.y = e.clientY - rect.top;
+            
+            const canvasRect = canvas.getBoundingClientRect();
+            dragOffset.x = (e.clientX - canvasRect.left) - control.X;
+            dragOffset.y = (e.clientY - canvasRect.top) - control.Y;
         };
 
         if (control.Type === "Button") {
             el.innerHTML = `<button type="button">${control.Text}</button>`;
         } else if (control.Type === "TextBox") {
-            el.innerHTML = `<input type="text" value="${control.Text}" readonly>`;
+            el.innerHTML = `<input type="text" value="${control.Text}">`;
         } else if (control.Type === "Label") {
             el.innerHTML = `<label>${control.Text}</label>`;
         } else if (control.Type === "CheckBox") {
-            el.innerHTML = `<div style="display:flex; align-items:center;"><input type="checkbox" disabled> <label>${control.Text}</label></div>`;
+            el.innerHTML = `<div style="display:flex; align-items:center;"><input type="checkbox"> <label>${control.Text}</label></div>`;
         } else if (control.Type === "Dropdown") {
             const optionsHtml = (control.Options || '').split(',').map(opt => `<option>${opt.trim()}</option>`).join('');
             el.innerHTML = `<select>${optionsHtml}</select>`;
@@ -122,10 +126,10 @@ function renderSimulator() {
 document.onmousemove = (e) => {
     if (!isDragging || selectedControlIndex === null) return;
     const canvas = document.getElementById('live-preview-canvas');
-    const rect = canvas.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
     
-    let newX = e.clientX - rect.left - dragOffset.x;
-    let newY = e.clientY - rect.top - dragOffset.y;
+    let newX = (e.clientX - canvasRect.left) - dragOffset.x;
+    let newY = (e.clientY - canvasRect.top) - dragOffset.y;
     
     // Boundary constraints inside the form canvas
     newX = Math.max(0, Math.min(newX, canvas.clientWidth - 100));
@@ -134,23 +138,30 @@ document.onmousemove = (e) => {
     universalUIModel.Children[selectedControlIndex].X = Math.round(newX);
     universalUIModel.Children[selectedControlIndex].Y = Math.round(newY);
     
-    // Move element live without destroying DOM focus
     const el = document.getElementsByClassName('canvas-element')[selectedControlIndex];
     if (el) {
         el.style.left = `${newX}px`;
         el.style.top = `${newY}px`;
     }
-    
-    // Update X/Y input values in properties panel if open
-    const inputX = document.getElementById('prop-x');
-    const inputY = document.getElementById('prop-y');
-    if (inputX) inputX.value = Math.round(newX);
-    if (inputY) inputY.value = Math.round(newY);
 };
 
 document.onmouseup = () => {
     isDragging = false;
 };
+
+// Nudge controls (+/- px)
+function nudgeControl(dx, dy) {
+    if (selectedControlIndex !== null) {
+        const control = universalUIModel.Children[selectedControlIndex];
+        const canvas = document.getElementById('live-preview-canvas');
+        
+        control.X = Math.max(0, Math.min(control.X + dx, canvas.clientWidth - 100));
+        control.Y = Math.max(0, Math.min(control.Y + dy, canvas.clientHeight - 30));
+        
+        renderSimulator();
+        renderPropertiesPanel();
+    }
+}
 
 function renderPropertiesPanel() {
     const propsContent = document.getElementById('props-content');
@@ -191,15 +202,30 @@ function renderPropertiesPanel() {
             <label>Text / Label</label>
             <input type="text" value="${control.Text}" oninput="updateControlProperty('Text', this.value)">
         </div>
-        <div style="display:flex;">
-            <div class="prop-group" style="flex:1;">
-                <label>X Pos</label>
-                <input type="number" id="prop-x" value="${control.X}" oninput="updateControlCoordinate('X', this.value)">
+        <div class="prop-group">
+            <label>Position Nudge (X: ${control.X}px, Y: ${control.Y}px)</label>
+            <div class="nudge-grid">
+                <div></div>
+                <button class="nudge-btn" onclick="nudgeControl(0, -1)">▲ 1px</button>
+                <div></div>
+                <button class="nudge-btn" onclick="nudgeControl(-1, 0)">◀ 1px</button>
+                <button class="nudge-btn" onclick="nudgeControl(0, 1)">▼ 1px</button>
+                <button class="nudge-btn" onclick="nudgeControl(1, 0)">▶ 1px</button>
             </div>
-            <div class="prop-group" style="flex:1;">
-                <label>Y Pos</label>
-                <input type="number" id="prop-y" value="${control.Y}" oninput="updateControlCoordinate('Y', this.value)">
+            <div class="nudge-grid" style="grid-template-columns: repeat(2, 1fr); margin-top:5px;">
+                <button class="nudge-btn" onclick="nudgeControl(0, -5)">▲ 5px</button>
+                <button class="nudge-btn" onclick="nudgeControl(0, 5)">▼ 5px</button>
+                <button class="nudge-btn" onclick="nudgeControl(-5, 0)">◀ 5px</button>
+                <button class="nudge-btn" onclick="nudgeControl(5, 0)">▶ 5px</button>
+                <button class="nudge-btn" onclick="nudgeControl(-10, 0)">◀ 10px</button>
+                <button class="nudge-btn" onclick="nudgeControl(10, 0)">▶ 10px</button>
             </div>
+        </div>
+        <div class="prop-group">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" ${control.Interactive ? 'checked' : ''} onchange="toggleInteractive(${selectedControlIndex}, this.checked)" style="width:auto;"> 
+                Interact Mode (Test Control)
+            </label>
         </div>
         ${control.Type === 'Dropdown' ? `
         <div class="prop-group">
@@ -225,22 +251,15 @@ function updateFormProperty(property, value) {
 function updateControlProperty(property, value) {
     if (selectedControlIndex !== null) {
         universalUIModel.Children[selectedControlIndex][property] = value;
-        // Only re-render if text or options change, avoiding full loss of text input focus
         if (property === 'Text' || property === 'Options') {
             renderSimulator();
         }
     }
 }
 
-function updateControlCoordinate(axis, value) {
-    if (selectedControlIndex !== null) {
-        const val = parseInt(value) || 0;
-        universalUIModel.Children[selectedControlIndex][axis] = val;
-        const el = document.getElementsByClassName('canvas-element')[selectedControlIndex];
-        if (el) {
-            el.style[axis === 'X' ? 'left' : 'top'] = `${val}px`;
-        }
-    }
+function toggleInteractive(index, isChecked) {
+    universalUIModel.Children[index].Interactive = isChecked;
+    renderSimulator();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
