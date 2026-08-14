@@ -1,5 +1,5 @@
 // --- SELF-REPORTING VERSION ---
-const ENGINE_JS_VERSION = "1.14";
+const ENGINE_JS_VERSION = "1.15";
 
 // --- GLOBAL STATE ---
 let universalUIModel = {
@@ -377,7 +377,7 @@ function renderSidebar() {
                 <select onchange="universalUIModel.Theme = this.value; renderSimulator();">
                     <option value="winforms" ${universalUIModel.Theme === 'winforms' ? 'selected' : ''}>PowerShell WinForms</option>
                     <option value="wpf" ${universalUIModel.Theme === 'wpf' ? 'selected' : ''}>PowerShell WPF</option>
-                    <option value="html" ${universalUIModel.Theme === 'html' ? 'selected' : ''}>HTML / Web Form</option>
+                    <option value="html" ${universalUIModel.Theme === 'html' ? 'selected' : ''}>HTML5 / Web Form</option>
                 </select>
             </div>
             <div class="prop-group">
@@ -660,33 +660,55 @@ function generatePowerShellWPFCode() {
             xamlChildren += `        <CheckBox Content="${c.Text}" Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}" />\n`;
         } else if (c.Type === 'RadioButton') {
             xamlChildren += `        <RadioButton Content="${c.Text}" Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}" />\n`;
+        } else if (c.Type === 'Dropdown') {
+            xamlChildren += `        <ComboBox Canvas.Left="${c.X}" Canvas.Top="${c.Y}" Width="${c.Width}" Height="${c.Height}">\n`;
+            (c.Options || '').split(',').forEach(opt => {
+                xamlChildren += `            <ComboBoxItem Content="${opt.trim()}" />\n`;
+            });
+            xamlChildren += `        </ComboBox>\n`;
         }
     });
 
+    let fullXaml = `<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>`;
+
     if (wpfExportMode === 'xaml') {
-        return `# --- form.xaml ---\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n\n# --- run.ps1 ---\n[xml]$xaml = Get-Content "$PSScriptRoot/form.xaml"\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
+        return `# --- form.xaml ---\n${fullXaml}\n\n# --- run.ps1 ---\n[xml]$xaml = Get-Content "$PSScriptRoot/form.xaml"\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
     } else {
-        return `[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')\n[xml]$xaml = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title}" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n"@\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog();\n\n[xml]$xaml2 = @"\n<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n        Title="${universalUIModel.Title} - Secondary" Width="${universalUIModel.Width}" Height="${universalUIModel.Height}">\n    <Canvas>\n${xamlChildren}    </Canvas>\n</Window>\n"@\n$reader2 = (New-Object System.Xml.XmlNodeReader $xaml2)\n$form2 = [Windows.Markup.XamlReader]::Load($reader2)\n[void]$form2.ShowDialog()`;
+        return `[void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')\n[xml]$xaml = @"\n${fullXaml}\n"@\n$reader = (New-Object System.Xml.XmlNodeReader $xaml)\n$form = [Windows.Markup.XamlReader]::Load($reader)\n[void]$form.ShowDialog()`;
     }
 }
 
 function generateHTMLCode() {
-    let html = `<!DOCTYPE html>\n<html>\n<head>\n    <title>${universalUIModel.Title}</title>\n    <style>body { font-family: sans-serif; position: relative; width: ${universalUIModel.Width}px; height: ${universalUIModel.Height}px; }</style>\n</head>\n<body>\n`;
+    let menuHtml = '';
+    if (universalUIModel.ShowGlobalMenu && universalUIModel.GlobalMenu) {
+        let menuItems = universalUIModel.GlobalMenu.split(',').map(m => `<li style="display:inline-block; margin-right:15px; cursor:pointer;">${m.trim()}</li>`).join('');
+        menuHtml = `<nav style="background:#eee; padding:8px 15px; border-bottom:1px solid #ccc;"><ul style="list-style:none; margin:0; padding:0;">${menuItems}</ul></nav>\n`;
+    }
+
+    let htmlChildren = '';
     universalUIModel.Children.forEach(c => {
         if (c.Type === 'Button') {
-            html += `    <button style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${c.Text}</button>\n`;
+            htmlChildren += `    <button style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${c.Text}</button>\n`;
         } else if (c.Type === 'TextBox') {
-            html += `    <input type="text" value="${c.Text}" style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;" />\n`;
+            htmlChildren += `    <input type="text" value="${c.Text}" style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;" />\n`;
         } else if (c.Type === 'Label') {
-            html += `    <label style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${c.Text}</label>\n`;
+            htmlChildren += `    <label style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${c.Text}</label>\n`;
         } else if (c.Type === 'CheckBox') {
-            html += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;"><input type="checkbox"/> <label>${c.Text}</label></div>\n`;
+            htmlChildren += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px; display:flex; align-items:center; gap:5px;"><input type="checkbox"/> <label>${c.Text}</label></div>\n`;
         } else if (c.Type === 'RadioButton') {
-            html += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;"><input type="radio"/> <label>${c.Text}</label></div>\n`;
+            htmlChildren += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px; display:flex; align-items:center; gap:5px;"><input type="radio" name="group_html"/> <label>${c.Text}</label></div>\n`;
+        } else if (c.Type === 'Dropdown') {
+            let opts = (c.Options || '').split(',').map(o => `<option>${o.trim()}</option>`).join('');
+            htmlChildren += `    <select style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px;">${opts}</select>\n`;
+        } else if (c.Type === 'TabControl') {
+            let tabs = (c.Options || 'Tab 1, Tab 2').split(',').map(t => t.trim());
+            let tabBtns = tabs.map((t, idx) => `<button onclick="document.querySelectorAll('.tab-panel-${c.Name}').forEach(p=>p.style.display='none'); document.getElementById('tab-${c.Name}-${idx}').style.display='block';" style="padding:4px 10px; cursor:pointer;">${t}</button>`).join('');
+            let tabContent = tabs.map((t, idx) => `<div id="tab-${c.Name}-${idx}" class="tab-panel-${c.Name}" style="display:${idx===0?'block':'none'}; padding:10px; border:1px solid #ccc; height:calc(100% - 35px); box-sizing:border-box;">Content for ${t}</div>`).join('');
+            htmlChildren += `    <div style="position:absolute; left:${c.X}px; top:${c.Y}px; width:${c.Width}px; height:${c.Height}px; border:1px solid #ccc; background:#fff; box-sizing:border-box;"><div style="background:#f0f0f0; border-bottom:1px solid #ccc; display:flex;">${tabBtns}</div>${tabContent}</div>\n`;
         }
     });
-    html += `</body>\n</html>`;
-    return html;
+
+    return `<!DOCTYPE html>\n<html lang="en">\n<head>\n    <meta charset="UTF-8">\n    <title>${universalUIModel.Title}</title>\n    <style>\n        body { font-family: system-ui, -apple-system, sans-serif; position: relative; width: ${universalUIModel.Width}px; height: ${universalUIModel.Height}px; margin: 0; background: #f9f9f9; }\n    </style>\n</head>\n<body>\n${menuHtml}    <div style="position:relative; width:100%; height:100%;">\n${htmlChildren}    </div>\n</body>\n</html>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
