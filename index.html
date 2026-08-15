@@ -1,12 +1,12 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
-    Revision: WinForms is now the default/first entry in the format
-    switcher and Show Code tabs (was HTML). Title bar now renders real
-    min/max/close buttons via a dedicated container instead of a static
-    decorative dot.
+    Revision: added toolbar buttons for Undo, Redo, and Objects (a
+    control-picker for finding things hidden behind other controls), plus
+    the new Objects modal (#objectsModalOverlay / #objectsList) that
+    button opens.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -15,7 +15,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="styles.css">
-<script>window.PAGE_VERSION = '1.1';</script>
+<script>window.PAGE_VERSION = '1.2';</script>
 </head>
 <body>
 
@@ -35,6 +35,9 @@
       <button data-format="winui">WinUI</button>
     </div>
     <div class="toolbar-spacer"></div>
+    <button class="btn btn-ghost" id="btnUndo" title="Undo (Ctrl+Z)">&#8630;</button>
+    <button class="btn btn-ghost" id="btnRedo" title="Redo (Ctrl+Y)">&#8631;</button>
+    <button class="btn btn-ghost" id="btnObjects" title="Object list (find controls hidden behind others)">&#9776;</button>
     <button class="btn btn-ghost btn-danger" id="btnDelete" title="Delete selected (Del)">Delete</button>
     <button class="btn btn-ghost" id="btnClearAll" title="Remove all controls">Clear</button>
     <button class="btn btn-accent" id="btnShowCode">Show Code</button>
@@ -116,6 +119,19 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-accent" id="aboutModalClose2">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Objects modal -->
+<div class="modal-overlay" id="objectsModalOverlay">
+  <div class="modal" style="width:380px;">
+    <div class="modal-header">
+      <h2>Objects</h2>
+      <button class="btn icon-btn btn-ghost" id="objectsModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="objectsList"></div>
     </div>
   </div>
 </div>
