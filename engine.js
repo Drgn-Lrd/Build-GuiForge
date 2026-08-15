@@ -1,42 +1,17 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.3
+    Version 1.4
 
-    Revision: five fixes from user testing of 1.2. (2) Found and fixed
-    the actual root cause of Interact mode: selectControl() was called
-    on every canvas mousedown before checking the interact flag, and it
-    triggers a full render() that rebuilds the whole canvas DOM -
-    destroying the exact checkbox/dropdown/input the user had just
-    clicked, before the browser could finish handling that click.
-    Interact-mode clicks now skip that destructive re-render entirely.
-    Also discovered TextBox, RichTextBox, NumericUpDown, and
-    DateTimePicker were static preview divs with no real form element to
-    interact with regardless of the click-handling bug; all four are now
-    genuine <input>/<textarea> elements (disabled unless interacting)
-    that write back into props on change. DateTimePicker additionally
-    gets a Format-aware static preview (Long/Short/Time/Custom) when not
-    interacting, and a real <input type=date|time> when interacting.
-    (4) Anchor now actually repositions/stretches top-level controls in
-    the design canvas when the form is resized (not just in generated
-    code): Left+Right or Top+Bottom stretches the control with the
-    parent, a single Right/Bottom anchor repositions to hold that edge's
-    distance constant, None leaves the control untouched. (5) Reworked
-    the Layout section per feedback: removed the redundant directional
-    row (duplicated the Nudge d-pad). X/Y now show 0/Center/Max quick-
-    pin buttons; Width/Height show shrink(-)/grow(<->or<^>)/Max buttons
-    driven by the shared Nudge step (no duplicate step-size numbers).
-    (6) MenuStrip preset items now ship real default code instead of
-    empty stubs: File>Open/Save use OpenFileDialog/SaveFileDialog,
-    File>Exit closes the form, View>Zoom tracks a $script:ZoomLevel
-    script variable, and Help>About auto-generates its message box from
-    the Comment-Based Help synopsis/description (editable per item via a
-    new code textarea in the menu editor; typing custom code overrides
-    the auto-About behavior). Wired into both WinForms (Add_Click) and
-    HTML (onclick + generated function) output.
+    Revision: replaced the toolbox's two-letter glyph abbreviations
+    (Bt/Ab/Tb/Ck/etc) with real vector icons. Added a TOOL_ICONS
+    dictionary of 16x16 line-art SVG icons, one per control type
+    (button shape, checkmark, radio dot, dropdown arrow, list rows,
+    calendar grid, chain-link, menu bar, etc), rendered via
+    toolIconSvg() using currentColor so they follow the theme.
 */
 
-const ENGINE_VERSION = '1.3';
+const ENGINE_VERSION = '1.4';
 
 /* =========================================================================
    Control catalog
@@ -242,6 +217,35 @@ const CONTROL_DEFS = {
     isMenuStrip: true,
   },
 };
+
+// Real vector icons for the toolbox, one per control type - replaces the
+// old two-letter glyph abbreviations (Bt/Tb/Ck/etc). Each entry is just
+// the inner SVG markup; toolIconSvg() wraps it in a shared 16x16 <svg>
+// using currentColor so it follows the theme automatically.
+const TOOL_ICONS = {
+  Button: `<rect x="1.5" y="4.5" width="13" height="7" rx="1.5"/>`,
+  Label: `<path d="M2 4.5h7M2 8h10M2 11.5h5"/>`,
+  TextBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M4.2 6.2v3.6"/>`,
+  CheckBox: `<rect x="3" y="3" width="10" height="10" rx="1.5"/><path d="M5.2 8.2l2 2 3.6-4.2"/>`,
+  RadioButton: `<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>`,
+  ComboBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M10.3 6.7l1.4 1.5 1.4-1.5"/>`,
+  ListBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h5"/>`,
+  Panel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/>`,
+  GroupBox: `<path d="M1.5 4.6V13.5h13V4.6H8.3M1.5 4.6h2.3M6.3 4.6c0-1.15.9-2.1 2-2.1s2 .95 2 2.1"/>`,
+  PictureBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><circle cx="5.3" cy="6" r="1.2"/><path d="M2 12l3.7-3.8 2.5 2.3L12 6.8l2 2.4"/>`,
+  ProgressBar: `<rect x="1.5" y="6" width="13" height="4" rx="1"/><rect x="2.3" y="6.8" width="6.5" height="2.4" fill="currentColor" stroke="none"/>`,
+  TrackBar: `<path d="M1.5 8h13"/><circle cx="9.5" cy="8" r="2.1" fill="currentColor" stroke="none"/>`,
+  NumericUpDown: `<rect x="1.5" y="4" width="9" height="8" rx="1"/><path d="M12.3 6.3l1.2-1.3 1.2 1.3M12.3 9.7l1.2 1.3 1.2-1.3"/>`,
+  DateTimePicker: `<rect x="1.5" y="3.3" width="13" height="10.7" rx="1"/><path d="M1.5 6.4h13M4.7 1.8v2.9M11.3 1.8v2.9M4 9h1.3M7.4 9h1.3M10.7 9h1.3M4 11.3h1.3"/>`,
+  RichTextBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h6"/>`,
+  LinkLabel: `<path d="M6.6 9.4l2.8-2.8"/><path d="M5.3 8.3a1.9 1.9 0 010-2.7l1.3-1.3a1.9 1.9 0 012.7 2.7l-.6.6"/><path d="M10.7 7.7a1.9 1.9 0 010 2.7l-1.3 1.3a1.9 1.9 0 01-2.7-2.7l.6-.6"/>`,
+  MenuStrip: `<rect x="1.5" y="3.3" width="13" height="3.4" rx="0.7"/><path d="M5.3 3.3v3.4M9.5 3.3v3.4"/><path d="M2 10.2h12M2 12.7h8"/>`,
+};
+
+function toolIconSvg(type) {
+  const inner = TOOL_ICONS[type] || '';
+  return `<svg class="tool-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+}
 
 const TOOLBOX_GROUPS = [
   { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
@@ -802,7 +806,7 @@ function initToolbox() {
       item.className = 'tool-item';
       item.draggable = true;
       item.dataset.type = type;
-      item.innerHTML = `<span class="tool-glyph">${def.glyph}</span><span class="tool-label">${def.label}</span>`;
+      item.innerHTML = `<span class="tool-icon">${toolIconSvg(type)}</span><span class="tool-label">${def.label}</span>`;
       item.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('text/plain', type);
       });
