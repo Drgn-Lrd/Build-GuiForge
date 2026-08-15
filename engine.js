@@ -1,38 +1,38 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.7
+    Version 1.8
 
-    Revision: (1) Replaced the narrow 4-type usage-hint block with a real
-    Help node (CONTROL_HELP) for every one of the 18 control types,
-    always shown near the top of the properties pane - detailed guidance
-    plus a worked example, not buried under a specific property section.
-    ProgressBar's entry now explicitly explains it's a static designer
-    preview with no automatic link to a running command, and shows the
-    PowerShell loop pattern for updating Value as real work happens.
-    (2) Dock now respects z-order stacking like real WinForms: siblings
-    docked to the same parent claim space in z-order via applyDockStack/
-    recomputeAllDocking (a MenuStrip docked Top followed by a TabControl
-    also docked Top now stack instead of overlapping - the TabControl
-    docks into whatever's left below the menu). This runs centrally at
-    the top of render() so every mutation path benefits automatically;
-    removed the old single-control applyDock() and its scattered call
-    sites. (3) Added Undo/Redo: a checkpoint-on-render system that
-    diffs against the previous render's snapshot, with
-    suppressUndoCheckpoint collapsing a whole drag/resize gesture into
-    one undo step instead of one per mousemove tick. Wired to toolbar
-    buttons and Ctrl+Z/Ctrl+Y. (4) Added a Parent dropdown to the Layout
-    section (auto-fills with every container as it's created) plus
-    reparentControl()/absolutePosition() so picking a new parent moves a
-    control between the main window and any Panel/GroupBox/TabControl
-    without dragging, preserving its visual position when geometrically
-    possible. (5) Added an Objects panel/modal (buildObjectsList,
-    initObjectsModal) listing every control in a tree (respecting
-    container and tab-page nesting) so controls hidden behind others can
-    still be found and selected.
+    Revision: (1) Fixed the unstyled snippet-insert dropdown in the
+    Events section (Image 1 bug report) - it lived in .snippet-row, which
+    the dark-theme select styling never covered, so it fell back to the
+    browser's native white background while still inheriting light theme
+    text, making it nearly unreadable; also added a #propsBody select
+    safety net so this class of bug can't recur elsewhere. (2) Form
+    defaults to Always On Top = true. (3) Comment-Based Help defaults now
+    match the requested template exactly (Synopsis "Creating a test GUI
+    form", Notes with Author "Johnathon Largent" / Filename "TestGUI.ps1"
+    / Dependencies), and .NOTES now auto-appends a "Calls: . "path""
+    line for every button/event wired to an external .ps1 file
+    (collectCalledScripts scans every control's events, deduplicated,
+    using the exact dot-source syntax the generated code itself uses).
+    (4) Added real boundary containment: containerClientRect() computes
+    the space actually available to a non-docked child after docked
+    siblings claim their edges, and clampAllToContainers() (run centrally
+    in render(), parents processed before children) keeps every control
+    within its parent - a child can't leave its container, a container
+    can't leave its own parent, and a Dock=Top MenuStrip becomes the
+    real upper boundary for everything below it, matching the requested
+    example exactly. (5) z-index default changed from an ever-growing
+    global counter to parent.z + 1 (stays there until changed manually).
+    (6) Added same-z-index collision prevention: siblings at the same
+    z-index can touch but not overlap during drag (slides along whichever
+    axis isn't blocked) or resize (freezes at last valid size); different
+    z-indexes can still stack/overlap freely, since that's the point of
+    z-index.
 */
 
-const ENGINE_VERSION = '1.7';
+const ENGINE_VERSION = '1.8';
 
 /* =========================================================================
    Control catalog
@@ -344,14 +344,14 @@ const state = {
     closeBox: true,
     resizable: true,          // FormBorderStyle: Sizable vs FixedSingle
     startPosition: 'CenterScreen',
-    topMost: false,
+    topMost: true,
     events: { Load: { fn: 'Form_Load', code: '', ps1: '' } },
     help: {
-      synopsis: { enabled: true, text: '' },
+      synopsis: { enabled: true, text: 'Creating a test GUI form' },
       description: { enabled: false, text: '' },
       parameters: [],
       examples: [{ enabled: false, text: '' }],
-      notes: { enabled: false, author: '', filename: '', notes: '' },
+      notes: { enabled: true, author: 'Johnathon Largent', filename: 'TestGUI.ps1', notes: 'Requires PowerShell 5.1+ and the .NET Windows Forms assembly' },
     },
   },
 };
@@ -375,6 +375,7 @@ function createControl(type, x, y, parentId, tabPage) {
   const events = {};
   def.events.forEach(evt => { events[evt] = null; }); // null = not wired up yet
 
+  const parentZ = parentId ? ((getControl(parentId) && getControl(parentId).z) || 0) : 0;
   const ctrl = {
     id: 'c' + Math.random().toString(36).slice(2, 10),
     type, name,
@@ -382,7 +383,7 @@ function createControl(type, x, y, parentId, tabPage) {
     tabPage: tabPage || null, // which tab page of a TabControl parent this belongs to, if any
     x: snap(x), y: snap(y),
     w: def.defaultW, h: def.defaultH,
-    z: state.controls.length + 1,
+    z: parentZ + 1, // stays at parent.z + 1 until the user changes it manually
     interact: false,
     props, events,
   };
@@ -513,8 +514,72 @@ function redo() {
   restoreSnapshot(state.redoStack.pop());
 }
 
+// The rect a non-docked child is actually allowed to occupy: the parent's
+// full bounds, minus whatever space docked siblings have already claimed
+// (e.g. a MenuStrip docked Top becomes the new effective top boundary for
+// everything else in that parent). This mirrors applyDockStack's client-
+// rect shrinkage but as a read-only query, so drag/resize/nudge/quick-pin
+// actions can clamp against it without re-running the dock mutation pass.
+function containerClientRect(parentId, tabPage) {
+  let bounds;
+  if (parentId) {
+    const p = getControl(parentId);
+    if (!p) return { x: 0, y: 0, w: state.form.width, h: state.form.height };
+    let h = p.h;
+    if (CONTROL_DEFS[p.type].isTabControl) h = Math.max(1, h - TAB_HEADER_HEIGHT);
+    bounds = { w: p.w, h };
+  } else {
+    bounds = { w: state.form.width, h: state.form.height };
+  }
+
+  const dockedSiblings = state.controls
+    .filter(c => (c.parentId || null) === (parentId || null) && (c.tabPage || null) === (tabPage || null))
+    .filter(c => c.props.dock && c.props.dock !== 'None' && c.props.dock !== 'Fill')
+    .sort((a, b) => a.z - b.z);
+
+  let rect = { x: 0, y: 0, w: bounds.w, h: bounds.h };
+  dockedSiblings.forEach(ctrl => {
+    switch (ctrl.props.dock) {
+      case 'Top': rect = { x: rect.x, y: rect.y + ctrl.h, w: rect.w, h: Math.max(0, rect.h - ctrl.h) }; break;
+      case 'Bottom': rect = { x: rect.x, y: rect.y, w: rect.w, h: Math.max(0, rect.h - ctrl.h) }; break;
+      case 'Left': rect = { x: rect.x + ctrl.w, y: rect.y, w: Math.max(0, rect.w - ctrl.w), h: rect.h }; break;
+      case 'Right': rect = { x: rect.x, y: rect.y, w: Math.max(0, rect.w - ctrl.w), h: rect.h }; break;
+    }
+  });
+  return rect;
+}
+
+// Keeps every control within its parent's available space: a child can't
+// be dragged/resized/nudged outside its container, a container can't be
+// moved/resized outside its own parent, and a docked sibling's claimed
+// space (see containerClientRect) is respected as a hard boundary too.
+// Docked controls are skipped - their bounds are fully managed by the
+// dock engine, not manual placement. Processes parents before children so
+// a container's own clamped bounds are already final before its children
+// are checked against them.
+function clampAllToContainers() {
+  const byId = {};
+  state.controls.forEach(c => { byId[c.id] = c; });
+  const depthOf = (c) => {
+    let d = 0, p = c;
+    while (p.parentId && byId[p.parentId]) { p = byId[p.parentId]; d++; }
+    return d;
+  };
+  const ordered = state.controls.slice().sort((a, b) => depthOf(a) - depthOf(b));
+
+  ordered.forEach(ctrl => {
+    if (ctrl.props.dock && ctrl.props.dock !== 'None') return;
+    const rect = containerClientRect(ctrl.parentId, ctrl.tabPage);
+    ctrl.w = Math.min(ctrl.w, Math.max(12, rect.w));
+    ctrl.h = Math.min(ctrl.h, Math.max(12, rect.h));
+    ctrl.x = Math.max(rect.x, Math.min(ctrl.x, rect.x + rect.w - ctrl.w));
+    ctrl.y = Math.max(rect.y, Math.min(ctrl.y, rect.y + rect.h - ctrl.h));
+  });
+}
+
 function render() {
   recomputeAllDocking();
+  clampAllToContainers();
   maybeCheckpointUndo();
 
   const surface = surfaceEl();
@@ -881,6 +946,39 @@ function renderStatus() {
 
 let dragCtx = null;
 
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function sameZSiblings(ctrl) {
+  return state.controls.filter(s =>
+    s.id !== ctrl.id &&
+    (s.parentId || null) === (ctrl.parentId || null) &&
+    (s.tabPage || null) === (ctrl.tabPage || null) &&
+    s.z === ctrl.z &&
+    !(s.props.dock && s.props.dock !== 'None')
+  );
+}
+
+function collidesAt(ctrl, x, y, w, h, siblings) {
+  const testRect = { x, y, w, h };
+  return siblings.some(s => rectsOverlap(testRect, { x: s.x, y: s.y, w: s.w, h: s.h }));
+}
+
+// Controls at the SAME z-index within the same parent can touch edges but
+// never overlap (real collision); different z-indexes can still stack
+// freely on top of each other, since that's the whole point of z-index.
+// Slides along whichever axis isn't blocked rather than freezing outright,
+// so dragging diagonally past a neighbor still feels natural.
+function resolveDragCollision(ctrl, proposedX, proposedY) {
+  const siblings = sameZSiblings(ctrl);
+  if (!siblings.length) return { x: proposedX, y: proposedY };
+  if (!collidesAt(ctrl, proposedX, proposedY, ctrl.w, ctrl.h, siblings)) return { x: proposedX, y: proposedY };
+  if (!collidesAt(ctrl, proposedX, ctrl.y, ctrl.w, ctrl.h, siblings)) return { x: proposedX, y: ctrl.y };
+  if (!collidesAt(ctrl, ctrl.x, proposedY, ctrl.w, ctrl.h, siblings)) return { x: ctrl.x, y: proposedY };
+  return { x: ctrl.x, y: ctrl.y };
+}
+
 function onControlMouseDown(e) {
   const id = e.currentTarget.dataset.id;
   const ctrl = getControl(id);
@@ -920,8 +1018,9 @@ function onControlMouseDown(e) {
 
   function onMove(ev) {
     const dx = ev.clientX - startX, dy = ev.clientY - startY;
-    ctrl.x = snap(origX + dx);
-    ctrl.y = snap(origY + dy);
+    const resolved = resolveDragCollision(ctrl, snap(origX + dx), snap(origY + dy));
+    ctrl.x = resolved.x;
+    ctrl.y = resolved.y;
     render();
     reselectAfterRender(id);
   }
@@ -952,7 +1051,15 @@ function startResize(e, ctrl, handle) {
     if (handle.includes('s')) h = Math.max(12, orig.h + dy);
     if (handle.includes('w')) { w = Math.max(12, orig.w - dx); x = orig.x + dx; }
     if (handle.includes('n')) { h = Math.max(12, orig.h - dy); y = orig.y + dy; }
-    ctrl.x = snap(x); ctrl.y = snap(y); ctrl.w = snap(w); ctrl.h = snap(h);
+    x = snap(x); y = snap(y); w = snap(w); h = snap(h);
+
+    // Same-z siblings can touch but not overlap - if this resize would
+    // grow into one, freeze at the control's last valid size/position.
+    const siblings = sameZSiblings(ctrl);
+    if (siblings.length && collidesAt(ctrl, x, y, w, h, siblings)) {
+      x = ctrl.x; y = ctrl.y; w = ctrl.w; h = ctrl.h;
+    }
+    ctrl.x = x; ctrl.y = y; ctrl.w = w; ctrl.h = h;
 
     origChildren.forEach(oc => {
       const child = getControl(oc.id);
@@ -2070,6 +2177,39 @@ const HELP_PLACEHOLDERS = {
   notes: 'Requires PowerShell 5.1+ and the .NET Windows Forms assembly.',
 };
 
+// Scans every control's events (buttons, menu items, the form itself) for
+// a wired-up "Or .ps1 file" and returns each unique one in the exact
+// dot-source notation the generated code actually uses, so .NOTES stays
+// truthful about what the script calls out to. We can't see INSIDE those
+// files (if a called script calls another script, that's invisible to us)
+// so this only reports the direct, one-level call graph from this form.
+function collectCalledScripts() {
+  const found = new Set();
+
+  function scanEvents(events) {
+    if (!events) return;
+    Object.values(events).forEach(data => {
+      if (data && data.ps1 && data.ps1.trim()) found.add(data.ps1.trim());
+    });
+  }
+
+  scanEvents(state.form.events);
+  state.controls.forEach(c => {
+    scanEvents(c.events);
+    if (c.type === 'MenuStrip') {
+      (c.props.menuItems || []).forEach(m => {
+        (m.items || []).forEach(it => {
+          // Menu items don't have a separate .ps1 field today (inline code
+          // or autoAbout only), but this stays future-proof if that's added.
+          if (it.ps1 && it.ps1.trim()) found.add(it.ps1.trim());
+        });
+      });
+    }
+  });
+
+  return Array.from(found).sort();
+}
+
 function helpCheckboxTextRow(label, item, key, placeholder, multiline, tooltip) {
   const row = document.createElement('div');
   row.className = 'prop-row help-row';
@@ -2166,7 +2306,7 @@ function buildHelpBlockEditor() {
 
   const notesRow = document.createElement('div');
   notesRow.className = 'prop-row';
-  notesRow.innerHTML = `<label>Notes</label><textarea placeholder="${HELP_PLACEHOLDERS.notes}">${escapeHtml(h.notes.notes)}</textarea>`;
+  notesRow.innerHTML = `<label title="Runtime requirements, e.g. PowerShell version or required assemblies. Any button/event wired to an external .ps1 file is automatically listed below this as a 'Calls:' line - you don't need to add those yourself.">Dependencies</label><textarea placeholder="${HELP_PLACEHOLDERS.notes}">${escapeHtml(h.notes.notes)}</textarea>`;
   notesRow.querySelector('textarea').addEventListener('change', (e) => { h.notes.notes = e.target.value; });
   notesWrap.appendChild(notesRow);
 
@@ -2232,7 +2372,11 @@ function generateHelpBlockLines() {
     lines.push('.NOTES');
     lines.push('    Author: ' + (h.notes.author || HELP_PLACEHOLDERS.author));
     lines.push('    Filename: ' + (h.notes.filename || HELP_PLACEHOLDERS.filename));
-    if (h.notes.notes) h.notes.notes.split('\n').forEach(l => lines.push('    ' + l));
+    const depText = h.notes.notes || HELP_PLACEHOLDERS.notes;
+    if (depText) lines.push('    Dependencies: ' + depText);
+    collectCalledScripts().forEach(ps1 => {
+      lines.push(`    Calls: . "${ps1}"`);
+    });
   }
   return lines;
 }
