@@ -1,36 +1,42 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
-    Revision: six properties-pane fixes. (1) Sections with only one row
-    (e.g. Button-specific, GroupBox-specific) no longer render a
-    collapse toggle - they display flat. (2) Interact toggle moved out
-    of the collapsible accordion into a fixed block under the selection
-    header, and the actual bug fixed: CheckBox/RadioButton/ComboBox/
-    TrackBar no longer hardcode `disabled`, so toggling Interact now
-    really lets you check a box, pick a dropdown item, or drag a slider,
-    with the result written back to that control's props. (3) Section
-    open/closed state now persists in state.sectionOpen across re-
-    renders instead of resetting to collapsed on every property edit.
-    (4) Added a TOOLTIPS dictionary; every property label across Layout,
-    Behavior, Appearance, type-specific, Events, and Form-level fields
-    now has an explanatory title attribute, including explicit text for
-    Dock, Anchor, Z-Index, and Cursor. (5) Added a directional arrow
-    stepper (left/up/down/right at the current nudge step) plus Center-
-    X / Center-Y / Center-Both buttons to the Layout section, and wired
-    up the previously-decorative center cell of the Nudge d-pad to do
-    the same. (6) Added a MenuStrip control: defaults to preset File/
-    View/Help top-level menus (each with preset sub-items), every menu
-    and sub-item has an enable/disable checkbox plus an editable label,
-    and users can add fully custom top-level menus and custom sub-items
-    via the new menu editor. MenuStrip generates real output for HTML
-    (nested nav/ul with hover dropdowns), WinForms (ToolStripMenuItem
-    tree wired as MainMenuStrip), WPF (Menu/MenuItem/Separator), and
-    WinUI (MenuBar/MenuBarItem/MenuFlyoutItem/MenuFlyoutSeparator).
+    Revision: five fixes from user testing of 1.2. (2) Found and fixed
+    the actual root cause of Interact mode: selectControl() was called
+    on every canvas mousedown before checking the interact flag, and it
+    triggers a full render() that rebuilds the whole canvas DOM -
+    destroying the exact checkbox/dropdown/input the user had just
+    clicked, before the browser could finish handling that click.
+    Interact-mode clicks now skip that destructive re-render entirely.
+    Also discovered TextBox, RichTextBox, NumericUpDown, and
+    DateTimePicker were static preview divs with no real form element to
+    interact with regardless of the click-handling bug; all four are now
+    genuine <input>/<textarea> elements (disabled unless interacting)
+    that write back into props on change. DateTimePicker additionally
+    gets a Format-aware static preview (Long/Short/Time/Custom) when not
+    interacting, and a real <input type=date|time> when interacting.
+    (4) Anchor now actually repositions/stretches top-level controls in
+    the design canvas when the form is resized (not just in generated
+    code): Left+Right or Top+Bottom stretches the control with the
+    parent, a single Right/Bottom anchor repositions to hold that edge's
+    distance constant, None leaves the control untouched. (5) Reworked
+    the Layout section per feedback: removed the redundant directional
+    row (duplicated the Nudge d-pad). X/Y now show 0/Center/Max quick-
+    pin buttons; Width/Height show shrink(-)/grow(<->or<^>)/Max buttons
+    driven by the shared Nudge step (no duplicate step-size numbers).
+    (6) MenuStrip preset items now ship real default code instead of
+    empty stubs: File>Open/Save use OpenFileDialog/SaveFileDialog,
+    File>Exit closes the form, View>Zoom tracks a $script:ZoomLevel
+    script variable, and Help>About auto-generates its message box from
+    the Comment-Based Help synopsis/description (editable per item via a
+    new code textarea in the menu editor; typing custom code overrides
+    the auto-About behavior). Wired into both WinForms (Add_Click) and
+    HTML (onclick + generated function) output.
 */
 
-const ENGINE_VERSION = '1.2';
+const ENGINE_VERSION = '1.3';
 
 /* =========================================================================
    Control catalog
@@ -68,31 +74,34 @@ const TYPE_BACKCOLOR_OVERRIDES = {
 
 // Default MenuStrip content: preset top-level menus (checkbox-enabled), each
 // with its own preset sub-items (also checkbox-enabled) plus room for the
-// user to add fully custom top-level menus and custom sub-items.
+// user to add fully custom top-level menus and custom sub-items. Every
+// non-separator item ships with real default code (editable per-item),
+// not just a label - so File > Exit, Help > About, etc. actually do
+// something out of the box instead of being empty stubs.
 const PRESET_MENU_DEFAULT = [
   {
     id: 'file', label: 'File', enabled: true, preset: true,
     items: [
-      { id: 'file_new', label: 'New', enabled: true, preset: true },
-      { id: 'file_open', label: 'Open...', enabled: true, preset: true },
-      { id: 'file_save', label: 'Save', enabled: true, preset: true },
-      { id: 'file_sep1', label: '-', enabled: true, preset: true },
-      { id: 'file_exit', label: 'Exit', enabled: true, preset: true },
+      { id: 'file_new', label: 'New', enabled: true, preset: true, code: '# TODO: reset the form/document to a blank state' },
+      { id: 'file_open', label: 'Open...', enabled: true, preset: true, code: '$dlg = New-Object System.Windows.Forms.OpenFileDialog\nif ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {\n    # TODO: load $($dlg.FileName)\n}' },
+      { id: 'file_save', label: 'Save', enabled: true, preset: true, code: '$dlg = New-Object System.Windows.Forms.SaveFileDialog\nif ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {\n    # TODO: save to $($dlg.FileName)\n}' },
+      { id: 'file_sep1', label: '-', enabled: true, preset: true, code: '' },
+      { id: 'file_exit', label: 'Exit', enabled: true, preset: true, code: '$Form.Close()' },
     ],
   },
   {
     id: 'view', label: 'View', enabled: true, preset: true,
     items: [
-      { id: 'view_zoomin', label: 'Zoom In', enabled: true, preset: true },
-      { id: 'view_zoomout', label: 'Zoom Out', enabled: true, preset: true },
-      { id: 'view_reset', label: 'Reset Zoom', enabled: true, preset: true },
+      { id: 'view_zoomin', label: 'Zoom In', enabled: true, preset: true, code: '$script:ZoomLevel = [Math]::Min(200, $script:ZoomLevel + 10)\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
+      { id: 'view_zoomout', label: 'Zoom Out', enabled: true, preset: true, code: '$script:ZoomLevel = [Math]::Max(50, $script:ZoomLevel - 10)\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
+      { id: 'view_reset', label: 'Reset Zoom', enabled: true, preset: true, code: '$script:ZoomLevel = 100\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
     ],
   },
   {
     id: 'help', label: 'Help', enabled: true, preset: true,
     items: [
-      { id: 'help_docs', label: 'Documentation', enabled: true, preset: true },
-      { id: 'help_about', label: 'About', enabled: true, preset: true },
+      { id: 'help_docs', label: 'Documentation', enabled: true, preset: true, code: 'Start-Process "https://example.com/docs"' },
+      { id: 'help_about', label: 'About', enabled: true, preset: true, code: '', autoAbout: true },
     ],
   },
 ];
@@ -371,19 +380,67 @@ function ensureFormResizeHandles(formEl) {
   });
 }
 
+function applyAnchorFromOrigin(ctrl, orig, prevW, prevH, newW, newH) {
+  const anchorStr = ctrl.props.anchor || 'Top, Left';
+  if (anchorStr === 'None') return; // stays exactly where it was, unresized
+
+  const anchor = anchorStr.split(',').map(s => s.trim());
+  const hasLeft = anchor.includes('Left');
+  const hasRight = anchor.includes('Right');
+  const hasTop = anchor.includes('Top');
+  const hasBottom = anchor.includes('Bottom');
+
+  // Distances from the control's original far edges to the parent's far
+  // edges, captured at drag start - these are what stay constant for an
+  // anchored edge as the parent resizes.
+  const distRight = prevW - (orig.x + orig.w);
+  const distBottom = prevH - (orig.y + orig.h);
+
+  if (hasLeft && hasRight) {
+    ctrl.x = orig.x;
+    ctrl.w = Math.max(12, newW - orig.x - distRight);
+  } else if (hasRight) {
+    ctrl.w = orig.w;
+    ctrl.x = newW - distRight - orig.w;
+  } else {
+    ctrl.x = orig.x;
+    ctrl.w = orig.w;
+  }
+
+  if (hasTop && hasBottom) {
+    ctrl.y = orig.y;
+    ctrl.h = Math.max(12, newH - orig.y - distBottom);
+  } else if (hasBottom) {
+    ctrl.h = orig.h;
+    ctrl.y = newH - distBottom - orig.h;
+  } else {
+    ctrl.y = orig.y;
+    ctrl.h = orig.h;
+  }
+}
+
 function startFormResize(e) {
   e.stopPropagation();
   e.preventDefault();
   const handle = e.currentTarget.dataset.handle;
   const startX = e.clientX, startY = e.clientY;
   const orig = { w: state.form.width, h: state.form.height };
+  // Snapshot top-level controls' bounds so anchors can be recomputed
+  // fresh from this origin on every tick (avoids cumulative drift).
+  const origCtrls = state.controls.filter(c => !c.parentId).map(c => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }));
 
   function onMove(ev) {
     const dx = ev.clientX - startX, dy = ev.clientY - startY;
     if (handle.includes('e')) state.form.width = Math.max(200, snap(orig.w + dx));
     if (handle.includes('s')) state.form.height = Math.max(150, snap(orig.h + dy));
-    renderFormChrome();
-    renderStatus();
+
+    origCtrls.forEach(o => {
+      const ctrl = getControl(o.id);
+      if (!ctrl) return;
+      applyAnchorFromOrigin(ctrl, o, orig.w, orig.h, state.form.width, state.form.height);
+    });
+
+    render();
   }
   function onUp() {
     document.removeEventListener('mousemove', onMove);
@@ -451,7 +508,12 @@ function renderInner(c) {
       break;
     }
     case 'TextBox': {
-      wrap.innerHTML = `<div class="rc-textbox" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};">${escapeHtml(p.passwordChar ? p.passwordChar.repeat(p.text.length) : p.text)}</div>`;
+      if (p.multiline) {
+        wrap.innerHTML = `<textarea class="rc-textbox rc-textbox-multiline" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};" maxlength="${p.maxLength || ''}" ${p.readOnly ? 'readonly' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</textarea>`;
+      } else {
+        wrap.innerHTML = `<input type="${p.passwordChar ? 'password' : 'text'}" class="rc-textbox" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};" value="${escapeHtml(p.text)}" maxlength="${p.maxLength || ''}" ${p.readOnly ? 'readonly' : ''} ${c.interact ? '' : 'disabled'}>`;
+      }
+      if (c.interact) wrap.querySelector('input,textarea').addEventListener('input', (e) => { p.text = e.target.value; });
       break;
     }
     case 'CheckBox': {
@@ -502,15 +564,25 @@ function renderInner(c) {
       break;
     }
     case 'NumericUpDown': {
-      wrap.innerHTML = `<div class="rc-numeric" style="${fontStyleFor(p)}">${p.value}</div>`;
+      wrap.innerHTML = `<input type="number" class="rc-numeric" style="${fontStyleFor(p)}" min="${p.min}" max="${p.max}" step="${p.increment}" value="${p.value}" ${c.interact ? '' : 'disabled'}>`;
+      if (c.interact) wrap.querySelector('input').addEventListener('change', (e) => { p.value = Number(e.target.value) || 0; });
       break;
     }
     case 'DateTimePicker': {
-      wrap.innerHTML = `<div class="rc-datetime" style="${fontStyleFor(p)}">${escapeHtml(p.value || new Date().toLocaleDateString())}</div>`;
+      if (c.interact) {
+        const inputType = p.format === 'Time' ? 'time' : 'date';
+        wrap.innerHTML = `<input type="${inputType}" class="rc-datetime-input" style="${fontStyleFor(p)}">`;
+        const inp = wrap.querySelector('input');
+        if (p.value) inp.value = p.value;
+        inp.addEventListener('change', (e) => { p.value = e.target.value; });
+      } else {
+        wrap.innerHTML = `<div class="rc-datetime" style="${fontStyleFor(p)}">${escapeHtml(formatDateTimePreview(p))}</div>`;
+      }
       break;
     }
     case 'RichTextBox': {
-      wrap.innerHTML = `<div class="rc-richtext" style="${fontStyleFor(p)}">${escapeHtml(p.text)}</div>`;
+      wrap.innerHTML = `<textarea class="rc-richtext" style="${fontStyleFor(p)}background:${p.backColor || '#FFFFFF'};color:${p.foreColor};" ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</textarea>`;
+      if (c.interact) wrap.querySelector('textarea').addEventListener('input', (e) => { p.text = e.target.value; });
       break;
     }
     case 'LinkLabel': {
@@ -519,6 +591,18 @@ function renderInner(c) {
     }
   }
   return wrap;
+}
+
+function formatDateTimePreview(p) {
+  let d = p.value ? new Date(p.value) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+  switch (p.format) {
+    case 'Long': return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    case 'Short': return d.toLocaleDateString();
+    case 'Time': return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    case 'Custom': return p.value || d.toLocaleDateString();
+    default: return d.toLocaleDateString();
+  }
 }
 
 function renderMenuStripPreview(p) {
@@ -572,9 +656,24 @@ function onControlMouseDown(e) {
     return;
   }
 
-  selectControl(id);
+  if (ctrl.interact) {
+    // Deliberately do NOT call selectControl()/render() here. render()
+    // rebuilds the whole canvas DOM, which would destroy the very
+    // checkbox/select/input/date-picker the user is mid-click on, before
+    // the browser finishes toggling/opening/focusing it. Only update
+    // selection state (lightweight, no canvas rebuild) if it actually
+    // changed, so the real control is free to receive the interaction.
+    if (state.selectedId !== id) {
+      document.querySelectorAll('.ctrl.selected').forEach(elx => elx.classList.remove('selected'));
+      e.currentTarget.classList.add('selected');
+      state.selectedId = id;
+      renderProps();
+      renderStatus();
+    }
+    return;
+  }
 
-  if (ctrl.interact) return; // let the real control receive the interaction
+  selectControl(id);
 
   e.stopPropagation();
   e.preventDefault();
@@ -930,39 +1029,88 @@ function centerControl(ctrl, axis) {
   render();
 }
 
-function positionArrowRow(ctrl) {
+function xyQuickRow(ctrl, axis, label) {
   const row = document.createElement('div');
-  row.className = 'prop-row pos-arrow-row';
-  row.title = 'Move the control by the current nudge step, or center it within its parent.';
-  const label = document.createElement('label');
-  label.textContent = 'Position';
-  const cluster = document.createElement('div');
-  cluster.className = 'pos-arrow-cluster';
+  row.className = 'prop-row xy-row';
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  labelEl.title = tt(axis);
 
-  const step = state.nudgeStep;
-  const mk = (glyph, title, onClick) => {
+  const wrap = document.createElement('div');
+  wrap.className = 'xy-controls';
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.value = ctrl[axis];
+  input.className = 'px-input';
+  input.addEventListener('change', () => { ctrl[axis] = snap(Number(input.value) || 0); render(); });
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'xy-quick-btns';
+  const mk = (text, title, onClick) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'pos-arrow-btn';
-    b.textContent = glyph;
+    b.className = 'xy-quick-btn';
+    b.textContent = text;
     b.title = title;
     b.addEventListener('click', onClick);
     return b;
   };
-  cluster.appendChild(mk('\u2190', `Move left ${step}px`, () => { ctrl.x = snap(ctrl.x - step); render(); }));
-  cluster.appendChild(mk('\u2191', `Move up ${step}px`, () => { ctrl.y = snap(ctrl.y - step); render(); }));
-  cluster.appendChild(mk('\u2193', `Move down ${step}px`, () => { ctrl.y = snap(ctrl.y + step); render(); }));
-  cluster.appendChild(mk('\u2192', `Move right ${step}px`, () => { ctrl.x = snap(ctrl.x + step); render(); }));
+  btnRow.appendChild(mk('0', axis === 'x' ? 'Pin to far left' : 'Pin to far top', () => { ctrl[axis] = 0; render(); }));
+  btnRow.appendChild(mk('Center', 'Center within parent', () => centerControl(ctrl, axis)));
+  btnRow.appendChild(mk('Max', axis === 'x' ? 'Pin to far right (edge of parent)' : 'Pin to far bottom (edge of parent)', () => {
+    const b = parentBounds(ctrl);
+    ctrl[axis] = axis === 'x' ? b.w - ctrl.w : b.h - ctrl.h;
+    render();
+  }));
 
-  const centerWrap = document.createElement('div');
-  centerWrap.className = 'pos-center-cluster';
-  centerWrap.appendChild(mk('\u21c6 X', 'Center horizontally within parent', () => centerControl(ctrl, 'x')));
-  centerWrap.appendChild(mk('\u21c5 Y', 'Center vertically within parent', () => centerControl(ctrl, 'y')));
-  centerWrap.appendChild(mk('\u2316', 'Center within parent (both axes)', () => centerControl(ctrl, 'both')));
+  wrap.appendChild(input);
+  wrap.appendChild(btnRow);
+  row.appendChild(labelEl);
+  row.appendChild(wrap);
+  return row;
+}
 
-  row.appendChild(label);
-  row.appendChild(cluster);
-  row.appendChild(centerWrap);
+function whQuickRow(ctrl, dim, label, growSymbol) {
+  const row = document.createElement('div');
+  row.className = 'prop-row xy-row';
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  labelEl.title = tt(dim);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'xy-controls';
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.value = ctrl[dim];
+  input.className = 'px-input';
+  input.addEventListener('change', () => { ctrl[dim] = Math.max(12, snap(Number(input.value) || 12)); render(); });
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'xy-quick-btns';
+  const mk = (text, title, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'xy-quick-btn';
+    b.textContent = text;
+    b.title = title;
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  const step = state.nudgeStep;
+  btnRow.appendChild(mk('\u2212', `Shrink ${step}px (uses the Nudge section's step size)`, () => { ctrl[dim] = Math.max(12, snap(ctrl[dim] - step)); render(); }));
+  btnRow.appendChild(mk(growSymbol, `Grow ${step}px (uses the Nudge section's step size)`, () => { ctrl[dim] = snap(ctrl[dim] + step); render(); }));
+  btnRow.appendChild(mk('Max', dim === 'w' ? "Fit parent's width" : "Fit parent's height", () => {
+    const b = parentBounds(ctrl);
+    ctrl[dim] = dim === 'w' ? b.w : b.h;
+    render();
+  }));
+
+  wrap.appendChild(input);
+  wrap.appendChild(btnRow);
+  row.appendChild(labelEl);
+  row.appendChild(wrap);
   return row;
 }
 
@@ -977,11 +1125,10 @@ function buildLayoutRows(ctrl) {
   });
   frag.appendChild(nameRow);
 
-  frag.appendChild(positionArrowRow(ctrl));
-
-  [['x', 'X'], ['y', 'Y'], ['w', 'Width'], ['h', 'Height']].forEach(([key, label]) => {
-    frag.appendChild(pixelStepperRow(label, ctrl[key], (v) => { ctrl[key] = snap(v); render(); }, { min: key === 'w' || key === 'h' ? 12 : -9999, tooltip: tt(key) }));
-  });
+  frag.appendChild(xyQuickRow(ctrl, 'x', 'X'));
+  frag.appendChild(xyQuickRow(ctrl, 'y', 'Y'));
+  frag.appendChild(whQuickRow(ctrl, 'w', 'Width', '\u2194'));
+  frag.appendChild(whQuickRow(ctrl, 'h', 'Height', '\u2195'));
 
   const zRow = document.createElement('div');
   zRow.className = 'prop-row';
@@ -1164,7 +1311,7 @@ function buildMenuTopItem(ctrl, key, menus, menu, mi) {
   addItemBtn.textContent = '+ Add item';
   addItemBtn.title = 'Add a custom entry under this menu.';
   addItemBtn.addEventListener('click', () => {
-    menu.items.push({ id: 'item' + Math.random().toString(36).slice(2, 8), label: 'New Item', enabled: true, preset: false });
+    menu.items.push({ id: 'item' + Math.random().toString(36).slice(2, 8), label: 'New Item', enabled: true, preset: false, code: '' });
     render();
   });
   itemsWrap.appendChild(addItemBtn);
@@ -1174,6 +1321,9 @@ function buildMenuTopItem(ctrl, key, menus, menu, mi) {
 }
 
 function buildMenuSubItem(menu, it, ii) {
+  const wrap = document.createElement('div');
+  wrap.className = 'menu-editor-subitem-wrap';
+
   const row = document.createElement('div');
   row.className = 'menu-editor-subitem-row';
 
@@ -1205,7 +1355,32 @@ function buildMenuSubItem(menu, it, ii) {
   row.appendChild(nameInput);
   row.appendChild(tag);
   row.appendChild(delBtn);
-  return row;
+  wrap.appendChild(row);
+
+  const isSeparator = it.label === '-';
+  if (!isSeparator) {
+    const codeRow = document.createElement('div');
+    codeRow.className = 'menu-editor-code-row';
+    const codeLabel = document.createElement('label');
+    codeLabel.textContent = it.autoAbout ? 'Code (auto-generated from Comment-Based Help)' : 'Code (PowerShell / JS, runs on click)';
+    codeLabel.title = it.autoAbout
+      ? 'This item shows your .SYNOPSIS/.DESCRIPTION text in a message box automatically. Start typing below to override it with custom code.'
+      : 'Handler that runs when this menu item is clicked.';
+    const codeTa = document.createElement('textarea');
+    codeTa.className = 'menu-editor-code';
+    codeTa.value = it.autoAbout ? '' : (it.code || '');
+    codeTa.placeholder = it.autoAbout ? '(auto) shows .SYNOPSIS / .DESCRIPTION in a message box' : '';
+    codeTa.addEventListener('change', () => {
+      it.code = codeTa.value;
+      if (codeTa.value.trim()) it.autoAbout = false;
+      render();
+    });
+    codeRow.appendChild(codeLabel);
+    codeRow.appendChild(codeTa);
+    wrap.appendChild(codeRow);
+  }
+
+  return wrap;
 }
 
 function buildInteractFixedBlock(ctrl) {
@@ -1574,12 +1749,42 @@ function orderedControls() {
 
 function cssColor(hex) { return hex; }
 
-function menuStripHtml(c, styleBase) {
+function menuAboutMessage() {
+  const h = state.form.help;
+  const parts = [];
+  if (h.synopsis && h.synopsis.enabled && h.synopsis.text) parts.push(h.synopsis.text);
+  if (h.description && h.description.enabled && h.description.text) parts.push(h.description.text);
+  return parts.join('\n\n') || (state.form.text + ' - no description provided.');
+}
+
+// Returns the code that should run when a menu item is clicked, in the
+// requested target language. autoAbout items ignore their stored `code`
+// and are generated fresh each time from the Comment-Based Help block,
+// unless the user has typed their own code (which clears autoAbout).
+function menuItemCodeFor(it, format) {
+  if (it.autoAbout) {
+    const msg = menuAboutMessage();
+    if (format === 'html') return `alert(${JSON.stringify(msg)});`;
+    return `[System.Windows.Forms.MessageBox]::Show("${msg.replace(/"/g, '""').replace(/\r?\n/g, '\`n')}", "About ${state.form.text.replace(/"/g, '""')}")`;
+  }
+  return it.code || '';
+}
+
+function menuStripHtml(c, styleBase, functionsOut) {
   const menus = (c.props.menuItems || []).filter(m => m.enabled);
   const li = (m) => {
     const items = (m.items || []).filter(it => it.enabled);
     const subUl = items.length
-      ? `<ul>${items.map(it => it.label === '-' ? `<li class="menu-sep"></li>` : `<li>${escapeHtml(it.label)}</li>`).join('')}</ul>`
+      ? `<ul>${items.map(it => {
+        if (it.label === '-') return `<li class="menu-sep"></li>`;
+        const code = menuItemCodeFor(it, 'html');
+        if (code && code.trim()) {
+          const fnName = `${c.name}_${m.id}_${it.id}`;
+          functionsOut.push(`function ${fnName}(event) {\n  ${code.split('\n').join('\n  ')}\n}`);
+          return `<li onclick="${fnName}(event)">${escapeHtml(it.label)}</li>`;
+        }
+        return `<li>${escapeHtml(it.label)}</li>`;
+      }).join('')}</ul>`
       : '';
     return `<li>${escapeHtml(m.label)}${subUl}</li>`;
   };
@@ -1589,6 +1794,7 @@ function menuStripHtml(c, styleBase) {
 function generateHTML() {
   const f = state.form;
   const ctrls = orderedControls();
+  const functions = [];
 
   const domFor = (c) => {
     const p = c.props;
@@ -1638,7 +1844,7 @@ function generateHTML() {
       case 'LinkLabel':
         return `<a id="${c.name}" href="${escapeHtml(p.url)}" style="${styleBase}color:${p.foreColor};"${evtAttr('LinkClicked', 'click')}>${escapeHtml(p.text)}</a>`;
       case 'MenuStrip':
-        return menuStripHtml(c, styleBase);
+        return menuStripHtml(c, styleBase, functions);
       default:
         return '';
     }
@@ -1647,7 +1853,6 @@ function generateHTML() {
   const childrenHtml = (parent) => ctrls.filter(c => c.parentId === parent.id).map(domFor).join('\n');
   const topLevelHtml = ctrls.filter(c => !c.parentId).map(domFor).join('\n  ');
 
-  const functions = [];
   ctrls.forEach(c => Object.entries(c.events).forEach(([evtName, data]) => {
     if (data && data.code) functions.push(`function ${data.fn}(event) {\n  ${data.code.split('\n').join('\n  ')}\n}`);
   }));
@@ -1694,9 +1899,16 @@ function generateWinForms() {
   const ctrls = orderedControls();
   const lines = [];
 
+  const usesZoomLevel = state.controls.some(c => c.type === 'MenuStrip' &&
+    (c.props.menuItems || []).some(m => (m.items || []).some(it => (menuItemCodeFor(it, 'winforms') || '').includes('$script:ZoomLevel'))));
+
   lines.push(`Add-Type -AssemblyName System.Windows.Forms`);
   lines.push(`Add-Type -AssemblyName System.Drawing`);
   lines.push('');
+  if (usesZoomLevel) {
+    lines.push(`$script:ZoomLevel = 100`);
+    lines.push('');
+  }
   lines.push(`$Form = New-Object System.Windows.Forms.Form`);
   lines.push(`$Form.Text = "${f.text}"`);
   lines.push(`$Form.Size = New-Object System.Drawing.Size(${f.width}, ${f.height})`);
@@ -1806,6 +2018,10 @@ function generateWinForms() {
               const itemVar = `${menuVar}_${it.id.replace(new RegExp('^' + m.id + '_'), '')}`;
               lines.push(`$${itemVar} = New-Object System.Windows.Forms.ToolStripMenuItem`);
               lines.push(`$${itemVar}.Text = "${(it.label || '').replace(/"/g, '""')}"`);
+              const code = menuItemCodeFor(it, 'winforms');
+              if (code && code.trim()) {
+                lines.push(`$${itemVar}.Add_Click({\n    ${code.split('\n').join('\n    ')}\n})`);
+              }
               lines.push(`$${menuVar}.DropDownItems.Add($${itemVar}) | Out-Null`);
             }
           });
