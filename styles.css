@@ -1,15 +1,15 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.5
+    Version 1.6
 
-    Revision: styling to match engine.js 1.6. Added .anchor-editor-grid/
-    .anchor-editor-chip for the new per-edge Anchor checkboxes. Added
-    .rc-tabcontrol-header/.rc-tabcontrol-tab/.rc-tabcontrol-body/
-    .tabcontrol-content for the new TabControl canvas preview (clickable
-    header strip, offset content area), and .tab-editor* for its Tabs
-    property editor. Added .usage-hint for the new worked-example info
-    blocks shown above ProgressBar/TrackBar/etc and in Comment-Based Help.
+    Revision: styling to match engine.js 1.7. Added .objects-row/
+    .objects-row-name/.objects-row-type/.objects-tab-header/.objects-empty
+    for the new Objects (control-finder) modal list. The Help node reuses
+    the existing .usage-hint styling from the previous pass (now shown
+    for every control type instead of just four). No changes needed for
+    Undo/Redo, Parent dropdown, or Dock stacking - those reuse existing
+    .btn/.prop-row/.toolbar-spacer rules.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -894,6 +894,33 @@ button, input, select, textarea {
 .about-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; }
 .about-grid dt { color: var(--bp-text-faint); }
 .about-grid dd { margin: 0; font-family: var(--bp-font-mono); color: var(--bp-accent-2); }
+
+/* Objects list (finds controls hidden behind others) */
+.objects-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+}
+.objects-row:hover { background: var(--bp-panel-raised); }
+.objects-row.active { background: var(--bp-accent-2-dim); color: var(--bp-accent-2); }
+.objects-row-name { font-weight: 500; }
+.objects-row-type { font-size: 10.5px; color: var(--bp-text-faint); font-family: var(--bp-font-mono); }
+.objects-row.objects-tab-header {
+  cursor: default;
+  color: var(--bp-text-faint);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 10px;
+  padding-bottom: 3px;
+}
+.objects-row.objects-tab-header:hover { background: none; }
+.objects-empty { padding: 20px 10px; text-align: center; color: var(--bp-text-faint); font-size: 12px; }
 
 .code-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
 .code-tabs button {
