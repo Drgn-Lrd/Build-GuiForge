@@ -1,12 +1,15 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.5
 
-    Revision: replaced .tool-glyph (letter-abbreviation styling) with
-    .tool-icon/.tool-icon-svg to house the new real vector toolbox
-    icons - fixed-size icon chip container plus a 16x16 SVG sized and
-    colored to match the theme via currentColor.
+    Revision: styling to match engine.js 1.6. Added .anchor-editor-grid/
+    .anchor-editor-chip for the new per-edge Anchor checkboxes. Added
+    .rc-tabcontrol-header/.rc-tabcontrol-tab/.rc-tabcontrol-body/
+    .tabcontrol-content for the new TabControl canvas preview (clickable
+    header strip, offset content area), and .tab-editor* for its Tabs
+    property editor. Added .usage-hint for the new worked-example info
+    blocks shown above ProgressBar/TrackBar/etc and in Comment-Based Help.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -37,6 +40,55 @@
 }
 .xy-quick-btn:hover { border-color: var(--bp-accent-2); }
 .xy-quick-btn:active { background: var(--bp-accent-2-dim); }
+
+/* Anchor editor (per-edge checkboxes, replacing the old fixed-preset dropdown) */
+.anchor-editor-row { grid-template-columns: 60px 1fr; align-items: center; }
+.anchor-editor-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 10px; }
+.anchor-editor-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--bp-text-muted);
+  cursor: pointer;
+}
+.anchor-editor-chip input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--bp-accent-2); flex-shrink: 0; }
+
+/* TabControl canvas preview */
+.rc-tabcontrol-header {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex;
+  background: #ECECEC;
+  border-bottom: 1px solid #ACA899;
+  z-index: 5;
+  pointer-events: auto;
+}
+.rc-tabcontrol-tab {
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: #333;
+  cursor: pointer;
+  border-right: 1px solid #ACA899;
+  user-select: none;
+}
+.rc-tabcontrol-tab.active { background: #FFFFFF; font-weight: 600; }
+.rc-tabcontrol-tab:hover:not(.active) { background: #DCDCDC; }
+.rc-tabcontrol-body {
+  position: absolute;
+  top: 26px; left: 0; right: 0; bottom: 0;
+  background: #FFFFFF;
+  border: 1px solid #ACA899;
+  border-top: none;
+}
+.tabcontrol-content {
+  position: absolute;
+  top: 26px; left: 0; right: 0; bottom: 0;
+  overflow: hidden;
+}
 
 /* MenuStrip canvas preview */
 .rc-menustrip {
@@ -75,6 +127,23 @@
 
 /* MenuStrip property editor (preset + custom menus/items with checkboxes) */
 .menu-editor { padding: 2px 0; }
+
+/* TabControl tabs editor */
+.tab-editor { padding: 2px 0; }
+.tab-editor-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
+.tab-editor-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--bp-border-soft);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  background: var(--bp-panel-raised);
+}
+.tab-editor-item.active { border-color: var(--bp-accent-2); }
+.tab-select-btn { flex-shrink: 0; font-size: 10.5px; padding: 4px 8px; }
+.tab-add-btn { width: 100%; margin-top: 2px; font-size: 11px; padding: 5px; }
 .menu-editor-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
 .menu-editor-item {
   border: 1px solid var(--bp-border-soft);
@@ -133,7 +202,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.4';
+  --stylesheet-version: '1.5';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -725,6 +794,18 @@ button, input, select, textarea {
 /* Items editor (combo/listbox) */
 .items-editor textarea { font-family: var(--bp-font-mono); min-height: 70px; }
 .items-hint { font-size: 10px; color: var(--bp-text-faint); margin-top: 2px; }
+
+.usage-hint {
+  margin: 8px 12px;
+  padding: 8px 10px;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border-soft);
+  border-left: 2px solid var(--bp-accent-2);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--bp-text-muted);
+}
 
 /* Events */
 .event-block {
