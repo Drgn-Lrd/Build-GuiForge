@@ -1,17 +1,32 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.6
 
-    Revision: replaced the toolbox's two-letter glyph abbreviations
-    (Bt/Ab/Tb/Ck/etc) with real vector icons. Added a TOOL_ICONS
-    dictionary of 16x16 line-art SVG icons, one per control type
-    (button shape, checkmark, radio dot, dropdown arrow, list rows,
-    calendar grid, chain-link, menu bar, etc), rendered via
-    toolIconSvg() using currentColor so they follow the theme.
+    Revision: (1) Corrected Dock vs Anchor, which had been swapped -
+    added a real applyDock() (hug an edge and stretch along it, like a
+    taskbar; Fill/Top/Bottom/Left/Right, applies immediately and on
+    resize) and reworked Anchor into genuine percentage-based math
+    (applyAnchorFromOrigin now preserves each checked edge's margin as a
+    % of parent size, not a fixed pixel offset, so all-four-anchored
+    scales proportionally while staying centered). Anchor is now four
+    independent checkboxes (any combination) instead of a fixed-preset
+    dropdown. Dock overrides Anchor when both are set. (2) Added toolbox
+    tooltips: a TOOL_DESCRIPTIONS dictionary explains what every control
+    is for and how to configure it. (3) Added a TabControl container:
+    real tab pages (add/rename/remove via a new Tabs editor), a clickable
+    canvas header strip that stays interactive regardless of the Interact
+    toggle, per-tab child isolation (children carry a `tabPage` field),
+    and code generation across HTML (pure-CSS radio-driven tabs, no JS),
+    WinForms (real TabPage objects, children routed into the correct
+    page), WPF (TabControl/TabItem), and WinUI (TabView/TabViewItem).
+    (4) Added a CONTROL_USAGE_HINTS block with worked examples shown
+    above ProgressBar/TrackBar/NumericUpDown/DateTimePicker's properties,
+    and expanded the Comment-Based Help editor with an intro explanation,
+    per-field tooltips, and concrete (non-"blah") example placeholders.
 */
 
-const ENGINE_VERSION = '1.4';
+const ENGINE_VERSION = '1.6';
 
 /* =========================================================================
    Control catalog
@@ -35,7 +50,7 @@ const COMMON_BEHAVIOR_PROPS = [
   ['tabIndex', 'Tab Index', 'number', 0],
   ['toolTip', 'Tool Tip', 'text', ''],
   ['dock', 'Dock', 'select', 'None', { options: ['None', 'Top', 'Bottom', 'Left', 'Right', 'Fill'] }],
-  ['anchor', 'Anchor', 'select', 'Top, Left', { options: ['Top, Left', 'Top, Left, Right', 'Top, Bottom, Left', 'Top, Bottom, Left, Right', 'None'] }],
+  ['anchor', 'Anchor', 'anchorEditor', 'Top, Left'],
   ['cursor', 'Cursor', 'select', 'Default', { options: ['Default', 'Hand', 'IBeam', 'Wait', 'Cross', 'SizeAll'] }],
 ];
 
@@ -79,6 +94,14 @@ const PRESET_MENU_DEFAULT = [
       { id: 'help_about', label: 'About', enabled: true, preset: true, code: '', autoAbout: true },
     ],
   },
+];
+
+// Default TabControl content: two starter tab pages. Each tab page holds
+// its own separate set of children (tracked via each child's `tabPage`
+// field), so controls placed on Tab1 don't show up on Tab2.
+const DEFAULT_TABS = [
+  { id: 'tab1', label: 'Tab1' },
+  { id: 'tab2', label: 'Tab2' },
 ];
 
 const CONTROL_DEFS = {
@@ -216,6 +239,15 @@ const CONTROL_DEFS = {
     events: [],
     isMenuStrip: true,
   },
+  TabControl: {
+    label: 'TabControl', glyph: 'Tc', defaultW: 320, defaultH: 220,
+    props: [
+      ['tabs', 'Tabs', 'tabEditor', DEFAULT_TABS],
+    ],
+    events: [],
+    isContainer: true,
+    isTabControl: true,
+  },
 };
 
 // Real vector icons for the toolbox, one per control type - replaces the
@@ -240,6 +272,7 @@ const TOOL_ICONS = {
   RichTextBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h6"/>`,
   LinkLabel: `<path d="M6.6 9.4l2.8-2.8"/><path d="M5.3 8.3a1.9 1.9 0 010-2.7l1.3-1.3a1.9 1.9 0 012.7 2.7l-.6.6"/><path d="M10.7 7.7a1.9 1.9 0 010 2.7l-1.3 1.3a1.9 1.9 0 01-2.7-2.7l.6-.6"/>`,
   MenuStrip: `<rect x="1.5" y="3.3" width="13" height="3.4" rx="0.7"/><path d="M5.3 3.3v3.4M9.5 3.3v3.4"/><path d="M2 10.2h12M2 12.7h8"/>`,
+  TabControl: `<path d="M1.5 5.3V4a1 1 0 011-1h4l1.3 1.6h6.2a1 1 0 011 1v.7"/><rect x="1.5" y="5.3" width="13" height="8.2" rx="1"/><path d="M5.8 5.3v8.2"/>`,
 };
 
 function toolIconSvg(type) {
@@ -247,10 +280,34 @@ function toolIconSvg(type) {
   return `<svg class="tool-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 }
 
+// Short usage description shown as a tooltip on each toolbox item -
+// what the control is for, in plain terms, since the icon/label alone
+// doesn't explain behavior for less-common controls.
+const TOOL_DESCRIPTIONS = {
+  Button: 'A clickable button. Wire its Click event to run code when pressed.',
+  Label: 'Static, read-only text. Not interactive - use for captions and headings.',
+  TextBox: 'A single- or multi-line field the user can type into.',
+  CheckBox: 'An independent on/off toggle. Multiple can be checked at once.',
+  RadioButton: 'A mutually-exclusive choice. Give matching Group Name to radio buttons that should only allow one selection.',
+  ComboBox: 'A dropdown the user can pick from (or type into, depending on DropDown Style). Enter choices in Items, one per line.',
+  ListBox: 'A scrollable list of choices, optionally multi-select. Enter choices in Items, one per line.',
+  Panel: 'A plain, unlabeled container for grouping other controls. Drag controls onto it to make them children.',
+  GroupBox: 'A labeled, bordered container for grouping related controls - the border and title make the grouping visible to the user.',
+  PictureBox: 'Displays an image. Set Image Source to a file path or URL.',
+  ProgressBar: 'Shows progress toward completion. Set Min/Max to the range, and Value to the current position - the fill on screen is (Value-Min)/(Max-Min).',
+  TrackBar: 'A draggable slider for picking a numeric value within Min/Max, in steps of Tick Frequency.',
+  NumericUpDown: 'A number field with up/down spinner arrows, constrained to Min/Max in steps of Increment.',
+  DateTimePicker: 'Lets the user pick a date (or time, if Format is Time). The Format property controls how it displays.',
+  RichTextBox: 'A multi-line text area for longer content than a TextBox is meant for.',
+  LinkLabel: 'Text styled and behaving like a hyperlink. Set URL to where it should navigate.',
+  MenuStrip: 'A top menu bar (File/Edit/View/etc). Comes with preset File/View/Help menus you can check on/off, edit, or add custom ones to - each item can have its own click code.',
+  TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
+};
+
 const TOOLBOX_GROUPS = [
   { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
   { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
-  { heading: 'Containers', types: ['Panel', 'GroupBox'] },
+  { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl'] },
   { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
   { heading: 'Menus', types: ['MenuStrip'] },
 ];
@@ -297,7 +354,7 @@ function nextName(type) {
 
 function getControl(id) { return state.controls.find(c => c.id === id); }
 
-function createControl(type, x, y, parentId) {
+function createControl(type, x, y, parentId, tabPage) {
   const def = CONTROL_DEFS[type];
   const name = nextName(type);
   const props = {};
@@ -313,12 +370,19 @@ function createControl(type, x, y, parentId) {
     id: 'c' + Math.random().toString(36).slice(2, 10),
     type, name,
     parentId: parentId || null,
+    tabPage: tabPage || null, // which tab page of a TabControl parent this belongs to, if any
     x: snap(x), y: snap(y),
     w: def.defaultW, h: def.defaultH,
     z: state.controls.length + 1,
     interact: false,
     props, events,
   };
+  if (def.isTabControl) {
+    // Design-time-only state (like `interact`): which tab is currently
+    // showing in the designer. Not a "prop" because it's not part of the
+    // generated output, just which page you're looking at while building.
+    ctrl.activeTabId = (props.tabs[0] && props.tabs[0].id) || null;
+  }
   state.controls.push(ctrl);
   return ctrl;
 }
@@ -384,9 +448,30 @@ function ensureFormResizeHandles(formEl) {
   });
 }
 
+function applyDock(ctrl) {
+  const dockVal = ctrl.props.dock || 'None';
+  if (dockVal === 'None') return;
+  const b = parentBounds(ctrl);
+
+  // Dock hugs an edge (or all edges, for Fill) and stretches along it - the
+  // "Windows taskbar" behavior: always flush, always full-length on that
+  // edge, no matter how the parent resizes.
+  switch (dockVal) {
+    case 'Top': ctrl.x = 0; ctrl.y = 0; ctrl.w = b.w; break;
+    case 'Bottom': ctrl.x = 0; ctrl.y = Math.max(0, b.h - ctrl.h); ctrl.w = b.w; break;
+    case 'Left': ctrl.x = 0; ctrl.y = 0; ctrl.h = b.h; break;
+    case 'Right': ctrl.x = Math.max(0, b.w - ctrl.w); ctrl.y = 0; ctrl.h = b.h; break;
+    case 'Fill': ctrl.x = 0; ctrl.y = 0; ctrl.w = b.w; ctrl.h = b.h; break;
+  }
+}
+
 function applyAnchorFromOrigin(ctrl, orig, prevW, prevH, newW, newH) {
+  // Dock takes over entirely when active - Anchor is ignored, same as real
+  // WinForms behavior (and what the Anchor tooltip already tells the user).
+  if (ctrl.props.dock && ctrl.props.dock !== 'None') return;
+
   const anchorStr = ctrl.props.anchor || 'Top, Left';
-  if (anchorStr === 'None') return; // stays exactly where it was, unresized
+  if (anchorStr === 'None') return;
 
   const anchor = anchorStr.split(',').map(s => s.trim());
   const hasLeft = anchor.includes('Left');
@@ -394,32 +479,37 @@ function applyAnchorFromOrigin(ctrl, orig, prevW, prevH, newW, newH) {
   const hasTop = anchor.includes('Top');
   const hasBottom = anchor.includes('Bottom');
 
-  // Distances from the control's original far edges to the parent's far
-  // edges, captured at drag start - these are what stay constant for an
-  // anchored edge as the parent resizes.
-  const distRight = prevW - (orig.x + orig.w);
-  const distBottom = prevH - (orig.y + orig.h);
-
+  // Anchor keeps each checked edge's margin at a constant PERCENTAGE of the
+  // parent's size (not a fixed pixel count), computed from the control's
+  // bounds at the start of the resize. Checking all four edges means every
+  // margin scales proportionally together, so the control grows/shrinks
+  // and stays exactly as centered, relative to the parent, as it started.
   if (hasLeft && hasRight) {
-    ctrl.x = orig.x;
-    ctrl.w = Math.max(12, newW - orig.x - distRight);
+    const leftPct = orig.x / prevW;
+    const rightPct = (prevW - orig.x - orig.w) / prevW;
+    const newLeft = leftPct * newW;
+    const newRight = rightPct * newW;
+    ctrl.x = Math.round(newLeft);
+    ctrl.w = Math.max(12, Math.round(newW - newLeft - newRight));
+  } else if (hasLeft) {
+    ctrl.x = Math.round((orig.x / prevW) * newW);
   } else if (hasRight) {
-    ctrl.w = orig.w;
-    ctrl.x = newW - distRight - orig.w;
-  } else {
-    ctrl.x = orig.x;
-    ctrl.w = orig.w;
+    const rightPct = (prevW - orig.x - orig.w) / prevW;
+    ctrl.x = Math.round(newW - rightPct * newW - orig.w);
   }
 
   if (hasTop && hasBottom) {
-    ctrl.y = orig.y;
-    ctrl.h = Math.max(12, newH - orig.y - distBottom);
+    const topPct = orig.y / prevH;
+    const bottomPct = (prevH - orig.y - orig.h) / prevH;
+    const newTop = topPct * newH;
+    const newBottom = bottomPct * newH;
+    ctrl.y = Math.round(newTop);
+    ctrl.h = Math.max(12, Math.round(newH - newTop - newBottom));
+  } else if (hasTop) {
+    ctrl.y = Math.round((orig.y / prevH) * newH);
   } else if (hasBottom) {
-    ctrl.h = orig.h;
-    ctrl.y = newH - distBottom - orig.h;
-  } else {
-    ctrl.y = orig.y;
-    ctrl.h = orig.h;
+    const bottomPct = (prevH - orig.y - orig.h) / prevH;
+    ctrl.y = Math.round(newH - bottomPct * newH - orig.h);
   }
 }
 
@@ -429,8 +519,9 @@ function startFormResize(e) {
   const handle = e.currentTarget.dataset.handle;
   const startX = e.clientX, startY = e.clientY;
   const orig = { w: state.form.width, h: state.form.height };
-  // Snapshot top-level controls' bounds so anchors can be recomputed
-  // fresh from this origin on every tick (avoids cumulative drift).
+  // Snapshot top-level controls' bounds so Anchor's percentages are always
+  // computed fresh from this origin (avoids compounding rounding drift
+  // across many small mousemove ticks).
   const origCtrls = state.controls.filter(c => !c.parentId).map(c => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }));
 
   function onMove(ev) {
@@ -441,7 +532,11 @@ function startFormResize(e) {
     origCtrls.forEach(o => {
       const ctrl = getControl(o.id);
       if (!ctrl) return;
-      applyAnchorFromOrigin(ctrl, o, orig.w, orig.h, state.form.width, state.form.height);
+      if (ctrl.props.dock && ctrl.props.dock !== 'None') {
+        applyDock(ctrl);
+      } else {
+        applyAnchorFromOrigin(ctrl, o, orig.w, orig.h, state.form.width, state.form.height);
+      }
     });
 
     render();
@@ -471,13 +566,32 @@ function renderControl(c) {
   badge.textContent = c.name + '  ' + c.x + ',' + c.y + '  ' + c.w + '\u00d7' + c.h;
   el.appendChild(badge);
 
-  const inner = document.createElement('div');
-  inner.className = 'ctrl-inner';
-  inner.appendChild(renderInner(c));
-  el.appendChild(inner);
+  if (def.isTabControl) {
+    // Tab switching is a structural design action, not a runtime preview
+    // interaction, so the header must stay clickable even when Interact
+    // is off - it lives outside .ctrl-inner (which is pointer-events:none
+    // unless interacting) rather than going through renderInner().
+    el.appendChild(buildTabHeaderStrip(c));
 
-  if (def.isContainer) {
-    state.controls.filter(ch => ch.parentId === c.id).forEach(ch => el.appendChild(renderControl(ch)));
+    const body = document.createElement('div');
+    body.className = 'rc-tabcontrol-body';
+    el.appendChild(body);
+
+    const content = document.createElement('div');
+    content.className = 'tabcontrol-content';
+    state.controls
+      .filter(ch => ch.parentId === c.id && ch.tabPage === c.activeTabId)
+      .forEach(ch => content.appendChild(renderControl(ch)));
+    el.appendChild(content);
+  } else {
+    const inner = document.createElement('div');
+    inner.className = 'ctrl-inner';
+    inner.appendChild(renderInner(c));
+    el.appendChild(inner);
+
+    if (def.isContainer) {
+      state.controls.filter(ch => ch.parentId === c.id).forEach(ch => el.appendChild(renderControl(ch)));
+    }
   }
 
   if (c.id === state.selectedId) {
@@ -491,6 +605,25 @@ function renderControl(c) {
 
   el.addEventListener('mousedown', onControlMouseDown);
   return el;
+}
+
+function buildTabHeaderStrip(c) {
+  const header = document.createElement('div');
+  header.className = 'rc-tabcontrol-header';
+  (c.props.tabs || []).forEach(tab => {
+    const btn = document.createElement('div');
+    btn.className = 'rc-tabcontrol-tab' + (tab.id === c.activeTabId ? ' active' : '');
+    btn.textContent = tab.label;
+    btn.title = 'Click to switch to this tab page while designing.';
+    btn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      c.activeTabId = tab.id;
+      selectControl(c.id);
+    });
+    header.appendChild(btn);
+  });
+  return header;
 }
 
 function fontStyleFor(p) {
@@ -704,6 +837,10 @@ function onControlMouseDown(e) {
 function startResize(e, ctrl, handle) {
   const startX = e.clientX, startY = e.clientY;
   const orig = { x: ctrl.x, y: ctrl.y, w: ctrl.w, h: ctrl.h };
+  // If this is a container, snapshot its children's bounds too so their
+  // Anchor percentages compute from a fixed origin (not compounding
+  // rounding drift tick-to-tick). Empty for leaf controls - harmless.
+  const origChildren = state.controls.filter(c => c.parentId === ctrl.id).map(c => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }));
 
   function onMove(ev) {
     const dx = ev.clientX - startX, dy = ev.clientY - startY;
@@ -713,6 +850,17 @@ function startResize(e, ctrl, handle) {
     if (handle.includes('w')) { w = Math.max(12, orig.w - dx); x = orig.x + dx; }
     if (handle.includes('n')) { h = Math.max(12, orig.h - dy); y = orig.y + dy; }
     ctrl.x = snap(x); ctrl.y = snap(y); ctrl.w = snap(w); ctrl.h = snap(h);
+
+    origChildren.forEach(oc => {
+      const child = getControl(oc.id);
+      if (!child) return;
+      if (child.props.dock && child.props.dock !== 'None') {
+        applyDock(child);
+      } else {
+        applyAnchorFromOrigin(child, oc, orig.w, orig.h, ctrl.w, ctrl.h);
+      }
+    });
+
     render();
     reselectAfterRender(ctrl.id);
   }
@@ -806,6 +954,7 @@ function initToolbox() {
       item.className = 'tool-item';
       item.draggable = true;
       item.dataset.type = type;
+      item.title = TOOL_DESCRIPTIONS[type] || def.label;
       item.innerHTML = `<span class="tool-icon">${toolIconSvg(type)}</span><span class="tool-label">${def.label}</span>`;
       item.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('text/plain', type);
@@ -831,18 +980,25 @@ function initCanvasDrop() {
 
     // If dropped inside a container control, parent to it (coords relative to container)
     let parentId = null;
+    let tabPage = null;
     const containerEl = document.elementFromPoint(e.clientX, e.clientY);
     const hostEl = containerEl && containerEl.closest && containerEl.closest('.ctrl');
     if (hostEl) {
       const hostCtrl = getControl(hostEl.dataset.id);
       if (hostCtrl && CONTROL_DEFS[hostCtrl.type].isContainer) {
         parentId = hostCtrl.id;
-        const hostRect = hostEl.getBoundingClientRect();
-        x = e.clientX - hostRect.left;
-        y = e.clientY - hostRect.top;
+        // For a TabControl, coordinates are relative to the tab content
+        // area (below the header strip), not the whole control, and the
+        // new child belongs to whichever tab is currently active.
+        const contentEl = hostEl.querySelector(':scope > .tabcontrol-content');
+        const refEl = contentEl || hostEl;
+        const refRect = refEl.getBoundingClientRect();
+        x = e.clientX - refRect.left;
+        y = e.clientY - refRect.top;
+        if (CONTROL_DEFS[hostCtrl.type].isTabControl) tabPage = hostCtrl.activeTabId;
       }
     }
-    const c = createControl(type, x, y, parentId);
+    const c = createControl(type, x, y, parentId, tabPage);
     selectControl(c.id);
   });
 }
@@ -871,8 +1027,8 @@ const TOOLTIPS = {
   enabled: 'Whether the control accepts input at runtime. Disabled controls are usually greyed out.',
   tabIndex: 'Keyboard tab order. Lower numbers are reached first when pressing Tab.',
   toolTip: 'Text shown in a small popup when the mouse hovers over this control at runtime.',
-  dock: 'Dock: stretches the control to fill an edge (or all) of its parent, and keeps it there as the parent resizes.',
-  anchor: 'Anchor: pins the control a fixed distance from the chosen parent edges, so it moves/stretches with those edges when the parent resizes. Anchor is ignored while Dock is set to anything other than None.',
+  dock: 'Dock: hugs and stretches along the chosen edge of the parent - like a taskbar or menu bar. Always flush, always full-length on that edge, no matter how the parent resizes. Overrides Anchor while active.',
+  anchor: 'Anchor: keeps this control the same PERCENTAGE distance from each checked edge as the parent resizes (not a fixed pixel margin). Check one edge to reposition proportionally along that axis; check both edges on an axis to scale/stretch proportionally along it. Check all four to keep the control scaling while staying exactly as centered, relative to the parent, as it started. Ignored while Dock is set to anything other than None.',
   cursor: 'Mouse pointer shown when hovering over this control at runtime.',
   backColor: 'Background/fill color of the control.',
   foreColor: 'Text/foreground color of the control.',
@@ -904,9 +1060,27 @@ const TOOLTIPS = {
   format: 'How the date/time value is displayed.',
   url: 'The web address this link opens when clicked.',
   menuItems: 'Configure this menu bar: check a top-level menu to include it, check individual entries to include them, edit labels, or add your own custom menus and items.',
+  tabs: 'The tab pages on this control. Rename, add, or remove pages here; click "Show" on a page to switch the canvas to it before placing controls - each page keeps its own separate set of children.',
 };
 
 function tt(key) { return TOOLTIPS[key] || ''; }
+
+// Extra plain-English usage guidance, with a concrete example, shown above
+// the type-specific properties for controls whose fields aren't self-
+// explanatory from labels/tooltips alone.
+const CONTROL_USAGE_HINTS = {
+  ProgressBar: 'Set Min and Max to the range you\'re measuring, then Value to where the fill should currently sit. Example: Min=0, Max=100, Value=40 shows a bar 40% full. From code, update Value as work progresses, e.g. $ProgressBar1.Value = 75.',
+  TrackBar: 'Set Min/Max to the value range, Value to the starting position, and Tick Frequency to how often a tick mark is drawn. Example: Min=0, Max=10, Value=5, Tick Frequency=1 gives 10 evenly-ticked steps starting in the middle.',
+  NumericUpDown: 'Set Min/Max to the allowed range, Value to the starting number, and Increment to how much each spinner click changes it. Example: Min=0, Max=20, Value=1, Increment=1.',
+  DateTimePicker: 'Format controls how the value is displayed (Long/Short/Time/Custom) - it doesn\'t change what\'s stored, just how it looks. Value holds the actual date/time.',
+};
+
+function buildUsageHintBlock(text) {
+  const div = document.createElement('div');
+  div.className = 'usage-hint';
+  div.textContent = text;
+  return div;
+}
 
 function renderProps() {
   const pane = document.getElementById('propsBody');
@@ -934,6 +1108,9 @@ function renderProps() {
 
   const def = CONTROL_DEFS[ctrl.type];
   if (def.props.length) {
+    if (CONTROL_USAGE_HINTS[ctrl.type]) {
+      pane.appendChild(buildUsageHintBlock(CONTROL_USAGE_HINTS[ctrl.type]));
+    }
     pane.appendChild(section(ctrl.type + '-specific', buildPropRows(ctrl, def.props), false));
   }
 
@@ -1184,6 +1361,47 @@ function buildNudgeSection(ctrl) {
   return frag;
 }
 
+function buildAnchorEditorRow(ctrl, key, label) {
+  const wrap = document.createElement('div');
+  wrap.className = 'prop-row anchor-editor-row';
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  labelEl.title = tt(key);
+
+  const grid = document.createElement('div');
+  grid.className = 'anchor-editor-grid';
+
+  const current = ctrl.props[key] || 'Top, Left';
+  const flags = current === 'None' ? [] : current.split(',').map(s => s.trim());
+  const order = ['Top', 'Bottom', 'Left', 'Right'];
+
+  order.forEach(edge => {
+    const chip = document.createElement('label');
+    chip.className = 'anchor-editor-chip';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = flags.includes(edge);
+    cb.addEventListener('change', () => {
+      const set = new Set(flags);
+      if (cb.checked) set.add(edge); else set.delete(edge);
+      flags.length = 0;
+      order.filter(o => set.has(o)).forEach(o => flags.push(o));
+      ctrl.props[key] = flags.length ? flags.join(', ') : 'None';
+      // No immediate positional effect - Anchor is forward-looking, its
+      // percentages get captured fresh the next time the parent resizes.
+      render();
+    });
+    chip.appendChild(cb);
+    chip.appendChild(document.createTextNode(edge));
+    grid.appendChild(chip);
+  });
+
+  wrap.appendChild(labelEl);
+  wrap.appendChild(grid);
+  return wrap;
+}
+
 function buildPropRows(ctrl, propDefs) {
   const frag = document.createElement('div');
   propDefs.forEach(([key, label, type, , extra]) => {
@@ -1191,6 +1409,14 @@ function buildPropRows(ctrl, propDefs) {
 
     if (type === 'menuEditor') {
       frag.appendChild(buildMenuEditorRow(ctrl, key, label));
+      return;
+    }
+    if (type === 'tabEditor') {
+      frag.appendChild(buildTabEditorRow(ctrl, key, label));
+      return;
+    }
+    if (type === 'anchorEditor') {
+      frag.appendChild(buildAnchorEditorRow(ctrl, key, label));
       return;
     }
     if (type === 'px') {
@@ -1220,7 +1446,14 @@ function buildPropRows(ctrl, propDefs) {
     } else if (type === 'select') {
       const opts = extra.options.map(o => `<option ${o === val ? 'selected' : ''}>${o}</option>`).join('');
       row.innerHTML = `<label title="${tipAttr}">${label}</label><select>${opts}</select>`;
-      row.querySelector('select').addEventListener('change', (e) => { ctrl.props[key] = e.target.value; render(); });
+      row.querySelector('select').addEventListener('change', (e) => {
+        ctrl.props[key] = e.target.value;
+        // Dock is a "snap now" action (hug the edge immediately). Anchor
+        // is purely forward-looking (its percentages get captured fresh
+        // the next time something resizes), so it has no immediate effect.
+        if (key === 'dock') applyDock(ctrl);
+        render();
+      });
     } else if (type === 'number') {
       row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="number" value="${val}">`;
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = Number(e.target.value) || 0; render(); });
@@ -1236,6 +1469,76 @@ function buildPropRows(ctrl, propDefs) {
 /* =========================================================================
    MenuStrip editor: checkbox-enabled preset menus + custom menu/item support
    ========================================================================= */
+
+/* =========================================================================
+   TabControl editor: add/rename/remove tab pages
+   ========================================================================= */
+
+function buildTabEditorRow(ctrl, key, label) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tab-editor';
+
+  const heading = document.createElement('div');
+  heading.className = 'tab-editor-heading';
+  heading.title = tt(key);
+  heading.textContent = label;
+  wrap.appendChild(heading);
+
+  const tabs = ctrl.props[key];
+  tabs.forEach((tab, ti) => {
+    wrap.appendChild(buildTabEditorItem(ctrl, tabs, tab, ti));
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn btn-ghost tab-add-btn';
+  addBtn.textContent = '+ Add tab';
+  addBtn.title = 'Add a new tab page.';
+  addBtn.addEventListener('click', () => {
+    const newId = 'tab' + Math.random().toString(36).slice(2, 8);
+    tabs.push({ id: newId, label: 'Tab' + (tabs.length + 1) });
+    render();
+  });
+  wrap.appendChild(addBtn);
+
+  return wrap;
+}
+
+function buildTabEditorItem(ctrl, tabs, tab, ti) {
+  const row = document.createElement('div');
+  row.className = 'tab-editor-item' + (tab.id === ctrl.activeTabId ? ' active' : '');
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'menu-editor-label-input';
+  nameInput.value = tab.label;
+  nameInput.addEventListener('change', (e) => { tab.label = e.target.value.trim() || tab.label; render(); });
+
+  const selectBtn = document.createElement('button');
+  selectBtn.type = 'button';
+  selectBtn.className = 'btn btn-ghost tab-select-btn';
+  selectBtn.textContent = tab.id === ctrl.activeTabId ? 'Active' : 'Show';
+  selectBtn.title = 'Switch the canvas to this tab page so you can place controls on it.';
+  selectBtn.addEventListener('click', () => { ctrl.activeTabId = tab.id; render(); });
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+  delBtn.textContent = '\u2715';
+  delBtn.title = 'Remove this tab page and everything placed on it.';
+  delBtn.addEventListener('click', () => {
+    if (tabs.length <= 1) return; // a TabControl needs at least one tab
+    state.controls = state.controls.filter(c => !(c.parentId === ctrl.id && c.tabPage === tab.id));
+    tabs.splice(ti, 1);
+    if (ctrl.activeTabId === tab.id) ctrl.activeTabId = tabs[0].id;
+    render();
+  });
+
+  row.appendChild(nameInput);
+  row.appendChild(selectBtn);
+  row.appendChild(delBtn);
+  return row;
+}
 
 function buildMenuEditorRow(ctrl, key, label) {
   const wrap = document.createElement('div');
@@ -1555,17 +1858,17 @@ function buildFormChromeRows() {
 /* ---- Comment-based help builder (PowerShell-style .SYNOPSIS/.DESCRIPTION/etc.) ---- */
 
 const HELP_PLACEHOLDERS = {
-  synopsis: 'This script/function does - What?',
-  description: 'A more detailed description of why and how the function works.',
-  paramName: 'ParamName',
-  paramText: 'The parameter is used to define the value of blah and also blah.',
-  example: 'The example below does blah\nPS C:\\> Example',
+  synopsis: 'Displays a customer intake form with validation.',
+  description: 'Collects customer name, email, and order details, validates required fields, then saves the record to CSV on submit.',
+  paramName: 'CustomerId',
+  paramText: 'The unique ID of the customer to pre-fill the form for, if editing an existing record.',
+  example: 'Opens the form pre-filled for customer 4021.\nPS C:\\> .\\CustomerForm.ps1 -CustomerId 4021',
   author: 'Name',
   get filename() { return (state.form.text.replace(/[^a-zA-Z0-9]/g, '') || 'Form') + '.ps1'; },
-  notes: 'Additional notes about this script.',
+  notes: 'Requires PowerShell 5.1+ and the .NET Windows Forms assembly.',
 };
 
-function helpCheckboxTextRow(label, item, key, placeholder, multiline) {
+function helpCheckboxTextRow(label, item, key, placeholder, multiline, tooltip) {
   const row = document.createElement('div');
   row.className = 'prop-row help-row';
   const cb = document.createElement('input');
@@ -1580,6 +1883,7 @@ function helpCheckboxTextRow(label, item, key, placeholder, multiline) {
 
   const labelWrap = document.createElement('label');
   labelWrap.className = 'help-item-label';
+  if (tooltip) labelWrap.title = tooltip;
   labelWrap.appendChild(cb);
   const span = document.createElement('span');
   span.textContent = label;
@@ -1594,13 +1898,20 @@ function buildHelpBlockEditor() {
   const h = state.form.help;
   const frag = document.createElement('div');
 
-  frag.appendChild(helpCheckboxTextRow('.SYNOPSIS', h.synopsis, 'text', HELP_PLACEHOLDERS.synopsis, true));
-  frag.appendChild(helpCheckboxTextRow('.DESCRIPTION', h.description, 'text', HELP_PLACEHOLDERS.description, true));
+  frag.appendChild(buildUsageHintBlock(
+    'This becomes a standard PowerShell comment-based help block at the top of every generated file - the same format Get-Help reads, and what MenuStrip\'s Help > About uses to build its message box. Only checked fields are included. Example .SYNOPSIS: "Displays a customer intake form with validation."'
+  ));
+
+  frag.appendChild(helpCheckboxTextRow('.SYNOPSIS', h.synopsis, 'text', HELP_PLACEHOLDERS.synopsis, true,
+    'A one-line summary of what this script/form does. This is what Help > About shows if you haven\'t written custom code for it.'));
+  frag.appendChild(helpCheckboxTextRow('.DESCRIPTION', h.description, 'text', HELP_PLACEHOLDERS.description, true,
+    'A longer explanation of what the script does and why. Also included in the auto-generated Help > About message.'));
 
   const paramWrap = document.createElement('div');
   paramWrap.className = 'help-list';
   const paramTitle = document.createElement('div');
   paramTitle.className = 'items-hint';
+  paramTitle.title = 'One entry per script parameter, e.g. if your .ps1 accepts -CustomerId, document it here.';
   paramTitle.textContent = '.PARAMETER entries';
   paramWrap.appendChild(paramTitle);
   h.parameters.forEach((p, idx) => paramWrap.appendChild(buildParamRow(p, idx)));
@@ -1799,6 +2110,7 @@ function generateHTML() {
   const f = state.form;
   const ctrls = orderedControls();
   const functions = [];
+  const tabControlCss = [];
 
   const domFor = (c) => {
     const p = c.props;
@@ -1849,12 +2161,23 @@ function generateHTML() {
         return `<a id="${c.name}" href="${escapeHtml(p.url)}" style="${styleBase}color:${p.foreColor};"${evtAttr('LinkClicked', 'click')}>${escapeHtml(p.text)}</a>`;
       case 'MenuStrip':
         return menuStripHtml(c, styleBase, functions);
+      case 'TabControl': {
+        const tabs = p.tabs || [];
+        const radios = tabs.map((tab, i) => `<input type="radio" name="${c.name}_tabs" id="${c.name}_${tab.id}" class="tabcontrol-radio"${i === 0 ? ' checked' : ''}>`).join('');
+        const headers = tabs.map(tab => `<label for="${c.name}_${tab.id}" class="tabcontrol-tab">${escapeHtml(tab.label)}</label>`).join('');
+        const pages = tabs.map(tab => `<div class="tabcontrol-page" id="${c.name}_page_${tab.id}">\n${childrenHtmlForTab(c, tab.id)}\n</div>`).join('\n');
+        tabs.forEach(tab => {
+          tabControlCss.push(`#${c.name}_${tab.id}:checked ~ .tabcontrol-body #${c.name}_page_${tab.id} { display: block; }`);
+        });
+        return `<div id="${c.name}" class="tabcontrol" style="${styleBase}">${radios}<div class="tabcontrol-header">${headers}</div><div class="tabcontrol-body">${pages}</div></div>`;
+      }
       default:
         return '';
     }
   };
 
   const childrenHtml = (parent) => ctrls.filter(c => c.parentId === parent.id).map(domFor).join('\n');
+  const childrenHtmlForTab = (parent, tabId) => ctrls.filter(c => c.parentId === parent.id && c.tabPage === tabId).map(domFor).join('\n');
   const topLevelHtml = ctrls.filter(c => !c.parentId).map(domFor).join('\n  ');
 
   ctrls.forEach(c => Object.entries(c.events).forEach(([evtName, data]) => {
@@ -1878,6 +2201,11 @@ function generateHTML() {
   .menu-strip li > ul li { padding: 4px 18px; font-size: 12px; white-space: nowrap; }
   .menu-strip li > ul li:hover { background: #C1D2EE; }
   .menu-strip li > ul li.menu-sep { height: 1px; margin: 4px 0; padding: 0; background: #ddd; }
+  .tabcontrol-radio { position: absolute; opacity: 0; pointer-events: none; }
+  .tabcontrol-header { display: flex; background: #ECECEC; border-bottom: 1px solid #ACA899; }
+  .tabcontrol-tab { padding: 6px 14px; font-size: 12px; cursor: pointer; border-right: 1px solid #ACA899; user-select: none; }
+  .tabcontrol-page { display: none; position: relative; }
+${tabControlCss.map(r => '  ' + r).join('\n')}
 </style>
 </head>
 <body>
@@ -1925,6 +2253,8 @@ function generateWinForms() {
   lines.push(`$Form.TopMost = $${f.topMost}`);
   lines.push('');
 
+  const tabPageVarFor = {}; // `${tabControlId}::${tabId}` -> generated $variable name
+
   ctrls.forEach(c => {
     const p = c.props;
     const wfType = {
@@ -1932,7 +2262,7 @@ function generateWinForms() {
       RadioButton: 'RadioButton', ComboBox: 'ComboBox', ListBox: 'ListBox', Panel: 'Panel',
       GroupBox: 'GroupBox', PictureBox: 'PictureBox', ProgressBar: 'ProgressBar',
       TrackBar: 'TrackBar', NumericUpDown: 'NumericUpDown', DateTimePicker: 'DateTimePicker',
-      RichTextBox: 'RichTextBox', LinkLabel: 'LinkLabel', MenuStrip: 'MenuStrip',
+      RichTextBox: 'RichTextBox', LinkLabel: 'LinkLabel', MenuStrip: 'MenuStrip', TabControl: 'TabControl',
     }[c.type];
 
     lines.push(`# ${c.name} (${c.type})`);
@@ -2033,6 +2363,16 @@ function generateWinForms() {
         });
         break;
       }
+      case 'TabControl': {
+        (p.tabs || []).forEach(tab => {
+          const pageVar = `${c.name}_${tab.id}`;
+          lines.push(`$${pageVar} = New-Object System.Windows.Forms.TabPage`);
+          lines.push(`$${pageVar}.Text = "${(tab.label || '').replace(/"/g, '""')}"`);
+          lines.push(`$${c.name}.TabPages.Add($${pageVar})`);
+          tabPageVarFor[`${c.id}::${tab.id}`] = pageVar;
+        });
+        break;
+      }
     }
 
     // events
@@ -2044,7 +2384,18 @@ function generateWinForms() {
       lines.push(`$${c.name}.Add_${evtName}({\n    ${body}\n})`);
     });
 
-    lines.push(`$${(c.parentId ? '' + getControl(c.parentId).name : 'Form')}.Controls.Add($${c.name})`);
+    // Route into the right container: a TabPage for TabControl children,
+    // the parent control for other nested children, or the Form.
+    let addTarget = 'Form';
+    if (c.parentId) {
+      const parentCtrl = getControl(c.parentId);
+      if (parentCtrl && parentCtrl.type === 'TabControl' && c.tabPage) {
+        addTarget = tabPageVarFor[`${parentCtrl.id}::${c.tabPage}`] || parentCtrl.name;
+      } else if (parentCtrl) {
+        addTarget = parentCtrl.name;
+      }
+    }
+    lines.push(`$${addTarget}.Controls.Add($${c.name})`);
     if (c.type === 'MenuStrip') lines.push(`$Form.MainMenuStrip = $${c.name}`);
     lines.push('');
   });
@@ -2066,6 +2417,12 @@ function wpfMenuXaml(c, common) {
     return `<MenuItem Header="${escapeHtml(m.label)}">${children}</MenuItem>`;
   };
   return `<Menu ${common}>\n    ${menus.map(menuItem).join('\n    ')}\n  </Menu>`;
+}
+
+function wpfTabXaml(c, common) {
+  const tabs = c.props.tabs || [];
+  const items = tabs.map(tab => `<TabItem Header="${escapeHtml(tab.label)}" />`).join('\n    ');
+  return `<TabControl ${common}>\n    ${items}\n  </TabControl>`;
 }
 
 function generateWPF() {
@@ -2098,6 +2455,7 @@ function generateWPF() {
       case 'PictureBox': return `<Image ${common} Source="${escapeHtml(p.imageSource)}" Stretch="Uniform" />`;
       case 'LinkLabel': return `<TextBlock ${common} Text="${escapeHtml(p.text)}" Foreground="#2dd4bf" TextDecorations="Underline" />`;
       case 'MenuStrip': return wpfMenuXaml(c, common);
+      case 'TabControl': return wpfTabXaml(c, common);
       default: return `<${tag} ${common} />`;
     }
   };
@@ -2128,16 +2486,25 @@ function winuiMenuXaml(c) {
   return `<MenuBar x:Name="${c.name}">\n    ${menus.map(menuItem).join('\n    ')}\n  </MenuBar>`;
 }
 
+function winuiTabXaml(c) {
+  const tabs = c.props.tabs || [];
+  const items = tabs.map(tab => `<TabViewItem Header="${escapeHtml(tab.label)}" IsCloseable="False" />`).join('\n      ');
+  return `<TabView x:Name="${c.name}">\n      ${items}\n    </TabView>`;
+}
+
 function generateWinUI() {
   const f = state.form;
   const header = helpBlockAsHtmlComment() + `<!-- WinUI export is a roadmap item: control -> markup mapping, Fluent
      styling, and event wiring are not implemented yet, except MenuStrip
-     which maps to a real MenuBar/MenuBarItem/MenuFlyoutItem tree below.
+     (maps to a real MenuBar/MenuBarItem/MenuFlyoutItem tree) and
+     TabControl (maps to a real TabView/TabViewItem tree) below.
      Everything else is a page shell with a TODO list for manual porting. -->
 `;
   const menuControls = state.controls.filter(c => c.type === 'MenuStrip');
-  const otherControls = state.controls.filter(c => c.type !== 'MenuStrip');
+  const tabControls = state.controls.filter(c => c.type === 'TabControl');
+  const otherControls = state.controls.filter(c => c.type !== 'MenuStrip' && c.type !== 'TabControl');
   const menuXaml = menuControls.map(winuiMenuXaml).join('\n  ');
+  const tabXaml = tabControls.map(winuiTabXaml).join('\n  ');
   const todoList = otherControls.map(c => `    <!-- TODO: port ${c.name} (${c.type}) at ${c.x},${c.y} ${c.w}x${c.h} -->`).join('\n');
   const xaml = `<Page
     x:Class="App.${(f.text || 'MainPage').replace(/[^a-zA-Z0-9]/g, '')}"
@@ -2145,6 +2512,7 @@ function generateWinUI() {
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <StackPanel Background="${f.backColor}" Width="${f.width}" Height="${f.height}">
     ${menuXaml}
+    ${tabXaml}
     <Grid>
 ${todoList}
     </Grid>
