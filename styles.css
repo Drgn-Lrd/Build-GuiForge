@@ -1,17 +1,18 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
-    Revision: styling to match engine.js 1.2. Added .single-row section
-    styling (static, non-clickable title for one-row sections), the
-    fixed .interact-fixed block (Interact toggle now lives outside the
-    accordion), .pos-arrow-row/.pos-arrow-cluster/.pos-center-cluster
-    for the new directional position stepper + Center buttons, the
-    .rc-menustrip* canvas preview styles for the new MenuStrip control
-    (horizontal bar with real hover dropdowns), and the .menu-editor*
-    family of styles for the MenuStrip property editor (checkbox-driven
-    preset/custom menu and sub-item rows, add/remove controls).
+    Revision: styling to match engine.js 1.3. Replaced .rc-textbox/
+    .rc-numeric/.rc-richtext static-div styles with real form-element
+    resets (box-sizing, disabled-state look) now that those previews are
+    genuine <input>/<textarea> elements, added .rc-textbox-multiline and
+    .rc-datetime-input for the newly-interactive TextBox/DateTimePicker
+    variants. Replaced the removed .pos-arrow-*/.pos-center-* rules with
+    .xy-row/.xy-controls/.xy-quick-btns/.xy-quick-btn for the reworked
+    Layout quick-pin/grow-shrink buttons. Added .menu-editor-subitem-wrap
+    and .menu-editor-code(-row) for the new per-item code editor in the
+    MenuStrip properties.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -26,27 +27,22 @@
 }
 .interact-fixed .toggle-row { padding: 6px 0 2px; }
 
-/* Directional position stepper + center buttons (Layout section) */
-.pos-arrow-row { grid-template-columns: 60px 1fr; align-items: center; }
-.pos-arrow-cluster, .pos-center-cluster {
-  display: inline-flex;
-  gap: 3px;
-  margin-right: 8px;
-}
-.pos-arrow-btn {
+/* X/Y/Width/Height quick controls (Layout section) */
+.xy-row { grid-template-columns: 60px 1fr; align-items: start; }
+.xy-controls { display: flex; flex-direction: column; gap: 4px; }
+.xy-quick-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.xy-quick-btn {
   background: var(--bp-panel-raised);
   border: 1px solid var(--bp-border);
   color: var(--bp-accent-2);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 11px;
-  min-width: 22px;
-  padding: 3px 6px;
+  font-size: 10.5px;
+  padding: 3px 0;
   font-family: var(--bp-font-mono);
 }
-.pos-arrow-btn:hover { border-color: var(--bp-accent-2); }
-.pos-arrow-btn:active { background: var(--bp-accent-2-dim); }
-.pos-center-cluster { border-left: 1px solid var(--bp-border-soft); padding-left: 8px; }
+.xy-quick-btn:hover { border-color: var(--bp-accent-2); }
+.xy-quick-btn:active { background: var(--bp-accent-2-dim); }
 
 /* MenuStrip canvas preview */
 .rc-menustrip {
@@ -120,14 +116,30 @@
   flex-shrink: 0;
 }
 .menu-del-btn { flex-shrink: 0; padding: 3px 7px; font-size: 11px; }
-.menu-editor-subitems { padding: 6px 8px 8px 26px; display: flex; flex-direction: column; gap: 5px; }
+.menu-editor-subitems { padding: 6px 8px 8px 26px; display: flex; flex-direction: column; gap: 8px; }
+.menu-editor-subitem-wrap { display: flex; flex-direction: column; gap: 4px; }
 .menu-editor-subitem-row { display: flex; align-items: center; gap: 6px; }
 .menu-editor-subitem-row input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--bp-accent-2); flex-shrink: 0; }
+.menu-editor-code-row { display: flex; flex-direction: column; gap: 3px; padding-left: 20px; }
+.menu-editor-code-row label { font-size: 10px; color: var(--bp-text-faint); }
+.menu-editor-code {
+  width: 100%;
+  min-height: 50px;
+  background: var(--bp-panel);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 5px 6px;
+  font-size: 11px;
+  font-family: var(--bp-font-mono);
+  resize: vertical;
+  box-sizing: border-box;
+}
 .menu-add-btn, .menu-add-item-btn { width: 100%; margin-top: 2px; font-size: 11px; padding: 5px; }
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.2';
+  --stylesheet-version: '1.3';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -497,7 +509,11 @@ button, input, select, textarea {
 .rc-track input { width: 100%; }
 .rc-numeric { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 3px 5px; font-size: 12px; }
 .rc-datetime { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 3px 5px; font-size: 12px; }
-.rc-richtext { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 4px; font-size: 12px; overflow: auto; white-space: pre-wrap; }
+.rc-datetime-input { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 2px 4px; font-size: 12px; box-sizing: border-box; }
+.rc-richtext { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 4px; font-size: 12px; overflow: auto; white-space: pre-wrap; resize: none; box-sizing: border-box; }
+.rc-textbox-multiline { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 4px; font-size: 12px; resize: none; white-space: pre-wrap; box-sizing: border-box; }
+.rc-textbox, .rc-numeric { box-sizing: border-box; outline: none; font-family: inherit; }
+.rc-textbox:disabled, .rc-numeric:disabled, .rc-datetime-input:disabled, .rc-richtext:disabled, .rc-textbox-multiline:disabled { background: #f3f3f3; color: #6b6b6b; }
 .rc-link { color: var(--bp-accent-2); font-size: 12px; text-decoration: underline; padding: 2px; }
 
 /* ---------- Format skins (canvas preview only) ---------- */
