@@ -1,12 +1,14 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.11
+    Version 1.12
 
-    Revision: styling to match engine.js 1.12. Added .rc-checkedlistbox*
-    for the new CheckedListBox control's clickable checkbox-list preview.
-    No new CSS needed for the Convert To feature - it reuses existing
-    .prop-row/select styling.
+    Revision: fixed the Info modal per screenshot feedback - it was
+    hugging the viewport's right edge (10px padding), which overlapped
+    the 300px-wide properties pane instead of sitting beside it. Now
+    positioned 10px to the left of the pane (padding-right: 310px), and
+    its dim overlay reduced to 25% of the previous opacity (0.72 -> 0.18)
+    so it's much less obtrusive.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -218,7 +220,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.11';
+  --stylesheet-version: '1.12';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -950,10 +952,16 @@ button, input, select, textarea {
 .modal-overlay.open { display: flex; }
 
 /* The Info modal is triggered from the properties pane (right side of the
-   app), so it anchors there instead of centering across the whole
-   viewport - on an ultra-wide monitor, centering it would put it far
-   from where the person is actually looking. */
-#infoModalOverlay { justify-content: flex-end; padding-right: 10px; }
+   app), so it anchors just outside it instead of centering across the
+   whole viewport - on an ultra-wide monitor, centering it would put it
+   far from where the person is actually looking. The properties pane is
+   a fixed 300px column flush against the right edge, so 300px + 10px
+   gap keeps the modal beside it rather than overlapping on top of it. */
+#infoModalOverlay {
+  justify-content: flex-end;
+  padding-right: 310px;
+  background: rgba(6, 8, 11, 0.18);
+}
 
 .modal {
   background: var(--bp-panel);
