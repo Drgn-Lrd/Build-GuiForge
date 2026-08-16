@@ -1,17 +1,14 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.8
+    Version 1.9
 
-    Revision: styling to match engine.js 1.9. Removed hardcoded borders
-    from .rc-textbox/.rc-combo/.rc-listbox-custom/.rc-numeric/.rc-datetime/
-    .rc-richtext/etc so the new BorderStyle-driven border on .ctrl-inner
-    is the single source of truth (no more double borders). Renamed
-    .rc-listbox to .rc-listbox-custom throughout (including format-skin
-    rules) to match the new custom clickable list, and added .rc-listbox-
-    item (+hover/selected states). Added .option-legend* for the new
-    per-dropdown-option definitions, and .items-list-editor/.items-list-
-    row for the new ComboBox/ListBox Add/Remove items UI.
+    Revision: styling to match engine.js 2.0. Replaced the static
+    .option-legend block styling with .option-info-btn (the small round
+    (i) button next to a dropdown's label) - .option-legend-line/-value/
+    -text are now reused inside the Info modal instead of inline in the
+    properties pane. Added .rc-combo-editable for the new typeable
+    ComboBox input (DropDown/Simple styles).
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -223,7 +220,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.8';
+  --stylesheet-version: '1.9';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -591,6 +588,7 @@ button, input, select, textarea {
 .rc-textbox { width: 100%; height: 100%; background: #fff; color: #111; padding: 3px 5px; font-size: 12px; }
 .rc-check, .rc-radio { display: flex; align-items: center; gap: 6px; color: #eef1f6; font-size: 12px; width: 100%; height: 100%; padding: 2px; }
 .rc-combo { width: 100%; height: 100%; background: #fff; color: #111; font-size: 12px; }
+.rc-combo-editable { box-sizing: border-box; padding: 2px 5px; }
 .rc-listbox-custom { width: 100%; height: 100%; background: #fff; color: #111; font-size: 12px; overflow-y: auto; box-sizing: border-box; }
 .rc-listbox-item { padding: 3px 6px; cursor: default; }
 .rc-listbox-item:hover { background: #e8f0fe; }
@@ -822,19 +820,31 @@ button, input, select, textarea {
 .items-editor textarea { font-family: var(--bp-font-mono); min-height: 70px; }
 .items-hint { font-size: 10px; color: var(--bp-text-faint); margin-top: 2px; }
 
-.option-legend {
-  margin-top: 5px;
-  padding: 6px 8px;
-  background: var(--bp-panel);
-  border: 1px solid var(--bp-border-soft);
-  border-radius: var(--radius-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.option-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--bp-border);
+  background: var(--bp-panel-raised);
+  color: var(--bp-accent-2);
+  font-size: 9px;
+  font-style: italic;
+  font-family: Georgia, serif;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+  padding: 0;
 }
-.option-legend-line { font-size: 10px; line-height: 1.4; }
-.option-legend-value { color: var(--bp-accent-2); font-family: var(--bp-font-mono); margin-right: 5px; }
-.option-legend-text { color: var(--bp-text-faint); }
+.option-info-btn:hover { border-color: var(--bp-accent-2); background: var(--bp-accent-2-dim); }
+
+.option-legend-line { font-size: 11.5px; line-height: 1.6; padding: 4px 0; border-bottom: 1px solid var(--bp-border-soft); }
+.option-legend-line:last-child { border-bottom: none; }
+.option-legend-value { display: block; color: var(--bp-accent-2); font-family: var(--bp-font-mono); font-weight: 600; }
+.option-legend-text { display: block; color: var(--bp-text-muted); }
 
 .usage-hint {
   margin: 8px 12px;
