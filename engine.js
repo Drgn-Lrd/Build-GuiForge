@@ -1,32 +1,26 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.14
+    Version 1.15
 
-    Revision: (1) Removed the generic "Close the form" event snippet -
-    it could be inserted into any event on any control, including ones
-    that fire constantly (TextChanged on every keystroke), silently
-    closing the window by accident. (2) Added a dedicated ClickToClose
-    event, only on Button, listed right after the regular Click event -
-    pre-fills with $Form.Close() the moment it's toggled on, no snippet
-    insert needed. WinForms codegen maps it to the real .Add_Click (not
-    a literal Add_ClickToClose, which isn't a real .NET event); HTML
-    output wires it into the same onclick attribute alongside a regular
-    Click handler if both exist. (3) engine.js was getting large, so
-    split two large, self-contained chunks out into their own files:
-    control-data.js (the full control catalog: CONTROL_DEFS, toolbox
-    icons/descriptions, MenuStrip/TabControl defaults) and codegen.js
-    (the four generateHTML/WinForms/WPF/WinUI functions and their
-    helpers). Both are plain global-scope scripts, loaded via ordinary
-    <script> tags (not ES modules, so this still works opening index.html
-    directly from disk, not just over http) - control-data.js and
-    codegen.js load before this file in index.html. This is a first
-    pass; more of engine.js is a reasonable candidate to split out
-    later (rendering, drag/resize/docking, the properties-pane
-    builders) once there's a natural next reason to touch that code.
+    Revision: (1) About modal now shows Control Data and Codegen
+    versions (were missing since those two files were split out).
+    (2) Added a control-picker: every event action has a "Select
+    Control" button (startControlPick/cancelControlPick) - click it,
+    then click a control on the canvas to insert its name into the
+    action's code, replacing $OtherControlName if present or inserting
+    at the cursor otherwise. Escape cancels. The picked control never
+    steals the current selection, so the event editor stays open. Since
+    a control on an inactive TabControl page isn't in the canvas DOM to
+    click, the picking banner also offers "Or pick from list", which
+    opens the Objects modal in pick-mode (buildObjectsList now checks
+    state.pickingCallback) - that list already includes every control
+    regardless of tab visibility, so this fully covers the "hidden
+    control" case, not just the common one. (3) Added CONTROL_HELP
+    entries for this update's 5 new controls (see control-data.js).
 */
 
-const ENGINE_VERSION = '1.14';
+const ENGINE_VERSION = '1.15';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -50,6 +44,7 @@ const state = {
   redoStack: [],
   suppressUndoCheckpoint: false, // true during a continuous drag/resize gesture
   dockOrderSeq: 0,
+  pickingCallback: null, // set while "Select Control" pick mode is active
   form: {
     text: 'MyForm',
     width: 640,
@@ -578,6 +573,11 @@ function renderInner(c) {
       if (c.interact) wrap.querySelector('input,textarea').addEventListener('input', (e) => { p.text = e.target.value; });
       break;
     }
+    case 'MaskedTextBox': {
+      wrap.innerHTML = `<input type="text" class="rc-textbox" style="${fontStyleFor(p)}" placeholder="${escapeHtml(p.mask)}" value="${escapeHtml(p.text)}" ${c.interact ? '' : 'disabled'}>`;
+      if (c.interact) wrap.querySelector('input').addEventListener('input', (e) => { p.text = e.target.value; });
+      break;
+    }
     case 'CheckBox': {
       wrap.innerHTML = `<label class="rc-check" style="${fontStyleFor(p)}color:${p.foreColor};"><input type="checkbox" ${p.checked ? 'checked' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</label>`;
       if (c.interact) wrap.querySelector('input').addEventListener('change', (e) => { p.checked = e.target.checked; });
@@ -693,6 +693,18 @@ function renderInner(c) {
       wrap.innerHTML = `<div class="rc-panel" style="background:${p.backColor};"></div>`;
       break;
     }
+    case 'FlowLayoutPanel': {
+      wrap.innerHTML = `<div class="rc-flowpanel" style="background:${p.backColor};" title="Flow: ${p.flowDirection}"></div>`;
+      break;
+    }
+    case 'TableLayoutPanel': {
+      const cols = Math.max(1, p.columnCount || 1);
+      const rows = Math.max(1, p.rowCount || 1);
+      const vLines = Array.from({ length: cols - 1 }, (_, i) => `<div class="rc-table-vline" style="left:${(100 / cols) * (i + 1)}%;"></div>`).join('');
+      const hLines = Array.from({ length: rows - 1 }, (_, i) => `<div class="rc-table-hline" style="top:${(100 / rows) * (i + 1)}%;"></div>`).join('');
+      wrap.innerHTML = `<div class="rc-tablepanel" style="background:${p.backColor};">${vLines}${hLines}</div>`;
+      break;
+    }
     case 'GroupBox': {
       wrap.innerHTML = `<div class="rc-groupbox" style="background:${p.backColor};"><span class="gb-title">${escapeHtml(p.text)}</span></div>`;
       break;
@@ -713,6 +725,15 @@ function renderInner(c) {
     }
     case 'MenuStrip': {
       wrap.appendChild(renderMenuStripPreview(p));
+      break;
+    }
+    case 'StatusStrip': {
+      wrap.innerHTML = `<div class="rc-statusstrip">${escapeHtml(p.text)}</div>`;
+      break;
+    }
+    case 'ToolStrip': {
+      const items = (p.items || '').split('\n').filter(Boolean);
+      wrap.innerHTML = `<div class="rc-toolstrip">${items.map(it => `<div class="rc-toolstrip-btn">${escapeHtml(it)}</div>`).join('')}</div>`;
       break;
     }
     case 'NumericUpDown': {
@@ -830,10 +851,53 @@ function resolveDragCollision(ctrl, proposedX, proposedY) {
   return { x: ctrl.x, y: ctrl.y };
 }
 
+function startControlPick(onPick) {
+  state.pickingCallback = onPick;
+  document.body.classList.add('picking-mode');
+  showPickingBanner();
+}
+
+function cancelControlPick() {
+  state.pickingCallback = null;
+  document.body.classList.remove('picking-mode');
+  hidePickingBanner();
+}
+
+function showPickingBanner() {
+  let banner = document.getElementById('pickingBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'pickingBanner';
+    banner.className = 'picking-banner';
+    banner.innerHTML = `<span>Click a control on the canvas to select it</span><button type="button" class="btn btn-ghost" id="pickingListBtn">Or pick from list</button><button type="button" class="btn btn-ghost" id="pickingCancelBtn">Cancel (Esc)</button>`;
+    document.body.appendChild(banner);
+    banner.querySelector('#pickingCancelBtn').addEventListener('click', cancelControlPick);
+    banner.querySelector('#pickingListBtn').addEventListener('click', () => {
+      buildObjectsList();
+      document.getElementById('objectsModalOverlay').classList.add('open');
+    });
+  }
+  banner.classList.add('open');
+}
+
+function hidePickingBanner() {
+  const banner = document.getElementById('pickingBanner');
+  if (banner) banner.classList.remove('open');
+}
+
 function onControlMouseDown(e) {
   const id = e.currentTarget.dataset.id;
   const ctrl = getControl(id);
   if (!ctrl) return;
+
+  if (state.pickingCallback) {
+    e.stopPropagation();
+    e.preventDefault();
+    const cb = state.pickingCallback;
+    cancelControlPick();
+    cb(ctrl);
+    return;
+  }
 
   if (e.target.dataset.handle) {
     e.stopPropagation();
@@ -1269,6 +1333,11 @@ const CONTROL_HELP = {
   MenuStrip: 'A top menu bar (File/Edit/View/Help, etc). Comes with preset File/View/Help menus you can check on/off, rename, or add custom menus/items to via the Menu Items editor below. Each item can have its own click code - presets like File > Exit and Help > About already come with working defaults. Example: uncheck "Zoom In/Out" if you don\'t need them, or add a custom "Tools > Settings" entry with your own code.',
   TabControl: 'A container with multiple named tab pages, each holding its own separate set of child controls. Use the Tabs editor below to add/rename/remove pages; click "Show" on a page (or click its header on the canvas) to switch which page you\'re placing controls onto. Example: an "Options" dialog with "General", "Advanced", and "About" tabs, each with different controls on it.',
   Form: 'The main window itself - everything else sits inside it. Title is the text shown in the title bar. Form Border Style controls the window\'s chrome and whether it can be resized. Comment-Based Help below becomes the PowerShell help block at the top of every generated file.',
+  MaskedTextBox: 'A TextBox that enforces a fixed input pattern instead of free text. Mask uses WinForms mask characters: 0 = required digit, 9 = optional digit, L = required letter, > = force uppercase, < = force lowercase. Example: Mask="000-00-0000" for a Social Security Number field.',
+  FlowLayoutPanel: 'A container that automatically arranges its children in a line, wrapping to the next row/column when it runs out of room - similar to how text wraps. Flow Direction sets which way it flows; Wrap Contents controls whether it wraps at all or just keeps going off the edge. Example: a toolbar of buttons that should reflow as the window resizes.',
+  TableLayoutPanel: 'A container that arranges its children into a grid - set Columns and Rows to the grid size you want, then place children into specific cells. Example: a 2-column form layout with a Label in each left cell and its matching input in the right cell.',
+  StatusStrip: 'A thin status bar, almost always docked to the bottom of the form. Text is the message shown - commonly updated from code as the app does things, e.g. $StatusStrip1.Text = "Saved.".',
+  ToolStrip: 'A horizontal bar of quick-action buttons, almost always docked to the top. Add button labels in Items, one per line. Example: Items="New\\nOpen\\nSave" for a classic file toolbar.',
 };
 
 function buildUsageHintBlock(text) {
@@ -2219,6 +2288,28 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
   ta.addEventListener('change', () => { actions[i] = ta.value; sync(); });
   card.appendChild(ta);
 
+  const pickBtn = document.createElement('button');
+  pickBtn.type = 'button';
+  pickBtn.className = 'btn btn-ghost pick-control-btn';
+  pickBtn.innerHTML = '\u2316 Select Control';
+  pickBtn.title = 'Click, then click any control on the canvas (even ones not currently visible in a collapsed tab/panel) to insert its name here - no need to remember or hunt for the exact spelling.';
+  pickBtn.addEventListener('click', () => {
+    startControlPick((pickedCtrl) => {
+      const varRef = '$' + pickedCtrl.name;
+      if (ta.value.includes('$OtherControlName')) {
+        ta.value = ta.value.replace('$OtherControlName', varRef);
+      } else {
+        const start = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
+        const end = ta.selectionEnd != null ? ta.selectionEnd : ta.value.length;
+        ta.value = ta.value.slice(0, start) + varRef + ta.value.slice(end);
+      }
+      actions[i] = ta.value;
+      sync();
+      render();
+    });
+  });
+  card.appendChild(pickBtn);
+
   insertBtn.addEventListener('click', () => {
     const code = sel.selectedOptions[0].dataset.code;
     if (!code) return;
@@ -2697,6 +2788,8 @@ function initAboutModal() {
   const overlay = document.getElementById('aboutModalOverlay');
   document.getElementById('btnAbout').addEventListener('click', () => {
     document.getElementById('aboutEngineVersion').textContent = ENGINE_VERSION;
+    document.getElementById('aboutControlDataVersion').textContent = typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a';
+    document.getElementById('aboutCodegenVersion').textContent = typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a';
     document.getElementById('aboutStyleVersion').textContent = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-version').trim().replace(/'/g, '');
     document.getElementById('aboutPageVersion').textContent = window.PAGE_VERSION || 'n/a';
     overlay.classList.add('open');
@@ -2718,6 +2811,7 @@ function initTopToolbar() {
   document.getElementById('btnRedo').addEventListener('click', redo);
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.pickingCallback) { cancelControlPick(); return; }
     const tag = (document.activeElement && document.activeElement.tagName) || '';
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
     const mod = e.ctrlKey || e.metaKey;
@@ -2741,9 +2835,15 @@ function buildObjectsList() {
       row.className = 'objects-row' + (c.id === state.selectedId ? ' active' : '');
       row.style.paddingLeft = (10 + depth * 16) + 'px';
       row.innerHTML = `<span class="objects-row-name">${escapeHtml(c.name)}</span><span class="objects-row-type">${c.type}</span>`;
-      row.title = 'Click to select this control.';
+      row.title = state.pickingCallback ? 'Click to pick this control.' : 'Click to select this control.';
       row.addEventListener('click', () => {
-        selectControl(c.id);
+        if (state.pickingCallback) {
+          const cb = state.pickingCallback;
+          cancelControlPick();
+          cb(c);
+        } else {
+          selectControl(c.id);
+        }
         document.getElementById('objectsModalOverlay').classList.remove('open');
       });
       container.appendChild(row);
