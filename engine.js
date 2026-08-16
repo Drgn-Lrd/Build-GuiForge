@@ -1,38 +1,42 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.8
+    Version 1.9
 
-    Revision: (1) Fixed the unstyled snippet-insert dropdown in the
-    Events section (Image 1 bug report) - it lived in .snippet-row, which
-    the dark-theme select styling never covered, so it fell back to the
-    browser's native white background while still inheriting light theme
-    text, making it nearly unreadable; also added a #propsBody select
-    safety net so this class of bug can't recur elsewhere. (2) Form
-    defaults to Always On Top = true. (3) Comment-Based Help defaults now
-    match the requested template exactly (Synopsis "Creating a test GUI
-    form", Notes with Author "Johnathon Largent" / Filename "TestGUI.ps1"
-    / Dependencies), and .NOTES now auto-appends a "Calls: . "path""
-    line for every button/event wired to an external .ps1 file
-    (collectCalledScripts scans every control's events, deduplicated,
-    using the exact dot-source syntax the generated code itself uses).
-    (4) Added real boundary containment: containerClientRect() computes
-    the space actually available to a non-docked child after docked
-    siblings claim their edges, and clampAllToContainers() (run centrally
-    in render(), parents processed before children) keeps every control
-    within its parent - a child can't leave its container, a container
-    can't leave its own parent, and a Dock=Top MenuStrip becomes the
-    real upper boundary for everything below it, matching the requested
-    example exactly. (5) z-index default changed from an ever-growing
-    global counter to parent.z + 1 (stays there until changed manually).
-    (6) Added same-z-index collision prevention: siblings at the same
-    z-index can touch but not overlap during drag (slides along whichever
-    axis isn't blocked) or resize (freezes at last valid size); different
-    z-indexes can still stack/overlap freely, since that's the point of
-    z-index.
+    Revision: (1) Dock order now tracked separately from z via a new
+    dockOrder field (assigned when Dock is turned on) - fixes docking a
+    second control to an edge being able to push an already-docked one
+    out of its slot; applyDockStack/containerClientRect now sort by
+    dockOrder, not z. (2) Added corner-pinning Dock options (TopLeft/
+    TopRight/BottomLeft/BottomRight) that attach to an edge without
+    stretching full width/height, so multiple items can share a strip
+    (e.g. two images docked below a menu, one each side, with open space
+    between); these map to Dock=None + the matching Anchor in generated
+    WinForms code since real DockStyle has no corner values. (3) Replaced
+    the boolean "Resizable" toggle with the real FormBorderStyle enum
+    (None/FixedSingle/Fixed3D/FixedDialog/Sizable/FixedToolWindow/
+    SizableToolWindow) - a real multi-value WinForms property doesn't
+    belong on an on/off switch. Always On Top relabeled to show its real
+    property name (TopMost). (4) Added OPTION_DEFINITIONS + a rendered
+    legend under every dropdown property (Dock, BorderStyle, DropDown
+    Style, Selection Mode, Size Mode, Format, Text Align, Cursor, Start
+    Position, Form Border Style) explaining what each individual option
+    value actually does. (5) BorderStyle now visually differs on canvas
+    (None/FixedSingle/Fixed3D were previously identical) via a scoped
+    borderStyleFor() applied to field-like controls only, avoiding a
+    double-border look on Button/CheckBox/etc that already draw their
+    own chrome. (6) Rewrote ListBox's interact-mode rendering: was a
+    native <select multiple> that always needed Ctrl regardless of
+    Selection Mode, and never actually tracked selection. Now a custom
+    clickable list implementing real semantics - One = single click,
+    MultiSimple = plain click-click-click with no modifier needed,
+    MultiExtended = click/Ctrl+click/Shift+click like a file picker -
+    backed by a new selectedIndices prop. (7) Replaced the bare "type
+    into a textarea" Items editor on ComboBox/ListBox with an explicit
+    per-row Add/Remove list editor (buildItemsListEditorRow).
 */
 
-const ENGINE_VERSION = '1.8';
+const ENGINE_VERSION = '1.9';
 
 /* =========================================================================
    Control catalog
@@ -55,7 +59,7 @@ const COMMON_BEHAVIOR_PROPS = [
   ['enabled', 'Enabled', 'checkbox', true],
   ['tabIndex', 'Tab Index', 'number', 0],
   ['toolTip', 'Tool Tip', 'text', ''],
-  ['dock', 'Dock', 'select', 'None', { options: ['None', 'Top', 'Bottom', 'Left', 'Right', 'Fill'] }],
+  ['dock', 'Dock', 'select', 'None', { options: ['None', 'Top', 'Bottom', 'Left', 'Right', 'Fill', 'TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'] }],
   ['anchor', 'Anchor', 'anchorEditor', 'Top, Left'],
   ['cursor', 'Cursor', 'select', 'Default', { options: ['Default', 'Hand', 'IBeam', 'Wait', 'Cross', 'SizeAll'] }],
 ];
@@ -155,7 +159,7 @@ const CONTROL_DEFS = {
   ComboBox: {
     label: 'ComboBox', glyph: 'Cb', defaultW: 130, defaultH: 22,
     props: [
-      ['items', 'Items', 'textarea', 'Item 1\nItem 2\nItem 3', { itemsEditor: true }],
+      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
       ['selectedIndex', 'Selected Index', 'number', -1],
       ['dropDownStyle', 'DropDown Style', 'select', 'DropDown', { options: ['DropDown', 'DropDownList', 'Simple'] }],
     ],
@@ -164,8 +168,9 @@ const CONTROL_DEFS = {
   ListBox: {
     label: 'ListBox', glyph: 'Lb', defaultW: 130, defaultH: 90,
     props: [
-      ['items', 'Items', 'textarea', 'Item 1\nItem 2\nItem 3', { itemsEditor: true }],
+      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
       ['selectionMode', 'Selection Mode', 'select', 'One', { options: ['None', 'One', 'MultiSimple', 'MultiExtended'] }],
+      ['selectedIndices', 'Selected Indices (design-time)', 'hidden', []],
     ],
     events: ['SelectedIndexChanged'],
   },
@@ -334,6 +339,7 @@ const state = {
   undoStack: [],
   redoStack: [],
   suppressUndoCheckpoint: false, // true during a continuous drag/resize gesture
+  dockOrderSeq: 0,
   form: {
     text: 'MyForm',
     width: 640,
@@ -342,7 +348,7 @@ const state = {
     minimizeBox: true,
     maximizeBox: true,
     closeBox: true,
-    resizable: true,          // FormBorderStyle: Sizable vs FixedSingle
+    formBorderStyle: 'Sizable', // real WinForms enum - replaces a plain true/false "resizable" toggle
     startPosition: 'CenterScreen',
     topMost: true,
     events: { Load: { fn: 'Form_Load', code: '', ps1: '' } },
@@ -384,6 +390,7 @@ function createControl(type, x, y, parentId, tabPage) {
     x: snap(x), y: snap(y),
     w: def.defaultW, h: def.defaultH,
     z: parentZ + 1, // stays at parent.z + 1 until the user changes it manually
+    dockOrder: null, // set when Dock is turned on; docking priority, NOT z, decides stacking order
     interact: false,
     props, events,
   };
@@ -417,9 +424,12 @@ const TAB_HEADER_HEIGHT = 26; // must match .rc-tabcontrol-header / .tabcontrol-
 // tab control docks into whatever's left below it, rather than both
 // independently snapping to y=0 and overlapping. Fill-docked controls
 // always resolve last (after every edge-dock), taking whatever remains,
-// regardless of z-order among themselves and the edge-docked controls.
+// regardless of dock-order among themselves and the edge-docked controls.
+// Sorted by dockOrder (the sequence Dock was actually turned on for each
+// control), NOT z - so a control docked first keeps its claim even if a
+// later-docked sibling happens to have a lower z-index.
 function applyDockStack(rawSiblings, bounds) {
-  const siblings = rawSiblings.slice().sort((a, b) => a.z - b.z);
+  const siblings = rawSiblings.slice().sort((a, b) => (a.dockOrder ?? Infinity) - (b.dockOrder ?? Infinity));
   let rect = { x: 0, y: 0, w: bounds.w, h: bounds.h };
   const fillCtrls = [];
 
@@ -444,6 +454,17 @@ function applyDockStack(rawSiblings, bounds) {
         ctrl.x = rect.x + rect.w - ctrl.w; ctrl.y = rect.y; ctrl.h = Math.max(1, rect.h);
         rect = { x: rect.x, y: rect.y, w: Math.max(0, rect.w - ctrl.w), h: rect.h };
         break;
+      // Corner variants pin flush to a corner of whatever space remains,
+      // WITHOUT stretching or claiming exclusive space - so several of
+      // these can share the same strip (e.g. two images both pinned to
+      // the top, one Top-Left and one Top-Right, with open space between
+      // them). There's no automatic collision avoidance between corner
+      // docks sharing a strip - if they're wide enough to touch, that's
+      // on the layout, same as manually placing them would be.
+      case 'TopLeft': ctrl.x = rect.x; ctrl.y = rect.y; break;
+      case 'TopRight': ctrl.x = rect.x + rect.w - ctrl.w; ctrl.y = rect.y; break;
+      case 'BottomLeft': ctrl.x = rect.x; ctrl.y = rect.y + rect.h - ctrl.h; break;
+      case 'BottomRight': ctrl.x = rect.x + rect.w - ctrl.w; ctrl.y = rect.y + rect.h - ctrl.h; break;
     }
   });
 
@@ -535,7 +556,7 @@ function containerClientRect(parentId, tabPage) {
   const dockedSiblings = state.controls
     .filter(c => (c.parentId || null) === (parentId || null) && (c.tabPage || null) === (tabPage || null))
     .filter(c => c.props.dock && c.props.dock !== 'None' && c.props.dock !== 'Fill')
-    .sort((a, b) => a.z - b.z);
+    .sort((a, b) => (a.dockOrder ?? Infinity) - (b.dockOrder ?? Infinity));
 
   let rect = { x: 0, y: 0, w: bounds.w, h: bounds.h };
   dockedSiblings.forEach(ctrl => {
@@ -750,6 +771,8 @@ function renderControl(c) {
   } else {
     const inner = document.createElement('div');
     inner.className = 'ctrl-inner';
+    inner.style.cssText += borderStyleFor(c.props, c.type);
+    inner.style.boxSizing = 'border-box';
     inner.appendChild(renderInner(c));
     el.appendChild(inner);
 
@@ -794,6 +817,20 @@ function fontStyleFor(p) {
   return `font-family:${p.fontFamily};font-size:${p.fontSize}px;font-weight:${p.fontBold ? '700' : '400'};font-style:${p.fontItalic ? 'italic' : 'normal'};`;
 }
 
+const BORDER_STYLE_VISIBLE_TYPES = new Set([
+  'TextBox', 'ComboBox', 'ListBox', 'NumericUpDown', 'DateTimePicker',
+  'RichTextBox', 'PictureBox', 'Panel', 'GroupBox',
+]);
+
+function borderStyleFor(p, type) {
+  if (!p || !('borderStyle' in p) || !BORDER_STYLE_VISIBLE_TYPES.has(type)) return '';
+  switch (p.borderStyle) {
+    case 'None': return 'border:none;';
+    case 'Fixed3D': return 'border:2px inset #dcdcdc;';
+    case 'FixedSingle': default: return 'border:1px solid #7d8390;';
+  }
+}
+
 function renderInner(c) {
   const p = c.props;
   const wrap = document.createElement('div');
@@ -835,7 +872,47 @@ function renderInner(c) {
     }
     case 'ListBox': {
       const items = (p.items || '').split('\n').filter(Boolean);
-      wrap.innerHTML = `<select class="rc-listbox" style="${fontStyleFor(p)}" multiple ${c.interact ? '' : 'disabled'}>${items.map(it => `<option>${escapeHtml(it)}</option>`).join('')}</select>`;
+      const list = document.createElement('div');
+      list.className = 'rc-listbox-custom';
+      list.style.cssText = fontStyleFor(p);
+      if (!p.selectedIndices) p.selectedIndices = [];
+
+      items.forEach((it, i) => {
+        const row = document.createElement('div');
+        row.className = 'rc-listbox-item' + (p.selectedIndices.includes(i) ? ' selected' : '');
+        row.textContent = it;
+        if (c.interact && p.selectionMode !== 'None') {
+          row.addEventListener('click', (e) => {
+            const mode = p.selectionMode;
+            if (mode === 'One') {
+              p.selectedIndices = [i];
+            } else if (mode === 'MultiSimple') {
+              // Real WinForms MultiSimple: plain click-click-click toggles
+              // an item in/out of the selection, no modifier key needed.
+              const idx = p.selectedIndices.indexOf(i);
+              if (idx >= 0) p.selectedIndices.splice(idx, 1);
+              else p.selectedIndices.push(i);
+            } else if (mode === 'MultiExtended') {
+              if (e.shiftKey && p.selectedIndices.length) {
+                const anchor = p.selectedIndices[p.selectedIndices.length - 1];
+                const [lo, hi] = anchor < i ? [anchor, i] : [i, anchor];
+                const range = [];
+                for (let k = lo; k <= hi; k++) range.push(k);
+                p.selectedIndices = range;
+              } else if (e.ctrlKey || e.metaKey) {
+                const idx = p.selectedIndices.indexOf(i);
+                if (idx >= 0) p.selectedIndices.splice(idx, 1);
+                else p.selectedIndices.push(i);
+              } else {
+                p.selectedIndices = [i];
+              }
+            }
+            render();
+          });
+        }
+        list.appendChild(row);
+      });
+      wrap.appendChild(list);
       break;
     }
     case 'Panel': {
@@ -1223,6 +1300,96 @@ const EVENT_SNIPPETS = [
   { label: 'Close the form', code: `$Form.Close()` },
   { label: 'Enable/disable another control', code: `$OtherControlName.Enabled = $true` },
 ];
+
+// Definitions for individual dropdown VALUES, not just the field itself -
+// rendered as a small legend under the dropdown so every option's meaning
+// is visible without guessing. Keyed by property key, then option value.
+const OPTION_DEFINITIONS = {
+  dock: {
+    None: 'Not docked - stays exactly where you place it.',
+    Top: 'Hugs the top edge and stretches to the full available width.',
+    Bottom: 'Hugs the bottom edge and stretches to the full available width.',
+    Left: 'Hugs the left edge and stretches to the full available height.',
+    Right: 'Hugs the right edge and stretches to the full available height.',
+    Fill: 'Takes up whatever space is left after every other docked control has claimed its edge.',
+    TopLeft: 'Pins to the top-left corner without stretching - keeps its own width/height, so other controls can share the top edge with it.',
+    TopRight: 'Pins to the top-right corner without stretching.',
+    BottomLeft: 'Pins to the bottom-left corner without stretching.',
+    BottomRight: 'Pins to the bottom-right corner without stretching.',
+  },
+  borderStyle: {
+    None: 'No visible border at all.',
+    FixedSingle: 'A thin, flat 1px line border.',
+    Fixed3D: 'A sunken, inset-look border (classic Windows "recessed" field appearance).',
+  },
+  dropDownStyle: {
+    DropDown: 'A text box with a dropdown arrow - the user can type a custom value OR pick from the list.',
+    DropDownList: 'Dropdown only, no typing - the user must pick one of the listed items.',
+    Simple: 'The list is shown inline (not collapsed into a dropdown) alongside an editable text box.',
+  },
+  selectionMode: {
+    None: 'Nothing can be selected.',
+    One: 'Exactly one item can be selected at a time.',
+    MultiSimple: 'Click any item to toggle it in/out of the selection - no Ctrl key needed, multiple items build up as you click.',
+    MultiExtended: 'Click selects one item; Ctrl+click toggles individual items; Shift+click selects a range - same as most Windows file pickers.',
+  },
+  sizeMode: {
+    Normal: 'Image shown at its actual size, anchored to the top-left; gets cropped if the box is smaller.',
+    StretchImage: 'Image is stretched to exactly fill the box, ignoring its original aspect ratio.',
+    AutoSize: 'The box resizes itself to match the image\'s actual size.',
+    CenterImage: 'Image is centered at its actual size; cropped if the box is smaller.',
+    Zoom: 'Image is scaled as large as possible while preserving its aspect ratio, and centered.',
+  },
+  format: {
+    Long: 'Full written-out date, e.g. "Saturday, August 15, 2026".',
+    Short: 'Compact numeric date, e.g. "8/15/2026".',
+    Time: 'Time only, e.g. "3:45 PM" - switches the picker itself to a time input.',
+    Custom: 'Displays whatever raw value is stored, unformatted.',
+  },
+  textAlign: {
+    Left: 'Text is left-aligned within the control.',
+    Center: 'Text is centered within the control.',
+    Right: 'Text is right-aligned within the control.',
+  },
+  cursor: {
+    Default: 'The normal system arrow pointer.',
+    Hand: 'A pointing hand - signals the control is clickable, like a link.',
+    IBeam: 'A text-insertion cursor - typically used for editable text fields.',
+    Wait: 'A busy/loading indicator.',
+    Cross: 'A crosshair - often used for precise selection.',
+    SizeAll: 'A four-way move cursor - signals the control can be dragged.',
+  },
+  startPosition: {
+    CenterScreen: 'Opens centered on the screen.',
+    Manual: 'Opens at whatever Location is set in code - not centered anywhere automatically.',
+    CenterParent: 'Opens centered over its parent/owner window.',
+    WindowsDefaultLocation: 'Opens wherever Windows decides to cascade it, with the size you set.',
+    WindowsDefaultBounds: 'Opens wherever Windows decides, AND lets Windows pick the size too (ignoring your Width/Height).',
+  },
+  formBorderStyle: {
+    None: 'No border and no title bar at all.',
+    FixedSingle: 'Thin fixed border, not resizable by dragging the edges.',
+    Fixed3D: 'Sunken-look fixed border, not resizable.',
+    FixedDialog: 'Thicker fixed border typical of dialog boxes, not resizable.',
+    Sizable: 'Standard resizable window border - the normal default.',
+    FixedToolWindow: 'Thin fixed border with a small tool-window-style title bar (no minimize/maximize buttons), not resizable.',
+    SizableToolWindow: 'Same small tool-window title bar as FixedToolWindow, but resizable.',
+  },
+};
+
+function buildOptionDefinitionsLegend(key, options) {
+  const legend = document.createElement('div');
+  legend.className = 'option-legend';
+  const defs = OPTION_DEFINITIONS[key];
+  options.forEach(o => {
+    if (!defs[o]) return;
+    const line = document.createElement('div');
+    line.className = 'option-legend-line';
+    line.innerHTML = `<span class="option-legend-value">${escapeHtml(o)}</span><span class="option-legend-text">${escapeHtml(defs[o])}</span>`;
+    legend.appendChild(line);
+  });
+  return legend;
+}
 
 const TOOLTIPS = {
   name: 'Variable/element name used to reference this control in generated code.',
@@ -1715,11 +1882,53 @@ function buildAnchorEditorRow(ctrl, key, label) {
   return wrap;
 }
 
+function buildItemsListEditorRow(ctrl, key, label) {
+  const wrap = document.createElement('div');
+  wrap.className = 'items-list-editor';
+
+  const heading = document.createElement('div');
+  heading.className = 'items-list-heading';
+  heading.title = 'The selectable entries in this control. Add, remove, or edit them below - order matters (item 0 is first).';
+  heading.textContent = label;
+  wrap.appendChild(heading);
+
+  const arr = (ctrl.props[key] || '').split('\n').filter((s, i, a) => !(s === '' && i === a.length - 1));
+  const sync = () => { ctrl.props[key] = arr.join('\n'); render(); };
+
+  arr.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'items-list-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = item;
+    input.addEventListener('change', () => { arr[i] = input.value; sync(); });
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+    delBtn.textContent = '\u2715';
+    delBtn.title = 'Remove this item.';
+    delBtn.addEventListener('click', () => { arr.splice(i, 1); sync(); });
+    row.appendChild(input);
+    row.appendChild(delBtn);
+    wrap.appendChild(row);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn btn-ghost menu-add-btn';
+  addBtn.textContent = '+ Add item';
+  addBtn.addEventListener('click', () => { arr.push('New Item'); sync(); });
+  wrap.appendChild(addBtn);
+
+  return wrap;
+}
+
 function buildPropRows(ctrl, propDefs) {
   const frag = document.createElement('div');
   propDefs.forEach(([key, label, type, , extra]) => {
     const tipAttr = escapeHtml(tt(key));
 
+    if (type === 'hidden') return; // tracked in props for codegen/undo, but not user-editable as a raw row
     if (type === 'menuEditor') {
       frag.appendChild(buildMenuEditorRow(ctrl, key, label));
       return;
@@ -1730,6 +1939,10 @@ function buildPropRows(ctrl, propDefs) {
     }
     if (type === 'anchorEditor') {
       frag.appendChild(buildAnchorEditorRow(ctrl, key, label));
+      return;
+    }
+    if (type === 'itemsListEditor') {
+      frag.appendChild(buildItemsListEditorRow(ctrl, key, label));
       return;
     }
     if (type === 'px') {
@@ -1760,9 +1973,15 @@ function buildPropRows(ctrl, propDefs) {
       const opts = extra.options.map(o => `<option ${o === val ? 'selected' : ''}>${o}</option>`).join('');
       row.innerHTML = `<label title="${tipAttr}">${label}</label><select>${opts}</select>`;
       row.querySelector('select').addEventListener('change', (e) => {
-        ctrl.props[key] = e.target.value;
+        const newVal = e.target.value;
+        if (key === 'dock') {
+          if (newVal !== 'None' && (ctrl.props.dock || 'None') === 'None') ctrl.dockOrder = ++state.dockOrderSeq;
+          if (newVal === 'None') ctrl.dockOrder = null;
+        }
+        ctrl.props[key] = newVal;
         render(); // docking (if this was Dock) is recomputed centrally at the top of render()
       });
+      if (OPTION_DEFINITIONS[key]) row.appendChild(buildOptionDefinitionsLegend(key, extra.options));
     } else if (type === 'number') {
       row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="number" value="${val}">`;
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = Number(e.target.value) || 0; render(); });
@@ -2142,10 +2361,9 @@ function buildFormChromeRows() {
     minimizeBox: 'Shows the minimize (_) button in the title bar.',
     maximizeBox: 'Shows the maximize (\u25a1) button in the title bar.',
     closeBox: 'Shows the close (\u00d7) button in the title bar.',
-    resizable: 'Allows the user to resize the window by dragging its edges.',
     topMost: 'Keeps the window above all other windows.',
   };
-  [['minimizeBox', 'Minimize Button'], ['maximizeBox', 'Maximize Button'], ['closeBox', 'Close Button'], ['resizable', 'Resizable'], ['topMost', 'Always On Top']].forEach(([key, label]) => {
+  [['minimizeBox', 'Minimize Button'], ['maximizeBox', 'Maximize Button'], ['closeBox', 'Close Button'], ['topMost', 'Always On Top (TopMost)']].forEach(([key, label]) => {
     const row = document.createElement('div');
     row.className = 'toggle-row';
     row.title = chromeTips[key];
@@ -2154,11 +2372,23 @@ function buildFormChromeRows() {
     frag.appendChild(row);
   });
 
+  // FormBorderStyle is a real multi-value WinForms enum (not a plain
+  // true/false), so it's a dropdown - not a toggle - with every option
+  // explained, since "Sizable" vs "FixedToolWindow" isn't self-evident.
+  const fbsRow = document.createElement('div');
+  fbsRow.className = 'prop-row';
+  const fbsOpts = ['None', 'FixedSingle', 'Fixed3D', 'FixedDialog', 'Sizable', 'FixedToolWindow', 'SizableToolWindow'];
+  fbsRow.innerHTML = `<label title="Controls the window's border/title-bar style AND whether it can be resized - a real WinForms enum, not a simple on/off.">Form Border Style</label><select>${fbsOpts.map(o => `<option ${o === state.form.formBorderStyle ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  fbsRow.querySelector('select').addEventListener('change', (e) => { state.form.formBorderStyle = e.target.value; render(); });
+  fbsRow.appendChild(buildOptionDefinitionsLegend('formBorderStyle', fbsOpts));
+  frag.appendChild(fbsRow);
+
   const startRow = document.createElement('div');
   startRow.className = 'prop-row';
   const opts = ['CenterScreen', 'Manual', 'CenterParent', 'WindowsDefaultLocation', 'WindowsDefaultBounds'];
   startRow.innerHTML = `<label title="Where the window appears on screen the first time it opens.">Start Position</label><select>${opts.map(o => `<option ${o === state.form.startPosition ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
   startRow.querySelector('select').addEventListener('change', (e) => { state.form.startPosition = e.target.value; });
+  startRow.appendChild(buildOptionDefinitionsLegend('startPosition', opts));
   frag.appendChild(startRow);
 
   return frag;
@@ -2595,7 +2825,7 @@ function generateWinForms() {
   lines.push(`$Form.MinimizeBox = $${f.minimizeBox}`);
   lines.push(`$Form.MaximizeBox = $${f.maximizeBox}`);
   lines.push(`$Form.ControlBox = $${f.closeBox}`);
-  lines.push(`$Form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::${f.resizable ? 'Sizable' : 'FixedSingle'}`);
+  lines.push(`$Form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::${f.formBorderStyle}`);
   lines.push(`$Form.TopMost = $${f.topMost}`);
   lines.push('');
 
@@ -2811,7 +3041,7 @@ function generateWPF() {
   const xaml = `<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="${escapeHtml(f.text)}" Width="${f.width}" Height="${f.height}" Background="${f.backColor}"
-        ResizeMode="${f.resizable ? 'CanResize' : 'NoResize'}" WindowStartupLocation="${f.startPosition === 'CenterScreen' ? 'CenterScreen' : 'Manual'}" Topmost="${f.topMost}">
+        ResizeMode="${(f.formBorderStyle === 'Sizable' || f.formBorderStyle === 'SizableToolWindow') ? 'CanResize' : 'NoResize'}" WindowStartupLocation="${f.startPosition === 'CenterScreen' ? 'CenterScreen' : 'Manual'}" Topmost="${f.topMost}">
   <Canvas>
     ${ctrls.map(elFor).join('\n    ')}
   </Canvas>
