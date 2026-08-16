@@ -1,13 +1,14 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.15
+    Version 1.16
 
-    Revision: added .pick-control-btn and .picking-banner/body.picking-
-    mode for the new control-picker feature. Added canvas preview styles
-    for this update's 5 new controls: .rc-flowpanel/.rc-tablepanel
-    (+ .rc-table-vline/-hline grid markers), .rc-statusstrip, and
-    .rc-toolstrip/.rc-toolstrip-btn.
+    Revision:
+
+    1. Added styling for the new structured/parameterized snippet UI:
+    .snippet-bound-head, .snippet-param-row (+ -control/-control-name
+    variants for the control-picker field type), and
+    .snippet-code-preview for the read-only computed-code display.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -219,7 +220,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.15';
+  --stylesheet-version: '1.16';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -912,6 +913,61 @@ button, input, select, textarea {
 .event-block-body .prop-row { grid-template-columns: 70px 1fr; }
 .snippet-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .snippet-row select { flex: 1; }
+
+.snippet-bound-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--bp-accent-2);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.snippet-bound-head span { flex: 1; }
+.snippet-bound-head .btn { font-size: 10px; padding: 3px 7px; font-weight: 400; }
+
+.snippet-param-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.snippet-param-row label { font-size: 11.5px; color: var(--bp-text-muted); }
+.snippet-param-row input[type="text"] {
+  width: 100%;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  font-size: 11.5px;
+  box-sizing: border-box;
+}
+.snippet-param-control { display: flex; align-items: center; gap: 8px; }
+.snippet-param-control-name {
+  font-family: var(--bp-font-mono);
+  font-size: 11px;
+  color: var(--bp-accent-2);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.snippet-param-control .pick-control-btn { width: auto; margin-top: 0; flex-shrink: 0; }
+
+.snippet-code-preview {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  font-family: var(--bp-font-mono);
+  color: var(--bp-text-faint);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .actions-editor { margin: 8px 0; }
 .action-block {
