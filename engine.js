@@ -1,34 +1,28 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 2.1
+    Version 1.12
 
-    Revision: (1) Found and fixed the real resize-handle bug: the FORM's
-    own resize handles (ensureFormResizeHandles) only ever created 3 of 8
-    positions (e/s/se) - west/north/corner dragging had no DOM element to
-    click AND no math in startFormResize's onMove to handle it even if it
-    did. All 8 positions now exist and work (verified via direct event
-    simulation). Per-control resize handles were already correct (all 8
-    always existed and worked) - confirmed via the same direct-simulation
-    test, so that wasn't actually broken. (2) FormBorderStyle now
-    actually changes the window's appearance - previously stored but
-    never applied to the design-form's visual chrome at all. Each of the
-    7 values gets a real distinct look (border style, title bar height/
-    button set, resize handles hidden for non-Sizable styles), matching
-    real WinForms conventions (dialog/tool-window styles hide Minimize/
-    Maximize; None hides the title bar and border entirely). (3) The
-    properties-pane header restructured per spec: an (i) info button now
-    sits to the left of the TYPE line (uppercase, e.g. "TEXTBOX"), with
-    the control's Name below it - clicking (i) opens the Info modal with
-    that type's detailed guidance (showInfoModalText), replacing the
-    permanently-expanded inline "Help" section that used to eat pane
-    space on every single control. (4) Info modal repositioned to anchor
-    10px from the right edge (near the properties pane) instead of
-    centering across the whole viewport - was miles from the properties
-    pane on an ultra-wide monitor.
+    Revision: (1) Added CheckedListBox as a real control type - a real
+    WinForms control that's easy to mistake for a dropdown but isn't
+    one: always-visible like ListBox, except every item gets its own
+    checkbox (Check On Click property, checkedIndices design-time
+    state), rendered as a custom clickable list matching the same
+    pattern as ListBox's selection UI. Wired into WinForms (real
+    CheckedListBox + SetItemChecked), HTML (a real checkbox list), and
+    WPF (maps to ListBox as a placeholder - a true checkbox
+    ItemTemplate is a bigger XAML undertaking, noted for later). (2)
+    Added a "Convert To" feature: CONTROL_FAMILIES groups related
+    control types (ListBox/ComboBox/CheckedListBox, TextBox/
+    RichTextBox, CheckBox/RadioButton, Panel/GroupBox), and a new
+    dropdown in the Layout section (convertControlType) lets a control
+    switch to a family member in place - keeping position, size, name,
+    and parent, carrying over any prop keys the two types share (e.g.
+    Items survives ListBox -> ComboBox), and resetting only the
+    type-specific properties that don't carry over.
 */
 
-const ENGINE_VERSION = '2.1';
+const ENGINE_VERSION = '1.12';
 
 /* =========================================================================
    Control catalog
@@ -167,6 +161,15 @@ const CONTROL_DEFS = {
     ],
     events: ['SelectedIndexChanged'],
   },
+  CheckedListBox: {
+    label: 'CheckedListBox', glyph: 'Cl', defaultW: 140, defaultH: 100,
+    props: [
+      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
+      ['checkOnClick', 'Check On Click', 'checkbox', true],
+      ['checkedIndices', 'Checked Indices (design-time)', 'hidden', []],
+    ],
+    events: ['ItemCheck'],
+  },
   Panel: {
     label: 'Panel', glyph: 'Pn', defaultW: 200, defaultH: 140,
     props: [], events: ['Click'], isContainer: true,
@@ -266,6 +269,7 @@ const TOOL_ICONS = {
   RadioButton: `<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>`,
   ComboBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M10.3 6.7l1.4 1.5 1.4-1.5"/>`,
   ListBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h5"/>`,
+  CheckedListBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><rect x="3.3" y="4.3" width="2.6" height="2.6" rx="0.4"/><path d="M3.7 5.6l0.6 0.6 1.2-1.3"/><path d="M7.3 5.6h5.2"/><rect x="3.3" y="9" width="2.6" height="2.6" rx="0.4"/><path d="M7.3 10.3h5.2"/>`,
   Panel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/>`,
   GroupBox: `<path d="M1.5 4.6V13.5h13V4.6H8.3M1.5 4.6h2.3M6.3 4.6c0-1.15.9-2.1 2-2.1s2 .95 2 2.1"/>`,
   PictureBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><circle cx="5.3" cy="6" r="1.2"/><path d="M2 12l3.7-3.8 2.5 2.3L12 6.8l2 2.4"/>`,
@@ -295,6 +299,7 @@ const TOOL_DESCRIPTIONS = {
   RadioButton: 'A mutually-exclusive choice. Give matching Group Name to radio buttons that should only allow one selection.',
   ComboBox: 'A dropdown the user can pick from (or type into, depending on DropDown Style). Enter choices in Items, one per line.',
   ListBox: 'A scrollable list of choices, optionally multi-select. Enter choices in Items, one per line.',
+  CheckedListBox: 'Like ListBox, but every item gets its own checkbox - always a visible list, NOT a dropdown. Good for "pick any of these" scenarios where you want every option visible at once, not collapsed.',
   Panel: 'A plain, unlabeled container for grouping other controls. Drag controls onto it to make them children.',
   GroupBox: 'A labeled, bordered container for grouping related controls - the border and title make the grouping visible to the user.',
   PictureBox: 'Displays an image. Set Image Source to a file path or URL.',
@@ -310,7 +315,7 @@ const TOOL_DESCRIPTIONS = {
 
 const TOOLBOX_GROUPS = [
   { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
-  { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
+  { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'CheckedListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
   { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl'] },
   { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
   { heading: 'Menus', types: ['MenuStrip'] },
@@ -941,6 +946,37 @@ function renderInner(c) {
       wrap.appendChild(list);
       break;
     }
+    case 'CheckedListBox': {
+      const items = (p.items || '').split('\n').filter(Boolean);
+      const list = document.createElement('div');
+      list.className = 'rc-listbox-custom rc-checkedlistbox';
+      list.style.cssText = fontStyleFor(p);
+      if (!p.checkedIndices) p.checkedIndices = [];
+
+      items.forEach((it, i) => {
+        const row = document.createElement('div');
+        row.className = 'rc-listbox-item rc-checkedlistbox-item';
+        const isChecked = p.checkedIndices.includes(i);
+        const box = document.createElement('span');
+        box.className = 'rc-checkedlistbox-box' + (isChecked ? ' checked' : '');
+        box.textContent = isChecked ? '\u2611' : '\u2610';
+        const label = document.createElement('span');
+        label.textContent = it;
+        row.appendChild(box);
+        row.appendChild(label);
+        if (c.interact) {
+          row.addEventListener('click', () => {
+            const idx = p.checkedIndices.indexOf(i);
+            if (idx >= 0) p.checkedIndices.splice(idx, 1);
+            else p.checkedIndices.push(i);
+            render();
+          });
+        }
+        list.appendChild(row);
+      });
+      wrap.appendChild(list);
+      break;
+    }
     case 'Panel': {
       wrap.innerHTML = `<div class="rc-panel" style="background:${p.backColor};"></div>`;
       break;
@@ -1494,6 +1530,7 @@ const CONTROL_HELP = {
   RadioButton: 'A mutually-exclusive choice - only one RadioButton per Group Name can be checked at a time. Give every radio button that should behave as one group the SAME Group Name; different Group Names create independent groups. Example: three radio buttons with Group Name="ShippingSpeed" - Standard/Express/Overnight - only one selectable at once.',
   ComboBox: 'A dropdown list. Enter the choices in Items, one per line. Selected Index sets which item is picked by default (0 = first item, -1 = none). Drop Down Style controls whether the user can type a custom value, must pick from the list, or sees it inline. Example: Items="Small\nMedium\nLarge", Selected Index=1 starts on "Medium".',
   ListBox: 'A scrollable list of choices, always visible (not a dropdown). Enter choices in Items, one per line. Selection Mode controls whether the user can pick none/one/multiple items at once. Example: Items="Red\nGreen\nBlue", Selection Mode="MultiExtended" lets the user Ctrl/Shift-click multiple colors.',
+  CheckedListBox: 'A real WinForms control that\'s often confused for a dropdown, but it isn\'t one - it\'s always-visible, like ListBox, except every item has its own checkbox so multiple can be picked without needing Ctrl/Shift. Check On Click controls whether a single click toggles the box (true, the common choice) or requires clicking exactly on the checkbox glyph (false). Example: a permissions list where several boxes should be checkable at a glance.',
   Panel: 'A plain, unlabeled container for grouping other controls - drag controls from the toolbox onto it, or use a control\'s Parent dropdown (Layout section) to move it in without dragging. Has no border/title of its own; use GroupBox instead if you want a visible boundary and caption. Example: group a set of address fields inside a Panel so you can reposition or hide them as one unit.',
   GroupBox: 'A bordered, titled container - like Panel, but draws a visible border and caption (Text) so the grouping is obvious to the user. Example: Text="Shipping Address" around a set of address TextBoxes.',
   PictureBox: 'Displays an image. Image Source is a file path or URL. Size Mode controls how the image fits the box - e.g. StretchImage fills it (ignoring aspect ratio), Zoom fits within it (preserving aspect ratio). Example: Image Source="logo.png", Size Mode="Zoom".',
@@ -1859,6 +1896,85 @@ function buildParentDropdownRow(ctrl) {
   return row;
 }
 
+// Related-control families, for the "Convert To" dropdown - lets a control
+// switch to a close relative in place (keeping position/size/name/parent)
+// instead of deleting and rebuilding it from scratch.
+const CONTROL_FAMILIES = {
+  ListBox: ['ComboBox', 'CheckedListBox'],
+  ComboBox: ['ListBox', 'CheckedListBox'],
+  CheckedListBox: ['ListBox', 'ComboBox'],
+  TextBox: ['RichTextBox'],
+  RichTextBox: ['TextBox'],
+  CheckBox: ['RadioButton'],
+  RadioButton: ['CheckBox'],
+  Panel: ['GroupBox'],
+  GroupBox: ['Panel'],
+};
+
+function convertControlType(ctrl, newType) {
+  const oldType = ctrl.type;
+  const oldProps = ctrl.props;
+  const oldEvents = ctrl.events;
+  const newDef = CONTROL_DEFS[newType];
+
+  const cloneDefault = (v) => (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+  const newProps = {};
+  newDef.props.forEach(([key, , , def0]) => { newProps[key] = cloneDefault(def0); });
+  COMMON_APPEARANCE_PROPS.forEach(([key, , , def0]) => { newProps[key] = cloneDefault(def0); });
+  COMMON_BEHAVIOR_PROPS.forEach(([key, , , def0]) => { newProps[key] = cloneDefault(def0); });
+  // Best-effort carry-over: any prop key that exists on both old and new
+  // types keeps its value (e.g. Items survives ListBox -> ComboBox).
+  Object.keys(newProps).forEach(key => { if (key in oldProps) newProps[key] = oldProps[key]; });
+
+  const newEvents = {};
+  newDef.events.forEach(evt => { newEvents[evt] = oldEvents[evt] || null; });
+
+  // If the name still matches the auto-generated pattern for the old type
+  // (e.g. "ListBox1"), rename it to match the new type; a custom name is
+  // left alone.
+  if (ctrl.name.startsWith(oldType)) {
+    ctrl.name = newType + ctrl.name.slice(oldType.length);
+  }
+
+  ctrl.type = newType;
+  ctrl.props = newProps;
+  ctrl.events = newEvents;
+  if (CONTROL_DEFS[newType].isTabControl && !ctrl.activeTabId) {
+    ctrl.activeTabId = (newProps.tabs && newProps.tabs[0] && newProps.tabs[0].id) || null;
+  }
+}
+
+function buildConvertToRow(ctrl) {
+  const family = CONTROL_FAMILIES[ctrl.type];
+  if (!family || !family.length) return null;
+
+  const row = document.createElement('div');
+  row.className = 'prop-row';
+  const label = document.createElement('label');
+  label.textContent = 'Convert To';
+  label.title = 'Switch this control to a closely related type, keeping its position, size, name, and parent - only type-specific properties reset to defaults.';
+  const select = document.createElement('select');
+  const keepOpt = document.createElement('option');
+  keepOpt.value = '';
+  keepOpt.textContent = `(keep as ${ctrl.type})`;
+  select.appendChild(keepOpt);
+  family.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    select.appendChild(opt);
+  });
+  select.addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    convertControlType(ctrl, e.target.value);
+    state.selectedId = ctrl.id;
+    render();
+  });
+  row.appendChild(label);
+  row.appendChild(select);
+  return row;
+}
+
 function buildLayoutRows(ctrl) {
   const frag = document.createElement('div');
   const nameRow = document.createElement('div');
@@ -1870,6 +1986,8 @@ function buildLayoutRows(ctrl) {
   });
   frag.appendChild(nameRow);
   frag.appendChild(buildParentDropdownRow(ctrl));
+  const convertRow = buildConvertToRow(ctrl);
+  if (convertRow) frag.appendChild(convertRow);
 
   frag.appendChild(xyQuickRow(ctrl, 'x', 'X'));
   frag.appendChild(xyQuickRow(ctrl, 'y', 'Y'));
@@ -2802,6 +2920,11 @@ function generateHTML() {
         const items = (p.items || '').split('\n').filter(Boolean);
         return `<select id="${c.name}" style="${styleBase}" ${p.selectionMode.startsWith('Multi') ? 'multiple' : ''}${evtAttr('SelectedIndexChanged', 'change')}>${items.map(it => `<option>${escapeHtml(it)}</option>`).join('')}</select>`;
       }
+      case 'CheckedListBox': {
+        const items = (p.items || '').split('\n').filter(Boolean);
+        const checked = p.checkedIndices || [];
+        return `<div id="${c.name}" style="${styleBase}background:#fff;border:1px solid #7d8390;overflow-y:auto;">${items.map((it, i) => `<label style="display:block;padding:2px 4px;"><input type="checkbox" ${checked.includes(i) ? 'checked' : ''}${evtAttr('ItemCheck', 'change')}> ${escapeHtml(it)}</label>`).join('')}</div>`;
+      }
       case 'Panel':
         return `<div id="${c.name}" style="${styleBase}background:${p.backColor};border:1px solid #33475e;"${evtAttr('Click', 'click')}>\n${childrenHtml(c)}</div>`;
       case 'GroupBox':
@@ -2924,6 +3047,7 @@ function generateWinForms() {
       GroupBox: 'GroupBox', PictureBox: 'PictureBox', ProgressBar: 'ProgressBar',
       TrackBar: 'TrackBar', NumericUpDown: 'NumericUpDown', DateTimePicker: 'DateTimePicker',
       RichTextBox: 'RichTextBox', LinkLabel: 'LinkLabel', MenuStrip: 'MenuStrip', TabControl: 'TabControl',
+      CheckedListBox: 'CheckedListBox',
     }[c.type];
 
     lines.push(`# ${c.name} (${c.type})`);
@@ -2975,6 +3099,13 @@ function generateWinForms() {
           lines.push(`$${c.name}.SelectionMode = [System.Windows.Forms.SelectionMode]::${p.selectionMode}`);
           (p.selectedIndices || []).forEach(i => lines.push(`$${c.name}.SetSelected(${i}, $true)`));
         }
+        break;
+      }
+      case 'CheckedListBox': {
+        const items = (p.items || '').split('\n').filter(Boolean);
+        items.forEach(it => lines.push(`$${c.name}.Items.Add("${it.replace(/"/g, '""')}") | Out-Null`));
+        lines.push(`$${c.name}.CheckOnClick = $${p.checkOnClick}`);
+        (p.checkedIndices || []).forEach(i => lines.push(`$${c.name}.SetItemChecked(${i}, $true)`));
         break;
       }
       case 'GroupBox':
@@ -3099,7 +3230,7 @@ function generateWPF() {
     RadioButton: 'RadioButton', ComboBox: 'ComboBox', ListBox: 'ListBox', Panel: 'Border',
     GroupBox: 'GroupBox', PictureBox: 'Image', ProgressBar: 'ProgressBar',
     TrackBar: 'Slider', NumericUpDown: 'TextBox', DateTimePicker: 'DatePicker',
-    RichTextBox: 'TextBox', LinkLabel: 'TextBlock',
+    RichTextBox: 'TextBox', LinkLabel: 'TextBlock', CheckedListBox: 'ListBox',
   };
 
   const elFor = (c) => {
