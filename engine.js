@@ -1,26 +1,42 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.15
+    Version 1.16
 
-    Revision: (1) About modal now shows Control Data and Codegen
-    versions (were missing since those two files were split out).
-    (2) Added a control-picker: every event action has a "Select
-    Control" button (startControlPick/cancelControlPick) - click it,
-    then click a control on the canvas to insert its name into the
-    action's code, replacing $OtherControlName if present or inserting
-    at the cursor otherwise. Escape cancels. The picked control never
-    steals the current selection, so the event editor stays open. Since
-    a control on an inactive TabControl page isn't in the canvas DOM to
-    click, the picking banner also offers "Or pick from list", which
-    opens the Objects modal in pick-mode (buildObjectsList now checks
-    state.pickingCallback) - that list already includes every control
-    regardless of tab visibility, so this fully covers the "hidden
-    control" case, not just the common one. (3) Added CONTROL_HELP
-    entries for this update's 5 new controls (see control-data.js).
+    Revision:
+
+    1. Redesigned event snippets from raw insertable text into real
+    parameterized templates. Picking "Set another control's text" and
+    clicking Insert now shows actual form fields for that snippet's
+    parameters - a "Select Control" button for the target, a text input
+    for the value - and the code recomputes live as each field changes,
+    shown in a read-only preview. No more hand-editing placeholder text
+    like $OtherControlName.
+
+    2. Fixed the root cause of garbled code from stacking snippets:
+    Insert used to append onto whatever was already in that action's
+    box, and the "Select Control" button would then paste a name at the
+    cursor or the end with no idea which snippet it belonged to. Insert
+    now replaces/binds this action to the chosen snippet instead of
+    appending - "+ Add action" is the only way to get a second,
+    independent action, exactly as it was meant to work.
+
+    3. This very likely also explains "doesn't work for label" from
+    testing - Label.Text is genuinely correct WinForms syntax (Text is
+    a property every Control shares), so the most likely explanation is
+    that the control name got corrupted by the same appending bug in
+    (2), not anything specific to Label.
+
+    4. Data model note: each action now stores {code, snippetId,
+    params} instead of a bare string, kept in data.actions. data.code
+    stays a plain joined string in sync at all times, so codegen.js
+    needed zero changes - it keeps reading data.code exactly as before.
+    Old events with only a bare code string (e.g. ClickToClose) still
+    work unchanged; they're derived into a single freeform action the
+    first time they're opened.
 */
 
-const ENGINE_VERSION = '1.15';
+const ENGINE_VERSION = '1.16';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -1131,12 +1147,57 @@ function initCanvasDrop() {
    ========================================================================= */
 
 const EVENT_SNIPPETS = [
-  { label: '-- Insert snippet --', code: '', help: '' },
-  { label: 'Show message box', code: `[System.Windows.Forms.MessageBox]::Show("Message text", "Title")`, help: 'Pops up a small dialog with a message and an OK button. Good for confirmations, errors, or simple status updates. Replace "Message text" and "Title" with your own strings, or reference a variable like $SomeVariable.' },
-  { label: 'Set another control\'s text', code: `$OtherControlName.Text = "New value"`, help: 'Changes a Label/TextBox/Button\'s displayed text from code. Replace $OtherControlName with the actual Name of the target control (see its Layout > Name property), and "New value" with the text you want, or a variable.' },
-  { label: 'Read this control\'s value', code: `$value = $ThisControl.Text`, help: 'Grabs the current value out of a control (Text for TextBox/ComboBox, Checked for CheckBox, Value for TrackBar/NumericUpDown/DateTimePicker) into a variable you can use in the rest of this action. Replace $ThisControl with the current control\'s own Name.' },
-  { label: 'Enable/disable another control', code: `$OtherControlName.Enabled = $true`, help: 'Turns another control on/off (greyed out and unclickable when $false). Common pattern: a checkbox or combo selection that should enable/disable a related field. Replace $OtherControlName with the target\'s Name, and $true/$false as needed.' },
+  { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
+  {
+    id: 'msgbox', label: 'Show message box',
+    template: `[System.Windows.Forms.MessageBox]::Show("{message}", "{title}")`,
+    help: 'Pops up a small dialog with a message and an OK button. Good for confirmations, errors, or simple status updates.',
+    params: [
+      { key: 'message', label: 'Message', type: 'text', default: 'Message text' },
+      { key: 'title', label: 'Title', type: 'text', default: 'Title' },
+    ],
+  },
+  {
+    id: 'setText', label: 'Set another control\'s text',
+    template: `{target}.Text = "{value}"`,
+    help: 'Changes a Label/TextBox/Button\'s displayed text from code. Text is the common display property shared by every WinForms control.',
+    params: [
+      { key: 'target', label: 'Target Control', type: 'control' },
+      { key: 'value', label: 'New Text', type: 'text', default: 'New value' },
+    ],
+  },
+  {
+    id: 'readValue', label: 'Read this control\'s value',
+    template: `$value = $ThisControl.Text`,
+    help: 'Grabs the current value out of THIS control (the one whose event you\'re editing) into a variable named $value, for use in the rest of this action. Uses Text for TextBox/ComboBox/Label; for CheckBox/TrackBar/etc, edit the property name after inserting (Checked, Value, ...).',
+    params: [],
+  },
+  {
+    id: 'toggleEnabled', label: 'Enable/disable another control',
+    template: `{target}.Enabled = {enabled}`,
+    help: 'Turns another control on/off (greyed out and unclickable when off). Common pattern: a checkbox or combo selection that should enable/disable a related field.',
+    params: [
+      { key: 'target', label: 'Target Control', type: 'control' },
+      { key: 'enabled', label: 'Enabled', type: 'boolean', default: true },
+    ],
+  },
 ];
+
+// Fills a snippet's template with current parameter values - 'control'
+// params become a $VariableName reference, 'boolean' becomes $true/$false,
+// 'text' is inserted as-is (the template itself supplies any quotes).
+function computeSnippetCode(snippet, params) {
+  let code = snippet.template;
+  snippet.params.forEach(p => {
+    const val = params[p.key];
+    let sub;
+    if (p.type === 'control') sub = val ? ('$' + val) : '$\u2026'; // ellipsis placeholder until picked
+    else if (p.type === 'boolean') sub = val ? '$true' : '$false';
+    else sub = val != null ? String(val) : '';
+    code = code.split('{' + p.key + '}').join(sub);
+  });
+  return code;
+}
 
 // Per-event-NAME guidance - event names are shared across control types
 // (every control's Click means roughly the same thing), so one entry
@@ -2230,7 +2291,64 @@ function buildInteractFixedBlock(ctrl) {
   return wrap;
 }
 
+function buildSnippetParamRow(snippet, action, param, sync) {
+  const row = document.createElement('div');
+  row.className = 'snippet-param-row';
+  const label = document.createElement('label');
+  label.textContent = param.label;
+  row.appendChild(label);
+
+  if (param.type === 'control') {
+    const wrap = document.createElement('div');
+    wrap.className = 'snippet-param-control';
+    const display = document.createElement('span');
+    display.className = 'snippet-param-control-name';
+    display.textContent = action.params[param.key] ? action.params[param.key] : '(not set)';
+    const pickBtn = document.createElement('button');
+    pickBtn.type = 'button';
+    pickBtn.className = 'btn btn-ghost pick-control-btn';
+    pickBtn.innerHTML = '\u2316 Select Control';
+    pickBtn.title = 'Click, then click any control on the canvas (or "Or pick from list" for one on an inactive tab) to set this.';
+    pickBtn.addEventListener('click', () => {
+      startControlPick((pickedCtrl) => {
+        action.params[param.key] = pickedCtrl.name;
+        action.code = computeSnippetCode(snippet, action.params);
+        sync();
+        render();
+      });
+    });
+    wrap.appendChild(display);
+    wrap.appendChild(pickBtn);
+    row.appendChild(wrap);
+  } else if (param.type === 'boolean') {
+    const sw = document.createElement('label');
+    sw.className = 'switch';
+    sw.innerHTML = `<input type="checkbox" ${action.params[param.key] ? 'checked' : ''}><span class="track"></span>`;
+    sw.querySelector('input').addEventListener('change', (e) => {
+      action.params[param.key] = e.target.checked;
+      action.code = computeSnippetCode(snippet, action.params);
+      sync();
+      render();
+    });
+    row.appendChild(sw);
+  } else {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = action.params[param.key] != null ? action.params[param.key] : '';
+    input.addEventListener('change', (e) => {
+      action.params[param.key] = e.target.value;
+      action.code = computeSnippetCode(snippet, action.params);
+      sync();
+      render();
+    });
+    row.appendChild(input);
+  }
+
+  return row;
+}
+
 function buildActionBlock(ctrl, evtName, actions, i, sync) {
+  const action = actions[i];
   const card = document.createElement('div');
   card.className = 'action-block';
 
@@ -2245,7 +2363,7 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
   delBtn.title = 'Remove this action.';
   delBtn.addEventListener('click', () => {
     actions.splice(i, 1);
-    if (!actions.length) actions.push('');
+    if (!actions.length) actions.push({ code: '', snippetId: null, params: {} });
     sync();
     render();
   });
@@ -2253,13 +2371,53 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
   head.appendChild(delBtn);
   card.appendChild(head);
 
+  const boundSnippet = action.snippetId ? EVENT_SNIPPETS.find(s => s.id === action.snippetId) : null;
+
+  if (boundSnippet) {
+    // Structured mode: real fields per parameter, code is fully derived -
+    // nothing here is hand-typed, so there's no way to end up with mangled
+    // syntax from stacking snippets or guessing where to paste a name.
+    const boundHead = document.createElement('div');
+    boundHead.className = 'snippet-bound-head';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = boundSnippet.label;
+    const infoBtn = document.createElement('button');
+    infoBtn.type = 'button';
+    infoBtn.className = 'option-info-btn';
+    infoBtn.textContent = 'i';
+    infoBtn.title = 'What does this snippet do?';
+    infoBtn.addEventListener('click', () => showInfoModalText(boundSnippet.label.toUpperCase(), boundSnippet.help));
+    const unbindBtn = document.createElement('button');
+    unbindBtn.type = 'button';
+    unbindBtn.className = 'btn btn-ghost';
+    unbindBtn.textContent = 'Edit as raw code';
+    unbindBtn.title = 'Detach from this snippet template and hand-edit the code directly.';
+    unbindBtn.addEventListener('click', () => { action.snippetId = null; render(); });
+    boundHead.appendChild(nameSpan);
+    boundHead.appendChild(infoBtn);
+    boundHead.appendChild(unbindBtn);
+    card.appendChild(boundHead);
+
+    if (!action.params) action.params = {};
+    boundSnippet.params.forEach(p => card.appendChild(buildSnippetParamRow(boundSnippet, action, p, sync)));
+
+    const preview = document.createElement('pre');
+    preview.className = 'snippet-code-preview';
+    preview.textContent = action.code;
+    card.appendChild(preview);
+
+    return card;
+  }
+
+  // Raw/freeform mode: pick a snippet to bind (replaces this action's
+  // content, doesn't append), or type/paste code directly.
   const snippetRow = document.createElement('div');
   snippetRow.className = 'snippet-row';
   const sel = document.createElement('select');
   EVENT_SNIPPETS.forEach(s => {
     const o = document.createElement('option');
     o.textContent = s.label;
-    o.dataset.code = s.code;
+    o.dataset.id = s.id;
     o.dataset.help = s.help;
     sel.appendChild(o);
   });
@@ -2284,26 +2442,22 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
   const ta = document.createElement('textarea');
   ta.className = 'action-code';
   ta.placeholder = 'PowerShell / JS for this action';
-  ta.value = actions[i];
-  ta.addEventListener('change', () => { actions[i] = ta.value; sync(); });
+  ta.value = action.code;
+  ta.addEventListener('change', () => { action.code = ta.value; sync(); });
   card.appendChild(ta);
 
   const pickBtn = document.createElement('button');
   pickBtn.type = 'button';
   pickBtn.className = 'btn btn-ghost pick-control-btn';
   pickBtn.innerHTML = '\u2316 Select Control';
-  pickBtn.title = 'Click, then click any control on the canvas (even ones not currently visible in a collapsed tab/panel) to insert its name here - no need to remember or hunt for the exact spelling.';
+  pickBtn.title = 'Click, then click any control on the canvas to insert its name at the cursor - for hand-editing raw code. Pick a "Set another control\'s text"-style snippet instead for a fully guided flow.';
   pickBtn.addEventListener('click', () => {
     startControlPick((pickedCtrl) => {
       const varRef = '$' + pickedCtrl.name;
-      if (ta.value.includes('$OtherControlName')) {
-        ta.value = ta.value.replace('$OtherControlName', varRef);
-      } else {
-        const start = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
-        const end = ta.selectionEnd != null ? ta.selectionEnd : ta.value.length;
-        ta.value = ta.value.slice(0, start) + varRef + ta.value.slice(end);
-      }
-      actions[i] = ta.value;
+      const start = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
+      const end = ta.selectionEnd != null ? ta.selectionEnd : ta.value.length;
+      ta.value = ta.value.slice(0, start) + varRef + ta.value.slice(end);
+      action.code = ta.value;
       sync();
       render();
     });
@@ -2311,11 +2465,18 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
   card.appendChild(pickBtn);
 
   insertBtn.addEventListener('click', () => {
-    const code = sel.selectedOptions[0].dataset.code;
-    if (!code) return;
-    ta.value = (ta.value ? ta.value + '\n' : '') + code;
-    actions[i] = ta.value;
+    const id = sel.selectedOptions[0].dataset.id;
+    const snippet = EVENT_SNIPPETS.find(s => s.id === id);
+    if (!snippet || !snippet.id || snippet.id === 'none') return;
+    // Binding REPLACES this action's content - it never appends onto
+    // whatever was already here, which is what used to produce mangled
+    // multi-snippet code. Use "+ Add action" for a second, independent one.
+    action.snippetId = snippet.id;
+    action.params = {};
+    snippet.params.forEach(p => { action.params[p.key] = p.default !== undefined ? p.default : (p.type === 'boolean' ? false : ''); });
+    action.code = computeSnippetCode(snippet, action.params);
     sync();
+    render();
   });
 
   return card;
@@ -2331,12 +2492,20 @@ function buildActionsEditor(ctrl, evtName, data) {
   heading.textContent = 'Actions';
   wrap.appendChild(heading);
 
-  // Actions are stored as one string (data.code, same field codegen has
-  // always read), split on blank lines - so this is purely a friendlier
-  // editing view, not a data-model change; nothing downstream needs to
-  // know actions exist as a concept.
-  const actions = data.code ? data.code.split('\n\n') : [''];
-  const sync = () => { data.code = actions.join('\n\n'); ctrl.events[evtName] = data; };
+  // data.actions is the real source of truth (structured: code + optional
+  // snippet binding + params). data.code is kept as a plain joined string
+  // in sync with it at all times, purely so codegen.js never has to change
+  // - it just keeps reading data.code exactly as before. If data.actions
+  // doesn't exist yet (an event created before this feature, or hand-typed
+  // raw code), it's derived once from data.code as freeform actions.
+  if (!data.actions) {
+    data.actions = (data.code ? data.code.split('\n\n') : ['']).map(code => ({ code, snippetId: null, params: {} }));
+  }
+  const actions = data.actions;
+  const sync = () => {
+    data.code = actions.map(a => a.code).join('\n\n');
+    ctrl.events[evtName] = data;
+  };
 
   actions.forEach((action, i) => wrap.appendChild(buildActionBlock(ctrl, evtName, actions, i, sync)));
 
@@ -2344,8 +2513,8 @@ function buildActionsEditor(ctrl, evtName, data) {
   addBtn.type = 'button';
   addBtn.className = 'btn btn-ghost menu-add-btn';
   addBtn.textContent = '+ Add action';
-  addBtn.title = 'Add another action to run when this event fires, alongside the ones above.';
-  addBtn.addEventListener('click', () => { actions.push(''); sync(); render(); });
+  addBtn.title = 'Add another, independent action to run when this event fires, alongside the ones above.';
+  addBtn.addEventListener('click', () => { actions.push({ code: '', snippetId: null, params: {} }); sync(); render(); });
   wrap.appendChild(addBtn);
 
   return wrap;
