@@ -1,16 +1,13 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.14
+    Version 1.15
 
-    Revision: fixed ComboBox's Border Style property appearing stuck on
-    a Fixed3D look regardless of what was actually selected - but only
-    for DropDown Style values that render as an editable input
-    (.rc-combo-editable). That element never had its native browser
-    border stripped (the native <select> variant, .rc-combo, already
-    had this fix from an earlier pass) - the browser's default text
-    input border has an inset/3D look, which was showing through and
-    completely masking the actual Border Style value.
+    Revision: added .pick-control-btn and .picking-banner/body.picking-
+    mode for the new control-picker feature. Added canvas preview styles
+    for this update's 5 new controls: .rc-flowpanel/.rc-tablepanel
+    (+ .rc-table-vline/-hline grid markers), .rc-statusstrip, and
+    .rc-toolstrip/.rc-toolstrip-btn.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -222,7 +219,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.14';
+  --stylesheet-version: '1.15';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -618,7 +615,15 @@ button, input, select, textarea {
 .rc-listbox-item:hover { background: #e8f0fe; }
 .rc-listbox-item.selected { background: #0078d7; color: #fff; }
 .rc-panel { width: 100%; height: 100%; background: rgba(255,255,255,0.03); border: 1px solid #3a4a5c; }
+.rc-flowpanel { width: 100%; height: 100%; background: rgba(255,255,255,0.03); border: 1px dashed #3a4a5c; }
+.rc-tablepanel { width: 100%; height: 100%; background: rgba(255,255,255,0.03); border: 1px solid #3a4a5c; position: relative; }
+.rc-table-vline { position: absolute; top: 0; bottom: 0; width: 1px; background: #3a4a5c; }
+.rc-table-hline { position: absolute; left: 0; right: 0; height: 1px; background: #3a4a5c; }
 .rc-groupbox { width: 100%; height: 100%; border: 1px solid #3a4a5c; position: relative; }
+.rc-statusstrip { width: 100%; height: 100%; background: #F0F0F0; color: #333; border-top: 1px solid #ACA899; display: flex; align-items: center; padding: 0 6px; font-size: 11px; box-sizing: border-box; }
+.rc-toolstrip { width: 100%; height: 100%; background: #F0F0F0; border-bottom: 1px solid #ACA899; display: flex; align-items: center; gap: 2px; padding: 0 4px; box-sizing: border-box; overflow: hidden; }
+.rc-toolstrip-btn { padding: 3px 8px; font-size: 11px; color: #333; border-radius: 2px; white-space: nowrap; }
+.rc-toolstrip-btn:hover { background: #E0E0E0; }
 .rc-groupbox .gb-title { position: absolute; top: -8px; left: 8px; background: var(--bp-canvas); padding: 0 4px; font-size: 11px; color: #bcd6ea; }
 .rc-picture { width: 100%; height: 100%; background: repeating-conic-gradient(#2a313c 0% 25%, #1e232b 0% 50%) 0 0/16px 16px; display: flex; align-items: center; justify-content: center; color: var(--bp-text-faint); font-size: 10.5px; }
 .rc-progress { width: 100%; height: 100%; background: #d8dbe0; }
@@ -935,6 +940,38 @@ button, input, select, textarea {
   resize: vertical;
   box-sizing: border-box;
 }
+
+.pick-control-btn {
+  width: 100%;
+  margin-top: 6px;
+  font-size: 11px;
+  padding: 5px;
+  color: var(--bp-accent-2);
+}
+
+/* Control-picker mode: hitting "Select Control" then clicking a control
+   on the canvas to insert its name, instead of hunting for it manually. */
+body.picking-mode .ctrl { cursor: crosshair !important; }
+.picking-banner {
+  position: fixed;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  background: var(--bp-accent);
+  color: #0f1216;
+  padding: 8px 10px 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  font-weight: 600;
+  box-shadow: 0 12px 30px -8px rgba(0,0,0,0.6);
+}
+.picking-banner.open { display: flex; }
+.picking-banner .btn { background: rgba(15,18,22,0.15); color: #0f1216; border: none; font-weight: 600; }
+.picking-banner .btn:hover { background: rgba(15,18,22,0.28); }
 
 .add-event-row { padding: 8px 0 2px; }
 .add-event-row select { width: 100%; }
