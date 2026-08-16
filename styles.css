@@ -1,14 +1,12 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.12
+    Version 1.13
 
-    Revision: fixed the Info modal per screenshot feedback - it was
-    hugging the viewport's right edge (10px padding), which overlapped
-    the 300px-wide properties pane instead of sitting beside it. Now
-    positioned 10px to the left of the pane (padding-right: 310px), and
-    its dim overlay reduced to 25% of the previous opacity (0.72 -> 0.18)
-    so it's much less obtrusive.
+    Revision: styling to match engine.js 1.13. Added .event-block-head-
+    left (holds the new per-event info button + label), .actions-editor/
+    .action-block/.action-block-head/.action-code for the new multi-
+    action event editor.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -220,7 +218,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.12';
+  --stylesheet-version: '1.13';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -899,11 +897,40 @@ button, input, select, textarea {
   padding: 6px 8px; background: var(--bp-panel-raised);
   font-size: 11.5px; color: var(--bp-accent-2); font-weight: 600;
 }
+.event-block-head-left { display: flex; align-items: center; gap: 6px; }
 .event-block-body { padding: 8px; display: none; }
 .event-block.open .event-block-body { display: block; }
 .event-block-body .prop-row { grid-template-columns: 70px 1fr; }
-.snippet-row { display: flex; gap: 6px; margin-top: 4px; }
+.snippet-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .snippet-row select { flex: 1; }
+
+.actions-editor { margin: 8px 0; }
+.action-block {
+  border: 1px solid var(--bp-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bp-panel);
+  padding: 7px 8px;
+  margin-bottom: 8px;
+}
+.action-block-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10.5px; color: var(--bp-text-faint); text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.action-code {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 6px;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 5px 6px;
+  font-size: 11px;
+  font-family: var(--bp-font-mono);
+  resize: vertical;
+  box-sizing: border-box;
+}
 
 .add-event-row { padding: 8px 0 2px; }
 .add-event-row select { width: 100%; }
