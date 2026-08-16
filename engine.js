@@ -1,42 +1,25 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.9
+    Version 2.0
 
-    Revision: (1) Dock order now tracked separately from z via a new
-    dockOrder field (assigned when Dock is turned on) - fixes docking a
-    second control to an edge being able to push an already-docked one
-    out of its slot; applyDockStack/containerClientRect now sort by
-    dockOrder, not z. (2) Added corner-pinning Dock options (TopLeft/
-    TopRight/BottomLeft/BottomRight) that attach to an edge without
-    stretching full width/height, so multiple items can share a strip
-    (e.g. two images docked below a menu, one each side, with open space
-    between); these map to Dock=None + the matching Anchor in generated
-    WinForms code since real DockStyle has no corner values. (3) Replaced
-    the boolean "Resizable" toggle with the real FormBorderStyle enum
-    (None/FixedSingle/Fixed3D/FixedDialog/Sizable/FixedToolWindow/
-    SizableToolWindow) - a real multi-value WinForms property doesn't
-    belong on an on/off switch. Always On Top relabeled to show its real
-    property name (TopMost). (4) Added OPTION_DEFINITIONS + a rendered
-    legend under every dropdown property (Dock, BorderStyle, DropDown
-    Style, Selection Mode, Size Mode, Format, Text Align, Cursor, Start
-    Position, Form Border Style) explaining what each individual option
-    value actually does. (5) BorderStyle now visually differs on canvas
-    (None/FixedSingle/Fixed3D were previously identical) via a scoped
-    borderStyleFor() applied to field-like controls only, avoiding a
-    double-border look on Button/CheckBox/etc that already draw their
-    own chrome. (6) Rewrote ListBox's interact-mode rendering: was a
-    native <select multiple> that always needed Ctrl regardless of
-    Selection Mode, and never actually tracked selection. Now a custom
-    clickable list implementing real semantics - One = single click,
-    MultiSimple = plain click-click-click with no modifier needed,
-    MultiExtended = click/Ctrl+click/Shift+click like a file picker -
-    backed by a new selectedIndices prop. (7) Replaced the bare "type
-    into a textarea" Items editor on ComboBox/ListBox with an explicit
-    per-row Add/Remove list editor (buildItemsListEditorRow).
+    Revision: (1) Per-dropdown-option definitions moved from a static
+    always-visible legend block to a small (i) info button next to the
+    field's label - clicking it opens the new shared Info modal
+    (showInfoModal/buildOptionInfoButton) instead of permanently
+    cluttering the properties pane. (2) Fixed ComboBox's designer
+    preview: it always rendered as a native <select> (pick-only)
+    regardless of DropDown Style, so DropDown/Simple styles - which are
+    supposed to let the user type a custom value - couldn't actually be
+    typed into. DropDownList correctly stays a native select; DropDown
+    and Simple now render a real editable text input (with a datalist of
+    the existing items as suggestions), backed by a new `text` prop.
+    WinForms codegen emits ComboBox.Text for a typed custom value, and
+    now also emits ListBox.SelectionMode + SetSelected() for whichever
+    indices are selected at design time (previously never emitted).
 */
 
-const ENGINE_VERSION = '1.9';
+const ENGINE_VERSION = '2.0';
 
 /* =========================================================================
    Control catalog
@@ -162,6 +145,7 @@ const CONTROL_DEFS = {
       ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
       ['selectedIndex', 'Selected Index', 'number', -1],
       ['dropDownStyle', 'DropDown Style', 'select', 'DropDown', { options: ['DropDown', 'DropDownList', 'Simple'] }],
+      ['text', 'Text (design-time)', 'hidden', ''],
     ],
     events: ['SelectedIndexChanged', 'TextChanged'],
   },
@@ -866,8 +850,27 @@ function renderInner(c) {
     }
     case 'ComboBox': {
       const items = (p.items || '').split('\n').filter(Boolean);
-      wrap.innerHTML = `<select class="rc-combo" style="${fontStyleFor(p)}" ${c.interact ? '' : 'disabled'}>${items.map((it, i) => `<option ${i === p.selectedIndex ? 'selected' : ''}>${escapeHtml(it)}</option>`).join('')}</select>`;
-      if (c.interact) wrap.querySelector('select').addEventListener('change', (e) => { p.selectedIndex = e.target.selectedIndex; });
+      if (p.dropDownStyle === 'DropDownList') {
+        // Pick-only: a native select is the correct fit here.
+        wrap.innerHTML = `<select class="rc-combo" style="${fontStyleFor(p)}" ${c.interact ? '' : 'disabled'}>${items.map((it, i) => `<option ${i === p.selectedIndex ? 'selected' : ''}>${escapeHtml(it)}</option>`).join('')}</select>`;
+        if (c.interact) wrap.querySelector('select').addEventListener('change', (e) => {
+          p.selectedIndex = e.target.selectedIndex;
+          p.text = items[e.target.selectedIndex] || '';
+        });
+      } else {
+        // DropDown / Simple: the user can type a custom value, not just
+        // pick from the list - a native <select> can never do that, so
+        // this needs a real editable field. A datalist keeps the existing
+        // items available as suggestions without blocking free typing.
+        const listId = 'dl_' + c.id;
+        const currentText = p.text != null && p.text !== '' ? p.text : (items[p.selectedIndex] || '');
+        wrap.innerHTML = `<input type="text" class="rc-combo rc-combo-editable" list="${listId}" style="${fontStyleFor(p)}" placeholder="Type or pick an item..." value="${escapeHtml(currentText)}" ${c.interact ? '' : 'disabled'}>
+          <datalist id="${listId}">${items.map(it => `<option value="${escapeHtml(it)}"></option>`).join('')}</datalist>`;
+        if (c.interact) wrap.querySelector('input').addEventListener('input', (e) => {
+          p.text = e.target.value;
+          p.selectedIndex = items.indexOf(e.target.value);
+        });
+      }
       break;
     }
     case 'ListBox': {
@@ -1377,18 +1380,33 @@ const OPTION_DEFINITIONS = {
   },
 };
 
-function buildOptionDefinitionsLegend(key, options) {
-  const legend = document.createElement('div');
-  legend.className = 'option-legend';
-  const defs = OPTION_DEFINITIONS[key];
+function showInfoModal(title, key, options) {
+  const overlay = document.getElementById('infoModalOverlay');
+  document.getElementById('infoModalTitle').textContent = title;
+  const body = document.getElementById('infoModalBody');
+  body.innerHTML = '';
+  const defs = OPTION_DEFINITIONS[key] || {};
   options.forEach(o => {
     if (!defs[o]) return;
     const line = document.createElement('div');
     line.className = 'option-legend-line';
     line.innerHTML = `<span class="option-legend-value">${escapeHtml(o)}</span><span class="option-legend-text">${escapeHtml(defs[o])}</span>`;
-    legend.appendChild(line);
+    body.appendChild(line);
   });
-  return legend;
+  overlay.classList.add('open');
+}
+
+function buildOptionInfoButton(key, label, options) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'option-info-btn';
+  btn.textContent = 'i';
+  btn.title = `What do the ${label} options mean?`;
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    showInfoModal(label, key, options);
+  });
+  return btn;
 }
 
 const TOOLTIPS = {
@@ -1981,7 +1999,7 @@ function buildPropRows(ctrl, propDefs) {
         ctrl.props[key] = newVal;
         render(); // docking (if this was Dock) is recomputed centrally at the top of render()
       });
-      if (OPTION_DEFINITIONS[key]) row.appendChild(buildOptionDefinitionsLegend(key, extra.options));
+      if (OPTION_DEFINITIONS[key]) row.querySelector('label').appendChild(buildOptionInfoButton(key, label, extra.options));
     } else if (type === 'number') {
       row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="number" value="${val}">`;
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = Number(e.target.value) || 0; render(); });
@@ -2380,7 +2398,7 @@ function buildFormChromeRows() {
   const fbsOpts = ['None', 'FixedSingle', 'Fixed3D', 'FixedDialog', 'Sizable', 'FixedToolWindow', 'SizableToolWindow'];
   fbsRow.innerHTML = `<label title="Controls the window's border/title-bar style AND whether it can be resized - a real WinForms enum, not a simple on/off.">Form Border Style</label><select>${fbsOpts.map(o => `<option ${o === state.form.formBorderStyle ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
   fbsRow.querySelector('select').addEventListener('change', (e) => { state.form.formBorderStyle = e.target.value; render(); });
-  fbsRow.appendChild(buildOptionDefinitionsLegend('formBorderStyle', fbsOpts));
+  fbsRow.querySelector('label').appendChild(buildOptionInfoButton('formBorderStyle', 'Form Border Style', fbsOpts));
   frag.appendChild(fbsRow);
 
   const startRow = document.createElement('div');
@@ -2388,7 +2406,7 @@ function buildFormChromeRows() {
   const opts = ['CenterScreen', 'Manual', 'CenterParent', 'WindowsDefaultLocation', 'WindowsDefaultBounds'];
   startRow.innerHTML = `<label title="Where the window appears on screen the first time it opens.">Start Position</label><select>${opts.map(o => `<option ${o === state.form.startPosition ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
   startRow.querySelector('select').addEventListener('change', (e) => { state.form.startPosition = e.target.value; });
-  startRow.appendChild(buildOptionDefinitionsLegend('startPosition', opts));
+  startRow.querySelector('label').appendChild(buildOptionInfoButton('startPosition', 'Start Position', opts));
   frag.appendChild(startRow);
 
   return frag;
@@ -2885,6 +2903,10 @@ function generateWinForms() {
         if (c.type === 'ComboBox') {
           lines.push(`$${c.name}.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::${p.dropDownStyle}`);
           if (p.selectedIndex >= 0) lines.push(`$${c.name}.SelectedIndex = ${p.selectedIndex}`);
+          else if (p.dropDownStyle !== 'DropDownList' && p.text) lines.push(`$${c.name}.Text = "${p.text.replace(/"/g, '""')}"`);
+        } else if (c.type === 'ListBox') {
+          lines.push(`$${c.name}.SelectionMode = [System.Windows.Forms.SelectionMode]::${p.selectionMode}`);
+          (p.selectedIndices || []).forEach(i => lines.push(`$${c.name}.SetSelected(${i}, $true)`));
         }
         break;
       }
@@ -3242,6 +3264,12 @@ function initObjectsModal() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
 }
 
+function initInfoModal() {
+  const overlay = document.getElementById('infoModalOverlay');
+  document.getElementById('infoModalClose').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+}
+
 /* =========================================================================
    Boot
    ========================================================================= */
@@ -3253,6 +3281,7 @@ function initEngine() {
   initShowCodeModal();
   initAboutModal();
   initObjectsModal();
+  initInfoModal();
   initTopToolbar();
   render();
 }
