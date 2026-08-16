@@ -1,25 +1,34 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 2.0
+    Version 2.1
 
-    Revision: (1) Per-dropdown-option definitions moved from a static
-    always-visible legend block to a small (i) info button next to the
-    field's label - clicking it opens the new shared Info modal
-    (showInfoModal/buildOptionInfoButton) instead of permanently
-    cluttering the properties pane. (2) Fixed ComboBox's designer
-    preview: it always rendered as a native <select> (pick-only)
-    regardless of DropDown Style, so DropDown/Simple styles - which are
-    supposed to let the user type a custom value - couldn't actually be
-    typed into. DropDownList correctly stays a native select; DropDown
-    and Simple now render a real editable text input (with a datalist of
-    the existing items as suggestions), backed by a new `text` prop.
-    WinForms codegen emits ComboBox.Text for a typed custom value, and
-    now also emits ListBox.SelectionMode + SetSelected() for whichever
-    indices are selected at design time (previously never emitted).
+    Revision: (1) Found and fixed the real resize-handle bug: the FORM's
+    own resize handles (ensureFormResizeHandles) only ever created 3 of 8
+    positions (e/s/se) - west/north/corner dragging had no DOM element to
+    click AND no math in startFormResize's onMove to handle it even if it
+    did. All 8 positions now exist and work (verified via direct event
+    simulation). Per-control resize handles were already correct (all 8
+    always existed and worked) - confirmed via the same direct-simulation
+    test, so that wasn't actually broken. (2) FormBorderStyle now
+    actually changes the window's appearance - previously stored but
+    never applied to the design-form's visual chrome at all. Each of the
+    7 values gets a real distinct look (border style, title bar height/
+    button set, resize handles hidden for non-Sizable styles), matching
+    real WinForms conventions (dialog/tool-window styles hide Minimize/
+    Maximize; None hides the title bar and border entirely). (3) The
+    properties-pane header restructured per spec: an (i) info button now
+    sits to the left of the TYPE line (uppercase, e.g. "TEXTBOX"), with
+    the control's Name below it - clicking (i) opens the Info modal with
+    that type's detailed guidance (showInfoModalText), replacing the
+    permanently-expanded inline "Help" section that used to eat pane
+    space on every single control. (4) Info modal repositioned to anchor
+    10px from the right edge (near the properties pane) instead of
+    centering across the whole viewport - was miles from the properties
+    pane on an ultra-wide monitor.
 */
 
-const ENGINE_VERSION = '2.0';
+const ENGINE_VERSION = '2.1';
 
 /* =========================================================================
    Control catalog
@@ -600,18 +609,30 @@ function render() {
 function renderFormChrome() {
   const formEl = document.getElementById('designForm');
   const isHtml = state.currentFormat === 'html';
+  const fbs = state.form.formBorderStyle || 'Sizable';
+  const noTitlebar = isHtml || fbs === 'None';
+  const isToolWindow = fbs === 'FixedToolWindow' || fbs === 'SizableToolWindow';
+  const isResizable = fbs === 'Sizable' || fbs === 'SizableToolWindow';
+  const titlebarHeight = noTitlebar ? 0 : (isToolWindow ? 20 : 26);
+
   formEl.style.width = state.form.width + 'px';
-  formEl.style.height = (state.form.height + (isHtml ? 0 : 26)) + 'px';
-  formEl.className = 'design-form skin-' + state.currentFormat + (isHtml ? ' no-titlebar' : '');
+  formEl.style.height = (state.form.height + (isHtml ? 0 : titlebarHeight)) + 'px';
+  formEl.className = 'design-form skin-' + state.currentFormat +
+    ' fbs-' + fbs.toLowerCase() +
+    (isHtml || noTitlebar ? ' no-titlebar' : '') +
+    (isToolWindow ? ' tool-window' : '') +
+    (!isResizable ? ' not-resizable' : '');
   document.getElementById('designSurface').style.height = state.form.height + 'px';
   document.getElementById('designSurface').style.background = state.form.backColor;
   document.getElementById('formTitleText').textContent = isHtml ? state.form.text + ' \u2014 index.html' : state.form.text;
 
   const btnWrap = document.getElementById('formTitleButtons');
   btnWrap.innerHTML = '';
-  if (!isHtml) {
-    if (state.form.minimizeBox) btnWrap.appendChild(titleGlyphBtn('\u2013'));
-    if (state.form.maximizeBox) btnWrap.appendChild(titleGlyphBtn('\u25a1'));
+  if (!isHtml && !noTitlebar) {
+    // Tool windows and dialog-style borders conventionally only show
+    // Close, never Minimize/Maximize, matching real Windows chrome.
+    if (state.form.minimizeBox && !isToolWindow && fbs !== 'FixedDialog') btnWrap.appendChild(titleGlyphBtn('\u2013'));
+    if (state.form.maximizeBox && !isToolWindow && fbs !== 'FixedDialog') btnWrap.appendChild(titleGlyphBtn('\u25a1'));
     if (state.form.closeBox) btnWrap.appendChild(titleGlyphBtn('\u00d7', true));
   }
 
@@ -627,7 +648,7 @@ function titleGlyphBtn(glyph, isClose) {
 
 function ensureFormResizeHandles(formEl) {
   if (formEl.querySelector('.form-resize-handle')) return;
-  ['e', 's', 'se'].forEach(pos => {
+  ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].forEach(pos => {
     const h = document.createElement('div');
     h.className = 'form-resize-handle frh-' + pos;
     h.dataset.handle = pos;
@@ -699,7 +720,9 @@ function startFormResize(e) {
   function onMove(ev) {
     const dx = ev.clientX - startX, dy = ev.clientY - startY;
     if (handle.includes('e')) state.form.width = Math.max(200, snap(orig.w + dx));
+    if (handle.includes('w')) state.form.width = Math.max(200, snap(orig.w - dx));
     if (handle.includes('s')) state.form.height = Math.max(150, snap(orig.h + dy));
+    if (handle.includes('n')) state.form.height = Math.max(150, snap(orig.h - dy));
 
     origCtrls.forEach(o => {
       const ctrl = getControl(o.id);
@@ -1482,6 +1505,7 @@ const CONTROL_HELP = {
   LinkLabel: 'Text styled and behaving like a hyperlink. Text is the label shown; URL is where it navigates when clicked (wire LinkClicked to run custom code instead of, or in addition to, navigating). Example: Text="Visit our site", URL="https://example.com".',
   MenuStrip: 'A top menu bar (File/Edit/View/Help, etc). Comes with preset File/View/Help menus you can check on/off, rename, or add custom menus/items to via the Menu Items editor below. Each item can have its own click code - presets like File > Exit and Help > About already come with working defaults. Example: uncheck "Zoom In/Out" if you don\'t need them, or add a custom "Tools > Settings" entry with your own code.',
   TabControl: 'A container with multiple named tab pages, each holding its own separate set of child controls. Use the Tabs editor below to add/rename/remove pages; click "Show" on a page (or click its header on the canvas) to switch which page you\'re placing controls onto. Example: an "Options" dialog with "General", "Advanced", and "About" tabs, each with different controls on it.',
+  Form: 'The main window itself - everything else sits inside it. Title is the text shown in the title bar. Form Border Style controls the window\'s chrome and whether it can be resized. Comment-Based Help below becomes the PowerShell help block at the top of every generated file.',
 };
 
 function buildUsageHintBlock(text) {
@@ -1491,30 +1515,73 @@ function buildUsageHintBlock(text) {
   return div;
 }
 
+function showInfoModalText(title, text) {
+  const overlay = document.getElementById('infoModalOverlay');
+  document.getElementById('infoModalTitle').textContent = title;
+  const body = document.getElementById('infoModalBody');
+  body.innerHTML = '';
+  const p = document.createElement('div');
+  p.className = 'option-legend-text info-modal-freetext';
+  p.textContent = text;
+  body.appendChild(p);
+  overlay.classList.add('open');
+}
+
+function buildSelHeaderInfoBtn(title, text) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'option-info-btn sel-info-btn';
+  btn.textContent = 'i';
+  btn.title = `What is a ${title}?`;
+  btn.addEventListener('click', () => showInfoModalText(title.toUpperCase(), text));
+  return btn;
+}
+
 function renderProps() {
   const pane = document.getElementById('propsBody');
   const header = document.getElementById('propsHeader');
   pane.innerHTML = '';
+  header.innerHTML = '';
 
   const ctrl = getControl(state.selectedId);
   if (!ctrl) {
-    header.innerHTML = `<div><div class="sel-type">Form</div><div class="sel-name">${escapeHtml(state.form.text)}</div></div>`;
+    const typeRow = document.createElement('div');
+    typeRow.className = 'sel-header-row';
+    if (CONTROL_HELP.Form) typeRow.appendChild(buildSelHeaderInfoBtn('Form', CONTROL_HELP.Form));
+    const typeLabel = document.createElement('div');
+    typeLabel.className = 'sel-type';
+    typeLabel.textContent = 'FORM';
+    typeRow.appendChild(typeLabel);
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'sel-name';
+    nameLabel.textContent = state.form.text;
+    const wrap = document.createElement('div');
+    wrap.appendChild(typeRow);
+    wrap.appendChild(nameLabel);
+    header.appendChild(wrap);
     pane.appendChild(buildFormProps());
     return;
   }
 
-  header.innerHTML = `<div><div class="sel-type">${ctrl.type}</div><div class="sel-name">${escapeHtml(ctrl.name)}</div></div>`;
+  const typeRow = document.createElement('div');
+  typeRow.className = 'sel-header-row';
+  if (CONTROL_HELP[ctrl.type]) typeRow.appendChild(buildSelHeaderInfoBtn(ctrl.type, CONTROL_HELP[ctrl.type]));
+  const typeLabel = document.createElement('div');
+  typeLabel.className = 'sel-type';
+  typeLabel.textContent = ctrl.type.toUpperCase();
+  typeRow.appendChild(typeLabel);
+  const nameLabel = document.createElement('div');
+  nameLabel.className = 'sel-name';
+  nameLabel.textContent = ctrl.name;
+  const wrap = document.createElement('div');
+  wrap.appendChild(typeRow);
+  wrap.appendChild(nameLabel);
+  header.appendChild(wrap);
 
   // Interact is never collapsible and never buried in an accordion — it's a
   // fixed control right under the header so it's always reachable in one
   // click, since it's the one you need in a hurry to test a dropdown/checkbox.
   pane.appendChild(buildInteractFixedBlock(ctrl));
-
-  // A dedicated Help node for every control type - detailed guidance plus
-  // a worked example, not buried under a specific property section.
-  if (CONTROL_HELP[ctrl.type]) {
-    pane.appendChild(section('Help', buildUsageHintBlock(CONTROL_HELP[ctrl.type]), false));
-  }
 
   pane.appendChild(section('Layout', buildLayoutRows(ctrl), true));
   pane.appendChild(section('Nudge', buildNudgeSection(ctrl), true));
