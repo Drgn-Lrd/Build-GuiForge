@@ -1,21 +1,19 @@
 /*
     codegen.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
-    Split out of engine.js as part of an ongoing file-organization pass.
-    Holds the four output-format generators (generateHTML, generateWinForms,
-    generateWPF, generateWinUI) and their small format-specific helpers
-    (menuStripHtml, wpfMenuXaml, wpfTabXaml, winuiMenuXaml, winuiTabXaml,
-    menuItemCodeFor, orderedControls), plus the GENERATORS lookup the
-    "Show Code" modal calls into. Reads control/form state and calls a
-    few helpers still defined in engine.js (helpBlockAsPs1Comment,
-    helpBlockAsHtmlComment, escapeHtml, getControl, collectCalledScripts)
-    - that's fine since none of this runs until the user opens Show Code,
-    long after every script has finished loading. Loaded after
-    control-data.js; load order relative to engine.js doesn't matter for
-    the same reason, but it's loaded before engine.js by convention.
+    Revision: added WinForms/HTML output for this update's 5 new
+    controls (MaskedTextBox, FlowLayoutPanel, TableLayoutPanel,
+    StatusStrip, ToolStrip), plus WPF tag mappings (TableLayoutPanel ->
+    Grid, FlowLayoutPanel -> WrapPanel, StatusStrip -> StatusBar,
+    ToolStrip -> ToolBar, MaskedTextBox -> TextBox) picked up
+    automatically by the existing default-case renderer. WinUI has no
+    special-case for these yet - they fall through to the existing
+    TODO-comment placeholder, same as most other controls there.
 */
+
+const CODEGEN_VERSION = '1.1';
 
 /* =========================================================================
    Code generation
@@ -123,8 +121,22 @@ function generateHTML() {
       }
       case 'Panel':
         return `<div id="${c.name}" style="${styleBase}background:${p.backColor};border:1px solid #33475e;"${evtAttr('Click', 'click')}>\n${childrenHtml(c)}</div>`;
+      case 'FlowLayoutPanel': {
+        const flexDir = { LeftToRight: 'row', TopDown: 'column', RightToLeft: 'row-reverse', BottomUp: 'column-reverse' }[p.flowDirection] || 'row';
+        return `<div id="${c.name}" style="${styleBase}background:${p.backColor};border:1px dashed #33475e;display:flex;flex-direction:${flexDir};flex-wrap:${p.wrapContents ? 'wrap' : 'nowrap'};align-content:flex-start;"${evtAttr('Click', 'click')}>\n${childrenHtml(c)}</div>`;
+      }
+      case 'TableLayoutPanel':
+        return `<div id="${c.name}" style="${styleBase}background:${p.backColor};border:1px solid #33475e;display:grid;grid-template-columns:repeat(${p.columnCount},1fr);grid-template-rows:repeat(${p.rowCount},1fr);"${evtAttr('Click', 'click')}>\n${childrenHtml(c)}</div>`;
       case 'GroupBox':
         return `<fieldset id="${c.name}" style="${styleBase}background:${p.backColor};"><legend>${escapeHtml(p.text)}</legend>\n${childrenHtml(c)}</fieldset>`;
+      case 'MaskedTextBox':
+        return `<input id="${c.name}" type="text" placeholder="${escapeHtml(p.mask)}" value="${escapeHtml(p.text)}" style="${styleBase}background:${p.backColor};color:${p.foreColor};"${evtAttr('TextChanged', 'input')}>`;
+      case 'StatusStrip':
+        return `<div id="${c.name}" style="${styleBase}background:#F0F0F0;border-top:1px solid #ACA899;display:flex;align-items:center;padding:0 6px;font-size:12px;">${escapeHtml(p.text)}</div>`;
+      case 'ToolStrip': {
+        const items = (p.items || '').split('\n').filter(Boolean);
+        return `<div id="${c.name}" class="tool-strip" style="${styleBase}">${items.map(it => `<button type="button">${escapeHtml(it)}</button>`).join('')}</div>`;
+      }
       case 'PictureBox':
         return `<img id="${c.name}" src="${escapeHtml(p.imageSource)}" style="${styleBase}object-fit:${p.sizeMode === 'StretchImage' ? 'fill' : 'contain'};"${evtAttr('Click', 'click')}>`;
       case 'ProgressBar':
@@ -185,6 +197,9 @@ function generateHTML() {
   .tabcontrol-header { display: flex; background: #ECECEC; border-bottom: 1px solid #ACA899; }
   .tabcontrol-tab { padding: 6px 14px; font-size: 12px; cursor: pointer; border-right: 1px solid #ACA899; user-select: none; }
   .tabcontrol-page { display: none; position: relative; }
+  .tool-strip { display: flex; align-items: center; gap: 4px; background: #F0F0F0; border-bottom: 1px solid #ACA899; padding: 0 4px; }
+  .tool-strip button { border: 1px solid transparent; background: transparent; padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 2px; }
+  .tool-strip button:hover { border-color: #ACA899; background: #E0E0E0; }
 ${tabControlCss.map(r => '  ' + r).join('\n')}
 </style>
 </head>
@@ -243,7 +258,9 @@ function generateWinForms() {
       GroupBox: 'GroupBox', PictureBox: 'PictureBox', ProgressBar: 'ProgressBar',
       TrackBar: 'TrackBar', NumericUpDown: 'NumericUpDown', DateTimePicker: 'DateTimePicker',
       RichTextBox: 'RichTextBox', LinkLabel: 'LinkLabel', MenuStrip: 'MenuStrip', TabControl: 'TabControl',
-      CheckedListBox: 'CheckedListBox',
+      CheckedListBox: 'CheckedListBox', MaskedTextBox: 'MaskedTextBox',
+      FlowLayoutPanel: 'FlowLayoutPanel', TableLayoutPanel: 'TableLayoutPanel',
+      StatusStrip: 'StatusStrip', ToolStrip: 'ToolStrip',
     }[c.type];
 
     lines.push(`# ${c.name} (${c.type})`);
@@ -306,6 +323,33 @@ function generateWinForms() {
       }
       case 'GroupBox':
         lines.push(`$${c.name}.Text = "${(p.text || '').replace(/"/g, '""')}"`); break;
+      case 'MaskedTextBox':
+        lines.push(`$${c.name}.Mask = "${(p.mask || '').replace(/"/g, '""')}"`);
+        if (p.text) lines.push(`$${c.name}.Text = "${p.text.replace(/"/g, '""')}"`);
+        break;
+      case 'FlowLayoutPanel':
+        lines.push(`$${c.name}.FlowDirection = [System.Windows.Forms.FlowDirection]::${p.flowDirection}`);
+        lines.push(`$${c.name}.WrapContents = $${p.wrapContents}`);
+        break;
+      case 'TableLayoutPanel':
+        lines.push(`$${c.name}.ColumnCount = ${p.columnCount}`);
+        lines.push(`$${c.name}.RowCount = ${p.rowCount}`);
+        break;
+      case 'StatusStrip': {
+        lines.push(`$${c.name}_Label = New-Object System.Windows.Forms.ToolStripStatusLabel`);
+        lines.push(`$${c.name}_Label.Text = "${(p.text || '').replace(/"/g, '""')}"`);
+        lines.push(`$${c.name}.Items.Add($${c.name}_Label) | Out-Null`);
+        break;
+      }
+      case 'ToolStrip': {
+        const items = (p.items || '').split('\n').filter(Boolean);
+        items.forEach((it, i) => {
+          lines.push(`$${c.name}_Btn${i} = New-Object System.Windows.Forms.ToolStripButton`);
+          lines.push(`$${c.name}_Btn${i}.Text = "${it.replace(/"/g, '""')}"`);
+          lines.push(`$${c.name}.Items.Add($${c.name}_Btn${i}) | Out-Null`);
+        });
+        break;
+      }
       case 'PictureBox':
         if (p.imageSource) lines.push(`$${c.name}.Image = [System.Drawing.Image]::FromFile("${p.imageSource}")`);
         lines.push(`$${c.name}.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::${p.sizeMode}`);
@@ -433,6 +477,8 @@ function generateWPF() {
     GroupBox: 'GroupBox', PictureBox: 'Image', ProgressBar: 'ProgressBar',
     TrackBar: 'Slider', NumericUpDown: 'TextBox', DateTimePicker: 'DatePicker',
     RichTextBox: 'TextBox', LinkLabel: 'TextBlock', CheckedListBox: 'ListBox',
+    MaskedTextBox: 'TextBox', FlowLayoutPanel: 'WrapPanel', TableLayoutPanel: 'Grid',
+    StatusStrip: 'StatusBar', ToolStrip: 'ToolBar',
   };
 
   const elFor = (c) => {
