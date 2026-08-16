@@ -1,17 +1,17 @@
 /*
     control-data.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
-    Split out of engine.js (which was getting large) as the first part of
-    an ongoing file-organization pass. Holds every control TYPE's static
-    definition: the property/appearance/behavior schemas (CONTROL_DEFS,
-    COMMON_APPEARANCE_PROPS, COMMON_BEHAVIOR_PROPS), toolbox icons and
-    descriptions (TOOL_ICONS, TOOL_DESCRIPTIONS, TOOLBOX_GROUPS), and the
-    default content for MenuStrip/TabControl (PRESET_MENU_DEFAULT,
-    DEFAULT_TABS). Pure data and small pure-function helpers only - no
-    rendering, no state mutation. Loaded before engine.js in index.html.
+    Revision: added 5 new controls (first batch of the ongoing "5 per
+    smaller update" backlog) - MaskedTextBox, FlowLayoutPanel,
+    TableLayoutPanel, StatusStrip, ToolStrip. Each has a CONTROL_DEFS
+    entry, a toolbox icon, a toolbox description, and a TOOLBOX_GROUPS
+    slot (added a new "Menus & Bars" group alongside the renamed
+    "Containers" additions).
 */
+
+const CONTROL_DATA_VERSION = '1.1';
 
 /* =========================================================================
    Control catalog
@@ -244,6 +244,46 @@ const CONTROL_DEFS = {
     isContainer: true,
     isTabControl: true,
   },
+  MaskedTextBox: {
+    label: 'MaskedTextBox', glyph: 'Mt', defaultW: 130, defaultH: 22,
+    props: [
+      ['mask', 'Mask', 'text', '(000) 000-0000'],
+      ['text', 'Text', 'text', ''],
+    ],
+    events: ['TextChanged', 'MaskInputRejected'],
+  },
+  FlowLayoutPanel: {
+    label: 'FlowLayoutPanel', glyph: 'Fl', defaultW: 220, defaultH: 140,
+    props: [
+      ['flowDirection', 'Flow Direction', 'select', 'LeftToRight', { options: ['LeftToRight', 'TopDown', 'RightToLeft', 'BottomUp'] }],
+      ['wrapContents', 'Wrap Contents', 'checkbox', true],
+    ],
+    events: ['Click'],
+    isContainer: true,
+  },
+  TableLayoutPanel: {
+    label: 'TableLayoutPanel', glyph: 'Tl', defaultW: 220, defaultH: 140,
+    props: [
+      ['columnCount', 'Columns', 'number', 2],
+      ['rowCount', 'Rows', 'number', 2],
+    ],
+    events: ['Click'],
+    isContainer: true,
+  },
+  StatusStrip: {
+    label: 'StatusStrip', glyph: 'Ss', defaultW: 400, defaultH: 24,
+    props: [
+      ['text', 'Text', 'text', 'Ready'],
+    ],
+    events: [],
+  },
+  ToolStrip: {
+    label: 'ToolStrip', glyph: 'Ts', defaultW: 300, defaultH: 26,
+    props: [
+      ['items', 'Items', 'itemsListEditor', 'New\nOpen\nSave'],
+    ],
+    events: [],
+  },
 };
 
 // Real vector icons for the toolbox, one per control type - replaces the
@@ -270,6 +310,11 @@ const TOOL_ICONS = {
   LinkLabel: `<path d="M6.6 9.4l2.8-2.8"/><path d="M5.3 8.3a1.9 1.9 0 010-2.7l1.3-1.3a1.9 1.9 0 012.7 2.7l-.6.6"/><path d="M10.7 7.7a1.9 1.9 0 010 2.7l-1.3 1.3a1.9 1.9 0 01-2.7-2.7l.6-.6"/>`,
   MenuStrip: `<rect x="1.5" y="3.3" width="13" height="3.4" rx="0.7"/><path d="M5.3 3.3v3.4M9.5 3.3v3.4"/><path d="M2 10.2h12M2 12.7h8"/>`,
   TabControl: `<path d="M1.5 5.3V4a1 1 0 011-1h4l1.3 1.6h6.2a1 1 0 011 1v.7"/><rect x="1.5" y="5.3" width="13" height="8.2" rx="1"/><path d="M5.8 5.3v8.2"/>`,
+  MaskedTextBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M4 6.5h1.4M6.4 6.5h1.4M8.8 6.5h1.4M4 9.2h6.2"/>`,
+  FlowLayoutPanel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><rect x="3" y="3" width="4" height="3.2" rx="0.5"/><rect x="8" y="3" width="4" height="3.2" rx="0.5"/><rect x="3" y="7.2" width="4" height="3.2" rx="0.5"/>`,
+  TableLayoutPanel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M8 1.5v13M1.5 8h13"/>`,
+  StatusStrip: `<rect x="1.5" y="10.5" width="13" height="4" rx="0.7"/><path d="M4 12.5h4"/>`,
+  ToolStrip: `<rect x="1.5" y="3.3" width="13" height="4.4" rx="0.7"/><rect x="3" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="6.2" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="9.4" y="4.3" width="2.2" height="2.4" rx="0.4"/>`,
 };
 
 function toolIconSvg(type) {
@@ -299,13 +344,18 @@ const TOOL_DESCRIPTIONS = {
   RichTextBox: 'A multi-line text area for longer content than a TextBox is meant for.',
   LinkLabel: 'Text styled and behaving like a hyperlink. Set URL to where it should navigate.',
   MenuStrip: 'A top menu bar (File/Edit/View/etc). Comes with preset File/View/Help menus you can check on/off, edit, or add custom ones to - each item can have its own click code.',
+  MaskedTextBox: 'A TextBox that enforces a fixed input pattern (Mask), like a phone number or date field - the user can only type where the mask allows it.',
+  FlowLayoutPanel: 'A container that auto-arranges its children in a row or column, wrapping to the next line when it runs out of space - like text wrapping, but for controls.',
+  TableLayoutPanel: 'A container that arranges its children in a grid of rows and columns, each cell sized to fit its content.',
+  StatusStrip: 'A thin bar (usually docked to the bottom) showing status text - "Ready", progress, or similar.',
+  ToolStrip: 'A horizontal bar of buttons (usually docked to the top) for quick-access actions - New/Open/Save style toolbars.',
   TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
 };
 
 const TOOLBOX_GROUPS = [
-  { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
+  { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'MaskedTextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
   { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'CheckedListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
-  { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl'] },
+  { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl', 'FlowLayoutPanel', 'TableLayoutPanel'] },
   { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
-  { heading: 'Menus', types: ['MenuStrip'] },
+  { heading: 'Menus & Bars', types: ['MenuStrip', 'ToolStrip', 'StatusStrip'] },
 ];
