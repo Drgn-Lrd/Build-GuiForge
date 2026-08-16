@@ -1,12 +1,16 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.13
+    Version 1.14
 
-    Revision: styling to match engine.js 1.13. Added .event-block-head-
-    left (holds the new per-event info button + label), .actions-editor/
-    .action-block/.action-block-head/.action-code for the new multi-
-    action event editor.
+    Revision: fixed ComboBox's Border Style property appearing stuck on
+    a Fixed3D look regardless of what was actually selected - but only
+    for DropDown Style values that render as an editable input
+    (.rc-combo-editable). That element never had its native browser
+    border stripped (the native <select> variant, .rc-combo, already
+    had this fix from an earlier pass) - the browser's default text
+    input border has an inset/3D look, which was showing through and
+    completely masking the actual Border Style value.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -218,7 +222,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.13';
+  --stylesheet-version: '1.14';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -604,7 +608,7 @@ button, input, select, textarea {
 .rc-textbox { width: 100%; height: 100%; background: #fff; color: #111; padding: 3px 5px; font-size: 12px; }
 .rc-check, .rc-radio { display: flex; align-items: center; gap: 6px; color: #eef1f6; font-size: 12px; width: 100%; height: 100%; padding: 2px; }
 .rc-combo { width: 100%; height: 100%; background: #fff; color: #111; font-size: 12px; }
-.rc-combo-editable { box-sizing: border-box; padding: 2px 5px; }
+.rc-combo-editable { box-sizing: border-box; padding: 2px 5px; border: none; outline: none; }
 .rc-listbox-custom { width: 100%; height: 100%; background: #fff; color: #111; font-size: 12px; overflow-y: auto; box-sizing: border-box; }
 .rc-listbox-item { padding: 3px 6px; cursor: default; }
 .rc-checkedlistbox-item { display: flex; align-items: center; gap: 5px; }
