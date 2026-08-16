@@ -1,15 +1,12 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 2.0
+    Version 1.11
 
-    Revision: styling to match engine.js 2.1. Added the 5 missing form
-    resize-handle positions (.frh-w/.frh-n/.frh-nw/.frh-ne/.frh-sw - only
-    e/s/se existed before). Added .fbs-* classes giving each
-    FormBorderStyle value a real distinct look, plus .tool-window and
-    .not-resizable modifiers. Added .sel-header-row for the restructured
-    properties-pane header (info button + TYPE inline). Anchored
-    #infoModalOverlay to the right edge instead of centering it.
+    Revision: styling to match engine.js 1.12. Added .rc-checkedlistbox*
+    for the new CheckedListBox control's clickable checkbox-list preview.
+    No new CSS needed for the Convert To feature - it reuses existing
+    .prop-row/select styling.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -221,7 +218,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '2.0';
+  --stylesheet-version: '1.11';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -610,6 +607,10 @@ button, input, select, textarea {
 .rc-combo-editable { box-sizing: border-box; padding: 2px 5px; }
 .rc-listbox-custom { width: 100%; height: 100%; background: #fff; color: #111; font-size: 12px; overflow-y: auto; box-sizing: border-box; }
 .rc-listbox-item { padding: 3px 6px; cursor: default; }
+.rc-checkedlistbox-item { display: flex; align-items: center; gap: 5px; }
+.rc-checkedlistbox-item:hover { background: #e8f0fe; }
+.rc-checkedlistbox-box { font-size: 13px; line-height: 1; color: #333; }
+.rc-checkedlistbox-box.checked { color: #0078d7; }
 .rc-listbox-item:hover { background: #e8f0fe; }
 .rc-listbox-item.selected { background: #0078d7; color: #fff; }
 .rc-panel { width: 100%; height: 100%; background: rgba(255,255,255,0.03); border: 1px solid #3a4a5c; }
