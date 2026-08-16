@@ -1,13 +1,17 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.7
+    Version 1.8
 
-    Revision: styling to match engine.js 1.8. Fixed the unstyled
-    .snippet-row select (see engine.js changelog) and added a #propsBody
-    select safety net. Also caught and fixed a version-number drift from
-    the previous pass: this header said 1.6 but --stylesheet-version was
-    still literally '1.5' - now consistent.
+    Revision: styling to match engine.js 1.9. Removed hardcoded borders
+    from .rc-textbox/.rc-combo/.rc-listbox-custom/.rc-numeric/.rc-datetime/
+    .rc-richtext/etc so the new BorderStyle-driven border on .ctrl-inner
+    is the single source of truth (no more double borders). Renamed
+    .rc-listbox to .rc-listbox-custom throughout (including format-skin
+    rules) to match the new custom clickable list, and added .rc-listbox-
+    item (+hover/selected states). Added .option-legend* for the new
+    per-dropdown-option definitions, and .items-list-editor/.items-list-
+    row for the new ComboBox/ListBox Add/Remove items UI.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -128,6 +132,25 @@
 
 /* TabControl tabs editor */
 .tab-editor { padding: 2px 0; }
+
+/* ComboBox/ListBox items editor (explicit Add/Remove rows) */
+.items-list-editor { padding: 2px 0; }
+.items-list-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
+.items-list-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.items-list-row input[type="text"] {
+  flex: 1;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  font-size: 11.5px;
+}
 .tab-editor-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
 .tab-editor-item {
   display: flex;
@@ -200,7 +223,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.7';
+  --stylesheet-version: '1.8';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -565,22 +588,26 @@ button, input, select, textarea {
   font-size: 12px; padding: 0 6px; text-align: center;
 }
 .rc-label { color: #eef1f6; font-size: 12px; padding: 2px; white-space: nowrap; overflow: hidden; }
-.rc-textbox { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 3px 5px; font-size: 12px; }
+.rc-textbox { width: 100%; height: 100%; background: #fff; color: #111; padding: 3px 5px; font-size: 12px; }
 .rc-check, .rc-radio { display: flex; align-items: center; gap: 6px; color: #eef1f6; font-size: 12px; width: 100%; height: 100%; padding: 2px; }
-.rc-combo, .rc-listbox { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; font-size: 12px; }
+.rc-combo { width: 100%; height: 100%; background: #fff; color: #111; font-size: 12px; }
+.rc-listbox-custom { width: 100%; height: 100%; background: #fff; color: #111; font-size: 12px; overflow-y: auto; box-sizing: border-box; }
+.rc-listbox-item { padding: 3px 6px; cursor: default; }
+.rc-listbox-item:hover { background: #e8f0fe; }
+.rc-listbox-item.selected { background: #0078d7; color: #fff; }
 .rc-panel { width: 100%; height: 100%; background: rgba(255,255,255,0.03); border: 1px solid #3a4a5c; }
 .rc-groupbox { width: 100%; height: 100%; border: 1px solid #3a4a5c; position: relative; }
 .rc-groupbox .gb-title { position: absolute; top: -8px; left: 8px; background: var(--bp-canvas); padding: 0 4px; font-size: 11px; color: #bcd6ea; }
-.rc-picture { width: 100%; height: 100%; background: repeating-conic-gradient(#2a313c 0% 25%, #1e232b 0% 50%) 0 0/16px 16px; border: 1px solid #7d8390; display: flex; align-items: center; justify-content: center; color: var(--bp-text-faint); font-size: 10.5px; }
-.rc-progress { width: 100%; height: 100%; background: #d8dbe0; border: 1px solid #7d8390; }
+.rc-picture { width: 100%; height: 100%; background: repeating-conic-gradient(#2a313c 0% 25%, #1e232b 0% 50%) 0 0/16px 16px; display: flex; align-items: center; justify-content: center; color: var(--bp-text-faint); font-size: 10.5px; }
+.rc-progress { width: 100%; height: 100%; background: #d8dbe0; }
 .rc-progress-fill { height: 100%; background: #2dd47a; }
 .rc-track { width: 100%; height: 100%; display: flex; align-items: center; }
 .rc-track input { width: 100%; }
-.rc-numeric { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 3px 5px; font-size: 12px; }
-.rc-datetime { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 3px 5px; font-size: 12px; }
-.rc-datetime-input { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 2px 4px; font-size: 12px; box-sizing: border-box; }
-.rc-richtext { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 4px; font-size: 12px; overflow: auto; white-space: pre-wrap; resize: none; box-sizing: border-box; }
-.rc-textbox-multiline { width: 100%; height: 100%; background: #fff; color: #111; border: 1px solid #7d8390; padding: 4px; font-size: 12px; resize: none; white-space: pre-wrap; box-sizing: border-box; }
+.rc-numeric { width: 100%; height: 100%; background: #fff; color: #111; padding: 3px 5px; font-size: 12px; }
+.rc-datetime { width: 100%; height: 100%; background: #fff; color: #111; padding: 3px 5px; font-size: 12px; }
+.rc-datetime-input { width: 100%; height: 100%; background: #fff; color: #111; padding: 2px 4px; font-size: 12px; box-sizing: border-box; }
+.rc-richtext { width: 100%; height: 100%; background: #fff; color: #111; padding: 4px; font-size: 12px; overflow: auto; white-space: pre-wrap; resize: none; box-sizing: border-box; }
+.rc-textbox-multiline { width: 100%; height: 100%; background: #fff; color: #111; padding: 4px; font-size: 12px; resize: none; white-space: pre-wrap; box-sizing: border-box; }
 .rc-textbox, .rc-numeric { box-sizing: border-box; outline: none; font-family: inherit; }
 .rc-textbox:disabled, .rc-numeric:disabled, .rc-datetime-input:disabled, .rc-richtext:disabled, .rc-textbox-multiline:disabled { background: #f3f3f3; color: #6b6b6b; }
 .rc-link { color: var(--bp-accent-2); font-size: 12px; text-decoration: underline; padding: 2px; }
@@ -588,26 +615,26 @@ button, input, select, textarea {
 /* ---------- Format skins (canvas preview only) ---------- */
 /* WinForms: classic flat/sharp Windows look (the default) */
 .skin-winforms .rc-button { border-radius: 0; border-color: #707070; }
-.skin-winforms .rc-textbox, .skin-winforms .rc-combo, .skin-winforms .rc-listbox,
+.skin-winforms .rc-textbox, .skin-winforms .rc-combo, .skin-winforms .rc-listbox-custom,
 .skin-winforms .rc-numeric, .skin-winforms .rc-datetime, .skin-winforms .rc-richtext { border-radius: 0; border-color: #7f9db9; }
 .skin-winforms .rc-groupbox, .skin-winforms .rc-panel { border-radius: 0; }
 
 /* HTML: flat web look, rounded corners, no inset border feel */
 .skin-html .rc-button { border-radius: 6px; border: none; background: #2563eb !important; color: #fff !important; }
-.skin-html .rc-textbox, .skin-html .rc-combo, .skin-html .rc-listbox,
+.skin-html .rc-textbox, .skin-html .rc-combo, .skin-html .rc-listbox-custom,
 .skin-html .rc-numeric, .skin-html .rc-datetime, .skin-html .rc-richtext { border-radius: 6px; border-color: #cbd5e1; }
 .skin-html .rc-groupbox, .skin-html .rc-panel { border-radius: 6px; border-color: #d7dbe0; }
 .skin-html .rc-progress-fill { background: #2563eb; }
 
 /* WPF: soft gradient "Aero-lite" look */
 .skin-wpf .rc-button { border-radius: 2px; border-color: #adadad; background: linear-gradient(#fefefe, #e5e5e5) !important; color: #1a1a1a !important; }
-.skin-wpf .rc-textbox, .skin-wpf .rc-combo, .skin-wpf .rc-listbox,
+.skin-wpf .rc-textbox, .skin-wpf .rc-combo, .skin-wpf .rc-listbox-custom,
 .skin-wpf .rc-numeric, .skin-wpf .rc-datetime, .skin-wpf .rc-richtext { border-radius: 2px; border-color: #7eb4ea; }
 .skin-wpf .rc-groupbox, .skin-wpf .rc-panel { border-radius: 2px; border-color: #a0b8d0; }
 
 /* WinUI: Fluent rounded corners + soft elevation */
 .skin-winui .rc-button { border-radius: 6px; border-color: #d1d1d1; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
-.skin-winui .rc-textbox, .skin-winui .rc-combo, .skin-winui .rc-listbox,
+.skin-winui .rc-textbox, .skin-winui .rc-combo, .skin-winui .rc-listbox-custom,
 .skin-winui .rc-numeric, .skin-winui .rc-datetime, .skin-winui .rc-richtext { border-radius: 6px; border-color: #d1d1d1; }
 .skin-winui .rc-groupbox, .skin-winui .rc-panel { border-radius: 8px; border-color: #d1d1d1; }
 .skin-winui .rc-check input, .skin-winui .rc-radio input { accent-color: #0067c0; }
@@ -794,6 +821,20 @@ button, input, select, textarea {
 /* Items editor (combo/listbox) */
 .items-editor textarea { font-family: var(--bp-font-mono); min-height: 70px; }
 .items-hint { font-size: 10px; color: var(--bp-text-faint); margin-top: 2px; }
+
+.option-legend {
+  margin-top: 5px;
+  padding: 6px 8px;
+  background: var(--bp-panel);
+  border: 1px solid var(--bp-border-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.option-legend-line { font-size: 10px; line-height: 1.4; }
+.option-legend-value { color: var(--bp-accent-2); font-family: var(--bp-font-mono); margin-right: 5px; }
+.option-legend-text { color: var(--bp-text-faint); }
 
 .usage-hint {
   margin: 8px 12px;
