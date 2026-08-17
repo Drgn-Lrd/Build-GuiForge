@@ -1,13 +1,20 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.18
+    Version 1.19
 
     Revision:
 
-    1. Added .toolstrip-item-row/.toolstrip-item-icon-preview/
-    .toolstrip-item-icon-select for the new ToolStrip items editor
-    (icon dropdown + live preview + label + delete per row).
+    1. Added a hard rule that the properties pane can never scroll
+    horizontally: overflow-x:hidden on .props-pane, plus min-width:0 on
+    every descendant so flex children can actually shrink below their
+    content's natural size instead of forcing overflow. Should prevent
+    this whole class of bug going forward, not just fix one instance.
+
+    2. Replaced the old .toolstrip-item-icon-select/-preview styles
+    with .icon-picker/.icon-picker-btn/.icon-picker-popover/
+    .icon-picker-option for the new compact icon-picker widget - a
+    fixed 24px button instead of a text-label dropdown.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -148,38 +155,16 @@
   font-size: 11.5px;
 }
 
-/* ToolStrip items editor (icon + label + delete per row) */
+/* ToolStrip items editor (icon picker + label + delete per row) */
 .toolstrip-item-row {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 5px;
 }
-.toolstrip-item-icon-preview {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--bp-accent-2);
-  border: 1px solid var(--bp-border-soft);
-  border-radius: var(--radius-sm);
-  background: var(--bp-panel-raised);
-}
-.toolstrip-item-icon-preview .tool-icon-svg { width: 13px; height: 13px; }
-.toolstrip-item-icon-select {
-  flex-shrink: 0;
-  width: 78px;
-  background: var(--bp-panel-raised);
-  border: 1px solid var(--bp-border);
-  color: var(--bp-text);
-  border-radius: var(--radius-sm);
-  padding: 4px 3px;
-  font-size: 10.5px;
-}
 .toolstrip-item-row input[type="text"] {
   flex: 1;
+  min-width: 0;
   background: var(--bp-panel-raised);
   border: 1px solid var(--bp-border);
   color: var(--bp-text);
@@ -187,6 +172,59 @@
   padding: 4px 6px;
   font-size: 11.5px;
 }
+
+/* Compact icon picker: a small fixed-size button showing the current
+   icon, opening a floating popover of real SVG options on click - never
+   contributes to horizontal overflow since it's a small fixed square,
+   not a text-label dropdown that has to fit the longest icon name. */
+.icon-picker { position: relative; flex-shrink: 0; }
+.icon-picker-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bp-accent-2);
+  border: 1px solid var(--bp-border);
+  border-radius: var(--radius-sm);
+  background: var(--bp-panel-raised);
+  cursor: pointer;
+  padding: 0;
+}
+.icon-picker-btn:hover { border-color: var(--bp-accent-2); }
+.icon-picker-btn .tool-icon-svg { width: 14px; height: 14px; }
+.icon-picker-popover {
+  display: none;
+  position: absolute;
+  top: 28px;
+  left: 0;
+  z-index: 50;
+  background: var(--bp-panel);
+  border: 1px solid var(--bp-border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  gap: 3px;
+  box-shadow: 0 12px 30px -8px rgba(0,0,0,0.6);
+}
+.icon-picker-popover.open { display: flex; }
+.icon-picker-option {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bp-text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.icon-picker-option:hover { background: var(--bp-panel-raised); border-color: var(--bp-border-soft); }
+.icon-picker-option.active { color: var(--bp-accent-2); border-color: var(--bp-accent-2); background: var(--bp-accent-2-dim); }
+.icon-picker-option .tool-icon-svg { width: 14px; height: 14px; }
+.icon-picker-none { font-size: 13px; line-height: 1; }
+
 .tab-editor-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
 .tab-editor-item {
   display: flex;
@@ -259,7 +297,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.18';
+  --stylesheet-version: '1.19';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -715,8 +753,17 @@ button, input, select, textarea {
   background: var(--bp-panel);
   border-left: 1px solid var(--bp-border);
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+/* Hard rule: nothing in the properties pane is ever allowed to force
+   horizontal scrolling. min-width:0 lets flex children actually shrink
+   below their content's natural size instead of overflowing the pane. */
+.props-pane * {
+  min-width: 0;
 }
 
 .props-header {
