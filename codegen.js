@@ -1,17 +1,22 @@
 /*
     codegen.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
     Revision:
 
-    1. Every generated event handler now starts with param($sender,
-    $e) - gives event action code access to the real EventArgs (e.g.
-    ItemCheck's $e.Index / $e.NewValue) via the standard PowerShell
-    WinForms convention. Harmless on handlers that don't reference $e.
+    1. DateTimePicker now emits CustomFormat when Format is set to
+    Custom (previously the property existed nowhere in codegen at all).
+
+    2. Fixed ToolStrip's WinForms and HTML output for its new
+    structured {label, icon} items (was still reading the old plain-
+    text-per-line format, which would have broken as soon as items
+    became objects). WinForms adds a TODO comment noting the icon needs
+    a real image resource, since icons aren't portable to WinForms the
+    way they are in HTML/SVG.
 */
 
-const CODEGEN_VERSION = '1.2';
+const CODEGEN_VERSION = '1.3';
 
 /* =========================================================================
    Code generation
@@ -132,8 +137,8 @@ function generateHTML() {
       case 'StatusStrip':
         return `<div id="${c.name}" style="${styleBase}background:#F0F0F0;border-top:1px solid #ACA899;display:flex;align-items:center;padding:0 6px;font-size:12px;">${escapeHtml(p.text)}</div>`;
       case 'ToolStrip': {
-        const items = (p.items || '').split('\n').filter(Boolean);
-        return `<div id="${c.name}" class="tool-strip" style="${styleBase}">${items.map(it => `<button type="button">${escapeHtml(it)}</button>`).join('')}</div>`;
+        const items = p.items || [];
+        return `<div id="${c.name}" class="tool-strip" style="${styleBase}">${items.map(it => `<button type="button">${toolStripIconSvg(it.icon)}<span>${escapeHtml(it.label)}</span></button>`).join('')}</div>`;
       }
       case 'PictureBox':
         return `<img id="${c.name}" src="${escapeHtml(p.imageSource)}" style="${styleBase}object-fit:${p.sizeMode === 'StretchImage' ? 'fill' : 'contain'};"${evtAttr('Click', 'click')}>`;
@@ -196,8 +201,9 @@ function generateHTML() {
   .tabcontrol-tab { padding: 6px 14px; font-size: 12px; cursor: pointer; border-right: 1px solid #ACA899; user-select: none; }
   .tabcontrol-page { display: none; position: relative; }
   .tool-strip { display: flex; align-items: center; gap: 4px; background: #F0F0F0; border-bottom: 1px solid #ACA899; padding: 0 4px; }
-  .tool-strip button { border: 1px solid transparent; background: transparent; padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 2px; }
+  .tool-strip button { display: flex; flex-direction: column; align-items: center; gap: 1px; border: 1px solid transparent; background: transparent; padding: 3px 8px; font-size: 9.5px; cursor: pointer; border-radius: 2px; color: #333; }
   .tool-strip button:hover { border-color: #ACA899; background: #E0E0E0; }
+  .tool-strip button svg { width: 14px; height: 14px; color: #555; }
 ${tabControlCss.map(r => '  ' + r).join('\n')}
 </style>
 </head>
@@ -340,10 +346,11 @@ function generateWinForms() {
         break;
       }
       case 'ToolStrip': {
-        const items = (p.items || '').split('\n').filter(Boolean);
+        const items = p.items || [];
         items.forEach((it, i) => {
           lines.push(`$${c.name}_Btn${i} = New-Object System.Windows.Forms.ToolStripButton`);
-          lines.push(`$${c.name}_Btn${i}.Text = "${it.replace(/"/g, '""')}"`);
+          lines.push(`$${c.name}_Btn${i}.Text = "${it.label.replace(/"/g, '""')}"`);
+          if (it.icon && it.icon !== 'none') lines.push(`# TODO: set $${c.name}_Btn${i}.Image to an actual icon resource (designer icon: "${it.icon}")`);
           lines.push(`$${c.name}.Items.Add($${c.name}_Btn${i}) | Out-Null`);
         });
         break;
@@ -372,6 +379,7 @@ function generateWinForms() {
         break;
       case 'DateTimePicker':
         lines.push(`$${c.name}.Format = [System.Windows.Forms.DateTimePickerFormat]::${p.format}`);
+        if (p.format === 'Custom' && p.customFormat) lines.push(`$${c.name}.CustomFormat = "${p.customFormat.replace(/"/g, '""')}"`);
         break;
       case 'MenuStrip': {
         const menus = (p.menuItems || []).filter(m => m.enabled);
