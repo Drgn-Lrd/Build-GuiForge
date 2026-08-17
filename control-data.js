@@ -1,21 +1,98 @@
 /*
     control-data.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
-    Revision: added 5 new controls (first batch of the ongoing "5 per
-    smaller update" backlog) - MaskedTextBox, FlowLayoutPanel,
-    TableLayoutPanel, StatusStrip, ToolStrip. Each has a CONTROL_DEFS
-    entry, a toolbox icon, a toolbox description, and a TOOLBOX_GROUPS
-    slot (added a new "Menus & Bars" group alongside the renamed
-    "Containers" additions).
+    Revision:
+
+    1. Added SETTABLE_PROPS_BY_TYPE - a per-control-type list of which
+    properties make sense to set from event action code, replacing a
+    single fixed list that let you pick things like SelectedIndex on a
+    NumericUpDown (which has no such property, and would error at
+    runtime).
+
+    2. Added resolveValueWidgetKind, deciding what kind of input the
+    Value field should be based on the target's type and the chosen
+    property - a real date input, a dropdown of the target's own item
+    labels, a boolean toggle, or a number field.
+
+    3. DateTimePicker now defaults to Custom format with pattern
+    ddMMMyyyy (renders as e.g. "11Aug2026"), and gained a real
+    Custom Format property instead of Custom silently falling back to
+    raw unformatted text.
+
+    4. Added a small starter icon library (TOOLSTRIP_ICONS: New/Open/
+    Save, matching the Notepad++-style reference) and switched
+    ToolStrip's Items from plain text to a structured {label, icon}
+    array so each button can have a real icon, not just a name.
 */
 
-const CONTROL_DATA_VERSION = '1.1';
+const CONTROL_DATA_VERSION = '1.2';
 
-/* =========================================================================
-   Control catalog
-   ========================================================================= */
+// Which properties make sense to SET on another control from event action
+// code, per control type - used by the "Set another control's property"
+// snippet so the Property dropdown only ever shows options that control
+// type actually has (fixes picking e.g. SelectedIndex on a NumericUpDown,
+// which has no such property and would error at runtime).
+const SETTABLE_PROPS_BY_TYPE = {
+  Button: ['Text', 'Enabled', 'Visible'],
+  Label: ['Text', 'Enabled', 'Visible'],
+  TextBox: ['Text', 'Enabled', 'Visible', 'ReadOnly'],
+  MaskedTextBox: ['Text', 'Enabled', 'Visible'],
+  CheckBox: ['Checked', 'Text', 'Enabled', 'Visible'],
+  RadioButton: ['Checked', 'Text', 'Enabled', 'Visible'],
+  ComboBox: ['SelectedIndex', 'Text', 'Enabled', 'Visible'],
+  ListBox: ['SelectedIndex', 'Enabled', 'Visible'],
+  CheckedListBox: ['Enabled', 'Visible'],
+  Panel: ['Enabled', 'Visible'],
+  GroupBox: ['Text', 'Enabled', 'Visible'],
+  PictureBox: ['Enabled', 'Visible'],
+  ProgressBar: ['Value', 'Enabled', 'Visible'],
+  TrackBar: ['Value', 'Enabled', 'Visible'],
+  NumericUpDown: ['Value', 'Enabled', 'Visible'],
+  DateTimePicker: ['Value', 'Enabled', 'Visible'],
+  RichTextBox: ['Text', 'Enabled', 'Visible'],
+  LinkLabel: ['Text', 'Enabled', 'Visible'],
+};
+const DEFAULT_SETTABLE_PROPS = ['Enabled', 'Visible'];
+
+function getSettableProps(type) {
+  return SETTABLE_PROPS_BY_TYPE[type] || DEFAULT_SETTABLE_PROPS;
+}
+
+// What kind of widget the Value field should be, given the target
+// control's type and which property was picked - e.g. a real date input
+// for DateTimePicker.Value, a dropdown of the target's own item labels
+// for ComboBox/ListBox.SelectedIndex, a toggle for boolean properties.
+function resolveValueWidgetKind(targetType, property) {
+  if (property === 'Checked' || property === 'Enabled' || property === 'Visible' || property === 'ReadOnly') return 'boolean';
+  if (property === 'Value' && targetType === 'DateTimePicker') return 'date';
+  if (property === 'Value' && (targetType === 'NumericUpDown' || targetType === 'TrackBar' || targetType === 'ProgressBar')) return 'number';
+  if (property === 'SelectedIndex' && (targetType === 'ComboBox' || targetType === 'ListBox')) return 'targetItemIndex';
+  return 'text';
+}
+
+// Small starter icon library for ToolStrip buttons - a real icon system
+// (browsable library, custom uploads) is a bigger future feature; this is
+// just enough to make New/Open/Save look like actual toolbar buttons
+// instead of plain text. 16x16 line-art, same style as the toolbox icons.
+const TOOLSTRIP_ICONS = {
+  none: '',
+  new: '<path d="M4 1.5h5l3 3v10h-8v-13z"/><path d="M9 1.5v3h3"/>',
+  open: '<path d="M1.5 4.5v9a1 1 0 001 1h11a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H2.5a1 1 0 00-1 1z"/>',
+  save: '<rect x="2" y="2" width="12" height="12" rx="1"/><rect x="4.7" y="2" width="4.6" height="3.8"/><rect x="4.2" y="9" width="7.6" height="5"/>',
+};
+
+function toolStripIconSvg(key) {
+  const inner = TOOLSTRIP_ICONS[key] || '';
+  return `<svg class="tool-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+}
+
+const DEFAULT_TOOLSTRIP_ITEMS = [
+  { id: 'new', label: 'New', icon: 'new' },
+  { id: 'open', label: 'Open', icon: 'open' },
+  { id: 'save', label: 'Save', icon: 'save' },
+];
 
 // Property field shorthand: [key, label, type, default, extra]
 // type: text | number | px | checkbox | color | select | textarea
@@ -209,7 +286,8 @@ const CONTROL_DEFS = {
   DateTimePicker: {
     label: 'DateTimePicker', glyph: 'Dt', defaultW: 130, defaultH: 22,
     props: [
-      ['format', 'Format', 'select', 'Long', { options: ['Long', 'Short', 'Time', 'Custom'] }],
+      ['format', 'Format', 'select', 'Custom', { options: ['Long', 'Short', 'Time', 'Custom'] }],
+      ['customFormat', 'Custom Format', 'text', 'ddMMMyyyy'],
       ['value', 'Value', 'text', ''],
     ],
     events: ['ValueChanged'],
@@ -280,7 +358,7 @@ const CONTROL_DEFS = {
   ToolStrip: {
     label: 'ToolStrip', glyph: 'Ts', defaultW: 300, defaultH: 26,
     props: [
-      ['items', 'Items', 'itemsListEditor', 'New\nOpen\nSave'],
+      ['items', 'Items', 'toolStripItemsEditor', DEFAULT_TOOLSTRIP_ITEMS],
     ],
     events: [],
   },
