@@ -1,19 +1,17 @@
 /*
     codegen.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
-    Revision: added WinForms/HTML output for this update's 5 new
-    controls (MaskedTextBox, FlowLayoutPanel, TableLayoutPanel,
-    StatusStrip, ToolStrip), plus WPF tag mappings (TableLayoutPanel ->
-    Grid, FlowLayoutPanel -> WrapPanel, StatusStrip -> StatusBar,
-    ToolStrip -> ToolBar, MaskedTextBox -> TextBox) picked up
-    automatically by the existing default-case renderer. WinUI has no
-    special-case for these yet - they fall through to the existing
-    TODO-comment placeholder, same as most other controls there.
+    Revision:
+
+    1. Every generated event handler now starts with param($sender,
+    $e) - gives event action code access to the real EventArgs (e.g.
+    ItemCheck's $e.Index / $e.NewValue) via the standard PowerShell
+    WinForms convention. Harmless on handlers that don't reference $e.
 */
 
-const CODEGEN_VERSION = '1.1';
+const CODEGEN_VERSION = '1.2';
 
 /* =========================================================================
    Code generation
@@ -423,7 +421,11 @@ function generateWinForms() {
       // on the same control, so this coexists fine with a separate,
       // independent regular Click handler if one also exists.
       const realEvtName = evtName === 'ClickToClose' ? 'Click' : evtName;
-      lines.push(`$${c.name}.Add_${realEvtName}({\n    ${body}\n})`);
+      // param($sender, $e) is the standard PowerShell WinForms convention
+      // for accessing an event's EventArgs (e.g. ItemCheck's $e.Index and
+      // $e.NewValue) - always declared, harmless when a handler doesn't
+      // use it, but means $e is always there for snippets that need it.
+      lines.push(`$${c.name}.Add_${realEvtName}({\n    param($sender, $e)\n    ${body}\n})`);
     });
 
     // Route into the right container: a TabPage for TabControl children,
