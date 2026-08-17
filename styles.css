@@ -1,13 +1,13 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.17
+    Version 1.18
 
     Revision:
 
-    1. Restyled .rc-toolstrip-btn for the new icon-over-label layout
-    (added .rc-toolstrip-icon, .rc-toolstrip-label) instead of plain
-    centered text.
+    1. Added .toolstrip-item-row/.toolstrip-item-icon-preview/
+    .toolstrip-item-icon-select for the new ToolStrip items editor
+    (icon dropdown + live preview + label + delete per row).
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -147,6 +147,46 @@
   padding: 4px 6px;
   font-size: 11.5px;
 }
+
+/* ToolStrip items editor (icon + label + delete per row) */
+.toolstrip-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.toolstrip-item-icon-preview {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bp-accent-2);
+  border: 1px solid var(--bp-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bp-panel-raised);
+}
+.toolstrip-item-icon-preview .tool-icon-svg { width: 13px; height: 13px; }
+.toolstrip-item-icon-select {
+  flex-shrink: 0;
+  width: 78px;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 3px;
+  font-size: 10.5px;
+}
+.toolstrip-item-row input[type="text"] {
+  flex: 1;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  font-size: 11.5px;
+}
 .tab-editor-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
 .tab-editor-item {
   display: flex;
@@ -219,7 +259,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.17';
+  --stylesheet-version: '1.18';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
