@@ -1,42 +1,25 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.18
+    Version 1.19
 
     Revision:
 
-    1. Dock Index moved to sit right next to the Dock property itself
-    (was grouped with Z-Index, an unrelated concept) - only shown/
-    enabled while Dock isn't None.
+    1. Fixed the ToolStrip icon editor causing a horizontal scrollbar
+    in the properties pane - the icon field was a text-label <select>
+    (needing room for "New"/"Open"/"Save") plus a separate icon-preview
+    box plus the label input, all together wider than the pane. Replaced
+    with buildToolStripIconPicker: a small fixed-size button showing the
+    current icon that opens a compact popover of real icon options on
+    click - can never contribute to overflow since it's a small square,
+    not a dropdown sized to fit the longest option's text.
 
-    2. Replaced the fixed-property snippets (Set text, Enable/disable)
-    with one unified "Set another control's property" snippet whose
-    Property and Value fields are fully type-aware: Property only lists
-    what the target control actually supports, and Value renders as a
-    real date picker, a dropdown of the target's own item labels, a
-    toggle, or a number field depending on what was picked. Picking a
-    new target resets stale property/value selections instead of
-    carrying over an invalid combination.
-
-    3. Added "Enable another control while this one is checked"
-    (genuinely bidirectional - reads the checkbox's own live state each
-    time, so unchecking auto-reverts with no separate handler needed)
-    and "Increase/Decrease another control's value" (clamped to the
-    target's own Min/Max).
-
-    4. Updated the per-item CheckedListBox snippet to use the same
-    type-aware Property/Value system instead of its old fixed list.
-
-    5. Added formatDateCustom - real .NET-style date format tokens
-    (dd/MMM/yyyy/HH/mm/etc), backing DateTimePicker's new default
-    Custom format and its canvas preview.
-
-    6. Finished the ToolStrip items editor: each row now has a real
-    icon dropdown (with a live preview), a label field, and delete -
-    replacing the old plain-text-only list.
+    2. Fixed stale "ddMMMyyyy"/"11Aug2026" (no-space) example text left
+    over in tooltips/definitions after control-data.js's default format
+    changed to include spaces.
 */
 
-const ENGINE_VERSION = '1.18';
+const ENGINE_VERSION = '1.19';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -844,7 +827,7 @@ function formatDateTimePreview(p) {
     case 'Long': return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     case 'Short': return d.toLocaleDateString();
     case 'Time': return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    case 'Custom': return formatDateCustom(d, p.customFormat || 'ddMMMyyyy');
+    case 'Custom': return formatDateCustom(d, p.customFormat || 'dd MMM yyyy');
     default: return d.toLocaleDateString();
   }
 }
@@ -1358,7 +1341,7 @@ const OPTION_DEFINITIONS = {
     Long: 'Full written-out date, e.g. "Saturday, August 15, 2026".',
     Short: 'Compact numeric date, e.g. "8/15/2026".',
     Time: 'Time only, e.g. "3:45 PM" - switches the picker itself to a time input.',
-    Custom: 'Uses the Custom Format field below (.NET date tokens: dd/MMM/yyyy/HH/mm/etc). Default is ddMMMyyyy, e.g. "15Aug2026".',
+    Custom: 'Uses the Custom Format field below (.NET date tokens: dd/MMM/yyyy/HH/mm/etc). Default is "dd MMM yyyy", e.g. "15 Aug 2026".',
   },
   textAlign: {
     Left: 'Text is left-aligned within the control.',
@@ -1462,7 +1445,7 @@ const TOOLTIPS = {
   increment: 'Amount the value changes per step (e.g. each click of the up/down arrows).',
   decimalPlaces: 'Number of digits shown after the decimal point.',
   format: 'How the date/time value is displayed.',
-  customFormat: '.NET date format tokens, used when Format is set to Custom. dd=day (05), MMM=month abbreviated (Aug), MMMM=month full (August), yyyy=4-digit year, yy=2-digit year, HH/mm/ss=24hr time, tt=AM/PM. Default "ddMMMyyyy" gives "15Aug2026".',
+  customFormat: '.NET date format tokens, used when Format is set to Custom. dd=day (05), MMM=month abbreviated (Aug), MMMM=month full (August), yyyy=4-digit year, yy=2-digit year, HH/mm/ss=24hr time, tt=AM/PM. Default "dd MMM yyyy" gives "15 Aug 2026".',
   url: 'The web address this link opens when clicked.',
   menuItems: 'Configure this menu bar: check a top-level menu to include it, check individual entries to include them, edit labels, or add your own custom menus and items.',
   tabs: 'The tab pages on this control. Rename, add, or remove pages here; click "Show" on a page to switch the canvas to it before placing controls - each page keeps its own separate set of children.',
@@ -2084,6 +2067,44 @@ function buildItemsListEditorRow(ctrl, key, label) {
   return wrap;
 }
 
+function buildToolStripIconPicker(item, sync) {
+  const wrap = document.createElement('div');
+  wrap.className = 'icon-picker';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'icon-picker-btn';
+  btn.innerHTML = toolStripIconSvg(item.icon);
+  btn.title = 'Choose an icon';
+
+  const popover = document.createElement('div');
+  popover.className = 'icon-picker-popover';
+  Object.keys(TOOLSTRIP_ICONS).forEach(k => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'icon-picker-option' + (item.icon === k ? ' active' : '');
+    opt.innerHTML = k === 'none' ? '<span class="icon-picker-none">\u2014</span>' : toolStripIconSvg(k);
+    opt.title = k === 'none' ? '(no icon)' : k[0].toUpperCase() + k.slice(1);
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      item.icon = k;
+      popover.classList.remove('open');
+      sync();
+    });
+    popover.appendChild(opt);
+  });
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.icon-picker-popover.open').forEach(p => { if (p !== popover) p.classList.remove('open'); });
+    popover.classList.toggle('open');
+  });
+
+  wrap.appendChild(btn);
+  wrap.appendChild(popover);
+  return wrap;
+}
+
 function buildToolStripItemsEditorRow(ctrl, key, label) {
   const wrap = document.createElement('div');
   wrap.className = 'items-list-editor toolstrip-items-editor';
@@ -2101,21 +2122,6 @@ function buildToolStripItemsEditorRow(ctrl, key, label) {
     const row = document.createElement('div');
     row.className = 'toolstrip-item-row';
 
-    const iconPreview = document.createElement('span');
-    iconPreview.className = 'toolstrip-item-icon-preview';
-    iconPreview.innerHTML = toolStripIconSvg(item.icon);
-
-    const iconSel = document.createElement('select');
-    iconSel.className = 'toolstrip-item-icon-select';
-    Object.keys(TOOLSTRIP_ICONS).forEach(k => {
-      const opt = document.createElement('option');
-      opt.value = k;
-      opt.textContent = k === 'none' ? '(no icon)' : k[0].toUpperCase() + k.slice(1);
-      if (item.icon === k) opt.selected = true;
-      iconSel.appendChild(opt);
-    });
-    iconSel.addEventListener('change', (e) => { item.icon = e.target.value; sync(); });
-
     const input = document.createElement('input');
     input.type = 'text';
     input.value = item.label;
@@ -2128,8 +2134,7 @@ function buildToolStripItemsEditorRow(ctrl, key, label) {
     delBtn.title = 'Remove this button.';
     delBtn.addEventListener('click', () => { arr.splice(i, 1); sync(); });
 
-    row.appendChild(iconPreview);
-    row.appendChild(iconSel);
+    row.appendChild(buildToolStripIconPicker(item, sync));
     row.appendChild(input);
     row.appendChild(delBtn);
     wrap.appendChild(row);
@@ -3315,6 +3320,10 @@ function initTopToolbar() {
   });
   document.getElementById('btnUndo').addEventListener('click', undo);
   document.getElementById('btnRedo').addEventListener('click', redo);
+
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.icon-picker-popover.open').forEach(p => p.classList.remove('open'));
+  });
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.pickingCallback) { cancelControlPick(); return; }
