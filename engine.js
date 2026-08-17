@@ -1,49 +1,42 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.17
+    Version 1.18
 
     Revision:
 
-    1. Show message box now has Buttons and Icon options (OK/YesNo/
-    etc, Information/Warning/Error/etc) via a new generic 'select' param
-    type - previously it only exposed Message and Title, silently
-    dropping the rest of MessageBox.Show()'s real signature.
+    1. Dock Index moved to sit right next to the Dock property itself
+    (was grouped with Z-Index, an unrelated concept) - only shown/
+    enabled while Dock isn't None.
 
-    2. Added a per-item cross-control action: "When item is checked,
-    set another control's property," scoped to only appear on the
-    ItemCheck event (a CheckedListBox's own event) via a new onlyFor
-    field on snippets. Ties ONE specific item to an action on another
-    control - check "Turbo Mode" and set ComboBox1 to option 2, check
-    "Eco Mode" and set it to option 1, as two separate snippet-bound
-    actions. Added two new param types to support it: itemIndex (a
-    dropdown populated live from the current control's own Items) and
-    select (a generic dropdown from a fixed option list, also used by
-    Show message box's new Buttons/Icon fields).
+    2. Replaced the fixed-property snippets (Set text, Enable/disable)
+    with one unified "Set another control's property" snippet whose
+    Property and Value fields are fully type-aware: Property only lists
+    what the target control actually supports, and Value renders as a
+    real date picker, a dropdown of the target's own item labels, a
+    toggle, or a number field depending on what was picked. Picking a
+    new target resets stale property/value selections instead of
+    carrying over an invalid combination.
 
-    3. codegen.js: every generated event handler now starts with
-    param($sender, $e) - the standard PowerShell WinForms convention for
-    accessing an event's arguments (needed for ItemCheck's $e.Index and
-    $e.NewValue). Harmless on handlers that don't use it.
+    3. Added "Enable another control while this one is checked"
+    (genuinely bidirectional - reads the checkbox's own live state each
+    time, so unchecking auto-reverts with no separate handler needed)
+    and "Increase/Decrease another control's value" (clamped to the
+    target's own Min/Max).
 
-    4. MenuStrip, ToolStrip, and StatusStrip now auto-dock themselves
-    at creation (Top, Top, Bottom) instead of requiring a manual Dock
-    toggle. MenuStrip always forces itself to sort before any existing
-    Top-docked sibling, regardless of creation order; ToolStrip slots in
-    right after a MenuStrip sibling if one exists. Verified: add
-    ToolStrip first, then MenuStrip - the menu still ends up on top.
+    4. Updated the per-item CheckedListBox snippet to use the same
+    type-aware Property/Value system instead of its old fixed list.
 
-    5. Added a Dock Index field to the Layout section (next to
-    Z-Index) - dockOrder was previously only auto-managed with no way
-    to view or override it directly.
+    5. Added formatDateCustom - real .NET-style date format tokens
+    (dd/MMM/yyyy/HH/mm/etc), backing DateTimePicker's new default
+    Custom format and its canvas preview.
 
-    6. ToolStrip's canvas preview now shows a small icon above each
-    button's label instead of plain text, closer to how a real toolbar
-    looks. No real icon-picking system exists yet (placeholder glyph
-    only) - a proper icon library is a separate future feature.
+    6. Finished the ToolStrip items editor: each row now has a real
+    icon dropdown (with a live preview), a label field, and delete -
+    replacing the old plain-text-only list.
 */
 
-const ENGINE_VERSION = '1.17';
+const ENGINE_VERSION = '1.18';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -96,6 +89,7 @@ function nextName(type) {
 }
 
 function getControl(id) { return state.controls.find(c => c.id === id); }
+function getControlByName(name) { return state.controls.find(c => c.name === name); }
 
 function createControl(type, x, y, parentId, tabPage) {
   const def = CONTROL_DEFS[type];
@@ -775,9 +769,8 @@ function renderInner(c) {
       break;
     }
     case 'ToolStrip': {
-      const items = (p.items || '').split('\n').filter(Boolean);
-      const iconSvg = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2" width="12" height="12" rx="1.5"/></svg>';
-      wrap.innerHTML = `<div class="rc-toolstrip">${items.map(it => `<div class="rc-toolstrip-btn"><span class="rc-toolstrip-icon">${iconSvg}</span><span class="rc-toolstrip-label">${escapeHtml(it)}</span></div>`).join('')}</div>`;
+      const items = p.items || [];
+      wrap.innerHTML = `<div class="rc-toolstrip">${items.map(it => `<div class="rc-toolstrip-btn"><span class="rc-toolstrip-icon">${toolStripIconSvg(it.icon)}</span><span class="rc-toolstrip-label">${escapeHtml(it.label)}</span></div>`).join('')}</div>`;
       break;
     }
     case 'NumericUpDown': {
@@ -810,6 +803,40 @@ function renderInner(c) {
   return wrap;
 }
 
+// Renders a Date using .NET-style custom format tokens (the same tokens
+// WinForms' DateTimePicker.CustomFormat uses), so the designer preview
+// and the real generated behavior agree. Supports the common tokens:
+// dd/d, MMM/MMMM/MM/M, yyyy/yy, HH/hh/H/h, mm, ss, tt.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function formatDateCustom(d, fmt) {
+  const pad = (n, len) => String(n).padStart(len, '0');
+  const h24 = d.getHours();
+  const h12 = ((h24 + 11) % 12) + 1;
+  return fmt.replace(/yyyy|yy|MMMM|MMM|MM|M|dddd|ddd|dd|d|HH|H|hh|h|mm|ss|tt/g, (token) => {
+    switch (token) {
+      case 'yyyy': return String(d.getFullYear());
+      case 'yy': return pad(d.getFullYear() % 100, 2);
+      case 'MMMM': return MONTH_FULL[d.getMonth()];
+      case 'MMM': return MONTH_ABBR[d.getMonth()];
+      case 'MM': return pad(d.getMonth() + 1, 2);
+      case 'M': return String(d.getMonth() + 1);
+      case 'dddd': return d.toLocaleDateString(undefined, { weekday: 'long' });
+      case 'ddd': return d.toLocaleDateString(undefined, { weekday: 'short' });
+      case 'dd': return pad(d.getDate(), 2);
+      case 'd': return String(d.getDate());
+      case 'HH': return pad(h24, 2);
+      case 'H': return String(h24);
+      case 'hh': return pad(h12, 2);
+      case 'h': return String(h12);
+      case 'mm': return pad(d.getMinutes(), 2);
+      case 'ss': return pad(d.getSeconds(), 2);
+      case 'tt': return h24 < 12 ? 'AM' : 'PM';
+      default: return token;
+    }
+  });
+}
+
 function formatDateTimePreview(p) {
   let d = p.value ? new Date(p.value) : new Date();
   if (isNaN(d.getTime())) d = new Date();
@@ -817,7 +844,7 @@ function formatDateTimePreview(p) {
     case 'Long': return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     case 'Short': return d.toLocaleDateString();
     case 'Time': return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    case 'Custom': return p.value || d.toLocaleDateString();
+    case 'Custom': return formatDateCustom(d, p.customFormat || 'ddMMMyyyy');
     default: return d.toLocaleDateString();
   }
 }
@@ -1188,12 +1215,13 @@ const EVENT_SNIPPETS = [
     ],
   },
   {
-    id: 'setText', label: 'Set another control\'s text',
-    template: `{target}.Text = "{value}"`,
-    help: 'Changes a Label/TextBox/Button\'s displayed text from code. Text is the common display property shared by every WinForms control.',
+    id: 'setTargetProp', label: 'Set another control\'s property',
+    template: `{target}.{property} = {value}`,
+    help: 'The general-purpose way to change something on another control. Pick the target first - Property and Value then adjust to match what that control type actually supports, so you can\'t accidentally pick a property it doesn\'t have (e.g. a NumericUpDown has no SelectedIndex). A DateTimePicker target gives you a real date field; a ComboBox/ListBox target with SelectedIndex lets you pick from its own item names instead of a raw number.',
     params: [
       { key: 'target', label: 'Target Control', type: 'control' },
-      { key: 'value', label: 'New Text', type: 'text', default: 'New value' },
+      { key: 'property', label: 'Property', type: 'targetProperty' },
+      { key: 'value', label: 'New Value', type: 'targetValue' },
     ],
   },
   {
@@ -1203,40 +1231,69 @@ const EVENT_SNIPPETS = [
     params: [],
   },
   {
-    id: 'toggleEnabled', label: 'Enable/disable another control',
-    template: `{target}.Enabled = {enabled}`,
-    help: 'Turns another control on/off (greyed out and unclickable when off). Common pattern: a checkbox or combo selection that should enable/disable a related field.',
+    id: 'mirrorChecked', label: 'Enable another control while this one is checked',
+    template: `{target}.Enabled = $ThisControl.Checked`,
+    help: 'Bidirectional on purpose: enables the target while THIS checkbox is checked, and automatically disables it again the instant it\'s unchecked - no separate "undo" handler needed, since it just reads this checkbox\'s own current state every time it fires.',
+    onlyFor: ['CheckedChanged'],
     params: [
       { key: 'target', label: 'Target Control', type: 'control' },
-      { key: 'enabled', label: 'Enabled', type: 'boolean', default: true },
+    ],
+  },
+  {
+    id: 'increaseValue', label: 'Increase another control\'s value',
+    template: `{target}.Value = [Math]::Min({target}.Maximum, {target}.Value + {amount})`,
+    help: 'Bumps a NumericUpDown/TrackBar/ProgressBar\'s Value up, clamped so it never exceeds that control\'s own Maximum. Usually wired to a button press, not a checkbox.',
+    params: [
+      { key: 'target', label: 'Target Control', type: 'control' },
+      { key: 'amount', label: 'Amount', type: 'text', default: '1' },
+    ],
+  },
+  {
+    id: 'decreaseValue', label: 'Decrease another control\'s value',
+    template: `{target}.Value = [Math]::Max({target}.Minimum, {target}.Value - {amount})`,
+    help: 'Same idea as Increase, but downward and clamped to the target\'s Minimum instead.',
+    params: [
+      { key: 'target', label: 'Target Control', type: 'control' },
+      { key: 'amount', label: 'Amount', type: 'text', default: '1' },
     ],
   },
   {
     id: 'itemCheckedSetProp', label: 'When item is checked, set another control\'s property',
     template: `if ($e.Index -eq {itemIndex} -and $e.NewValue -eq [System.Windows.Forms.CheckState]::Checked) {\n    {target}.{property} = {value}\n}`,
-    help: 'Ties ONE specific checkbox item to an action on another control - each item can drive something different. Example: checking "Turbo Mode" (item 0) sets ComboBox1.SelectedIndex to 1, while checking "Eco Mode" (item 1) sets it to 0 - just add one of these per item you want wired up. For text-type properties, include your own quotes in New Value (e.g. "Hello").',
+    help: 'Ties ONE specific checkbox item to an action on another control - each item can drive something different. Example: checking "Turbo Mode" (item 0) sets ComboBox1 to its "High" option, while checking "Eco Mode" (item 1) sets it to "Low" - just add one of these per item you want wired up.',
     onlyFor: ['ItemCheck'],
     params: [
       { key: 'itemIndex', label: 'When Item', type: 'itemIndex' },
       { key: 'target', label: 'Target Control', type: 'control' },
-      { key: 'property', label: 'Property', type: 'select', options: ['Text', 'Enabled', 'Visible', 'Checked', 'SelectedIndex', 'Value'], default: 'Text' },
-      { key: 'value', label: 'New Value', type: 'text', default: '' },
+      { key: 'property', label: 'Property', type: 'targetProperty' },
+      { key: 'value', label: 'New Value', type: 'targetValue' },
     ],
   },
 ];
 
 // Fills a snippet's template with current parameter values - 'control'
 // params become a $VariableName reference, 'boolean' becomes $true/$false,
-// 'itemIndex'/'select' insert their raw value (already the correct token,
-// e.g. an index number or an enum member name), 'text' is inserted as-is
-// (the template itself supplies any quotes).
+// 'targetProperty'/'targetValue' resolve based on the CURRENTLY picked
+// target control's real type (see resolveValueWidgetKind in
+// control-data.js), 'itemIndex'/'select' insert their raw value, 'text'
+// is inserted as-is (the template itself supplies any quotes).
 function computeSnippetCode(snippet, params) {
   let code = snippet.template;
+  const targetCtrl = params.target ? getControlByName(params.target) : null;
+  const targetType = targetCtrl ? targetCtrl.type : null;
   snippet.params.forEach(p => {
     const val = params[p.key];
     let sub;
     if (p.type === 'control') sub = val ? ('$' + val) : '$\u2026'; // ellipsis placeholder until picked
     else if (p.type === 'boolean') sub = val ? '$true' : '$false';
+    else if (p.type === 'targetProperty') sub = val || 'Text';
+    else if (p.type === 'targetValue') {
+      const kind = resolveValueWidgetKind(targetType, params.property);
+      if (kind === 'boolean') sub = val ? '$true' : '$false';
+      else if (kind === 'number' || kind === 'targetItemIndex') sub = (val != null && val !== '') ? String(val) : '0';
+      else if (kind === 'date') sub = val ? `[DateTime]::Parse("${val}")` : '[DateTime]::Now';
+      else sub = `"${(val != null ? String(val) : '').replace(/"/g, '`"')}"`;
+    }
     else sub = val != null ? String(val) : '';
     code = code.split('{' + p.key + '}').join(sub);
   });
@@ -1301,7 +1358,7 @@ const OPTION_DEFINITIONS = {
     Long: 'Full written-out date, e.g. "Saturday, August 15, 2026".',
     Short: 'Compact numeric date, e.g. "8/15/2026".',
     Time: 'Time only, e.g. "3:45 PM" - switches the picker itself to a time input.',
-    Custom: 'Displays whatever raw value is stored, unformatted.',
+    Custom: 'Uses the Custom Format field below (.NET date tokens: dd/MMM/yyyy/HH/mm/etc). Default is ddMMMyyyy, e.g. "15Aug2026".',
   },
   textAlign: {
     Left: 'Text is left-aligned within the control.',
@@ -1405,6 +1462,7 @@ const TOOLTIPS = {
   increment: 'Amount the value changes per step (e.g. each click of the up/down arrows).',
   decimalPlaces: 'Number of digits shown after the decimal point.',
   format: 'How the date/time value is displayed.',
+  customFormat: '.NET date format tokens, used when Format is set to Custom. dd=day (05), MMM=month abbreviated (Aug), MMMM=month full (August), yyyy=4-digit year, yy=2-digit year, HH/mm/ss=24hr time, tt=AM/PM. Default "ddMMMyyyy" gives "15Aug2026".',
   url: 'The web address this link opens when clicked.',
   menuItems: 'Configure this menu bar: check a top-level menu to include it, check individual entries to include them, edit labels, or add your own custom menus and items.',
   tabs: 'The tab pages on this control. Rename, add, or remove pages here; click "Show" on a page to switch the canvas to it before placing controls - each page keeps its own separate set of children.',
@@ -1900,17 +1958,6 @@ function buildLayoutRows(ctrl) {
   zRow.querySelector('input').addEventListener('change', (e) => { ctrl.z = Number(e.target.value) || 0; render(); });
   frag.appendChild(zRow);
 
-  const isDocked = ctrl.props.dock && ctrl.props.dock !== 'None';
-  const dockOrderRow = document.createElement('div');
-  dockOrderRow.className = 'prop-row';
-  dockOrderRow.innerHTML = `<label title="Docking priority among siblings docked to the same edge - lower numbers claim their space first. Set automatically when Dock is turned on (MenuStrip/ToolStrip/StatusStrip always order themselves sensibly), but you can override it here.">Dock Index</label><input type="number" value="${ctrl.dockOrder != null ? ctrl.dockOrder : ''}" placeholder="${isDocked ? '0' : 'not docked'}" ${isDocked ? '' : 'disabled'}>`;
-  dockOrderRow.querySelector('input').addEventListener('change', (e) => {
-    const v = e.target.value.trim();
-    ctrl.dockOrder = v === '' ? null : Number(v);
-    render();
-  });
-  frag.appendChild(dockOrderRow);
-
   return frag;
 }
 
@@ -2037,6 +2084,70 @@ function buildItemsListEditorRow(ctrl, key, label) {
   return wrap;
 }
 
+function buildToolStripItemsEditorRow(ctrl, key, label) {
+  const wrap = document.createElement('div');
+  wrap.className = 'items-list-editor toolstrip-items-editor';
+
+  const heading = document.createElement('div');
+  heading.className = 'items-list-heading';
+  heading.title = 'Each button gets an icon and a label. More icons can be added to the library later - for now: New, Open, Save, or none.';
+  heading.textContent = label;
+  wrap.appendChild(heading);
+
+  const arr = ctrl.props[key];
+  const sync = () => { render(); };
+
+  arr.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'toolstrip-item-row';
+
+    const iconPreview = document.createElement('span');
+    iconPreview.className = 'toolstrip-item-icon-preview';
+    iconPreview.innerHTML = toolStripIconSvg(item.icon);
+
+    const iconSel = document.createElement('select');
+    iconSel.className = 'toolstrip-item-icon-select';
+    Object.keys(TOOLSTRIP_ICONS).forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = k === 'none' ? '(no icon)' : k[0].toUpperCase() + k.slice(1);
+      if (item.icon === k) opt.selected = true;
+      iconSel.appendChild(opt);
+    });
+    iconSel.addEventListener('change', (e) => { item.icon = e.target.value; sync(); });
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = item.label;
+    input.addEventListener('change', () => { item.label = input.value; sync(); });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+    delBtn.textContent = '\u2715';
+    delBtn.title = 'Remove this button.';
+    delBtn.addEventListener('click', () => { arr.splice(i, 1); sync(); });
+
+    row.appendChild(iconPreview);
+    row.appendChild(iconSel);
+    row.appendChild(input);
+    row.appendChild(delBtn);
+    wrap.appendChild(row);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn btn-ghost menu-add-btn';
+  addBtn.textContent = '+ Add item';
+  addBtn.addEventListener('click', () => {
+    arr.push({ id: 'item' + Math.random().toString(36).slice(2, 8), label: 'New Item', icon: 'none' });
+    sync();
+  });
+  wrap.appendChild(addBtn);
+
+  return wrap;
+}
+
 function buildPropRows(ctrl, propDefs) {
   const frag = document.createElement('div');
   propDefs.forEach(([key, label, type, , extra]) => {
@@ -2057,6 +2168,10 @@ function buildPropRows(ctrl, propDefs) {
     }
     if (type === 'itemsListEditor') {
       frag.appendChild(buildItemsListEditorRow(ctrl, key, label));
+      return;
+    }
+    if (type === 'toolStripItemsEditor') {
+      frag.appendChild(buildToolStripItemsEditorRow(ctrl, key, label));
       return;
     }
     if (type === 'px') {
@@ -2096,6 +2211,20 @@ function buildPropRows(ctrl, propDefs) {
         render(); // docking (if this was Dock) is recomputed centrally at the top of render()
       });
       if (OPTION_DEFINITIONS[key]) row.querySelector('label').appendChild(buildOptionInfoButton(key, label, extra.options));
+      frag.appendChild(row);
+      if (key === 'dock') {
+        const isDocked = val && val !== 'None';
+        const dockOrderRow = document.createElement('div');
+        dockOrderRow.className = 'prop-row';
+        dockOrderRow.innerHTML = `<label title="Docking priority among siblings docked to the same edge - lower numbers claim their space first. Set automatically when Dock is turned on (MenuStrip/ToolStrip/StatusStrip always order themselves sensibly), but you can override it here. Only matters while Dock isn't None.">Dock Index</label><input type="number" value="${ctrl.dockOrder != null ? ctrl.dockOrder : ''}" placeholder="${isDocked ? '0' : 'not docked'}" ${isDocked ? '' : 'disabled'}>`;
+        dockOrderRow.querySelector('input').addEventListener('change', (e) => {
+          const v = e.target.value.trim();
+          ctrl.dockOrder = v === '' ? null : Number(v);
+          render();
+        });
+        frag.appendChild(dockOrderRow);
+      }
+      return;
     } else if (type === 'number') {
       row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="number" value="${val}">`;
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = Number(e.target.value) || 0; render(); });
@@ -2367,6 +2496,12 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
     pickBtn.addEventListener('click', () => {
       startControlPick((pickedCtrl) => {
         action.params[param.key] = pickedCtrl.name;
+        if (param.key === 'target') {
+          // A property valid for the old target might not exist on the
+          // new one - reset both so there's no stale/invalid carryover.
+          delete action.params.property;
+          delete action.params.value;
+        }
         action.code = computeSnippetCode(snippet, action.params);
         sync();
         render();
@@ -2426,6 +2561,111 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
       render();
     });
     row.appendChild(sel);
+  } else if (param.type === 'targetProperty') {
+    // Options depend entirely on which control was picked as the target -
+    // this is what actually prevents picking a property that control
+    // doesn't have (e.g. SelectedIndex on a NumericUpDown).
+    const targetCtrl = action.params.target ? getControlByName(action.params.target) : null;
+    const sel = document.createElement('select');
+    if (!targetCtrl) {
+      const opt = document.createElement('option');
+      opt.textContent = '(pick a Target Control first)';
+      sel.appendChild(opt);
+      sel.disabled = true;
+    } else {
+      getSettableProps(targetCtrl.type).forEach(propName => {
+        const opt = document.createElement('option');
+        opt.value = propName;
+        opt.textContent = propName;
+        if (action.params[param.key] === propName) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', (e) => {
+        action.params[param.key] = e.target.value;
+        delete action.params.value; // widget kind for Value depends on Property
+        action.code = computeSnippetCode(snippet, action.params);
+        sync();
+        render();
+      });
+    }
+    row.appendChild(sel);
+  } else if (param.type === 'targetValue') {
+    const targetCtrl = action.params.target ? getControlByName(action.params.target) : null;
+    const kind = targetCtrl ? resolveValueWidgetKind(targetCtrl.type, action.params.property) : 'text';
+    if (!targetCtrl) {
+      const hint = document.createElement('span');
+      hint.className = 'snippet-param-control-name';
+      hint.textContent = '(pick a Target Control first)';
+      row.appendChild(hint);
+    } else if (kind === 'boolean') {
+      const sw = document.createElement('label');
+      sw.className = 'switch';
+      sw.innerHTML = `<input type="checkbox" ${action.params[param.key] ? 'checked' : ''}><span class="track"></span>`;
+      sw.querySelector('input').addEventListener('change', (e) => {
+        action.params[param.key] = e.target.checked;
+        action.code = computeSnippetCode(snippet, action.params);
+        sync();
+        render();
+      });
+      row.appendChild(sw);
+    } else if (kind === 'date') {
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.value = action.params[param.key] || '';
+      input.addEventListener('change', (e) => {
+        action.params[param.key] = e.target.value;
+        action.code = computeSnippetCode(snippet, action.params);
+        sync();
+        render();
+      });
+      row.appendChild(input);
+    } else if (kind === 'number') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.value = action.params[param.key] != null ? action.params[param.key] : '';
+      input.addEventListener('change', (e) => {
+        action.params[param.key] = e.target.value;
+        action.code = computeSnippetCode(snippet, action.params);
+        sync();
+        render();
+      });
+      row.appendChild(input);
+    } else if (kind === 'targetItemIndex') {
+      // The whole point: show the TARGET's own item labels, not raw
+      // index numbers you'd otherwise have to count by hand.
+      const sel = document.createElement('select');
+      const items = (targetCtrl.props.items || '').split('\n').filter(Boolean);
+      if (!items.length) {
+        const opt = document.createElement('option');
+        opt.textContent = `(${targetCtrl.name} has no items yet)`;
+        sel.appendChild(opt);
+      }
+      items.forEach((it, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `${idx}: ${it}`;
+        if (String(action.params[param.key]) === String(idx)) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', (e) => {
+        action.params[param.key] = e.target.value;
+        action.code = computeSnippetCode(snippet, action.params);
+        sync();
+        render();
+      });
+      row.appendChild(sel);
+    } else {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = action.params[param.key] != null ? action.params[param.key] : '';
+      input.addEventListener('change', (e) => {
+        action.params[param.key] = e.target.value;
+        action.code = computeSnippetCode(snippet, action.params);
+        sync();
+        render();
+      });
+      row.appendChild(input);
+    }
   } else {
     const input = document.createElement('input');
     input.type = 'text';
