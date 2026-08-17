@@ -1,33 +1,17 @@
 /*
     control-data.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
     Revision:
 
-    1. Added SETTABLE_PROPS_BY_TYPE - a per-control-type list of which
-    properties make sense to set from event action code, replacing a
-    single fixed list that let you pick things like SelectedIndex on a
-    NumericUpDown (which has no such property, and would error at
-    runtime).
-
-    2. Added resolveValueWidgetKind, deciding what kind of input the
-    Value field should be based on the target's type and the chosen
-    property - a real date input, a dropdown of the target's own item
-    labels, a boolean toggle, or a number field.
-
-    3. DateTimePicker now defaults to Custom format with pattern
-    ddMMMyyyy (renders as e.g. "11Aug2026"), and gained a real
-    Custom Format property instead of Custom silently falling back to
-    raw unformatted text.
-
-    4. Added a small starter icon library (TOOLSTRIP_ICONS: New/Open/
-    Save, matching the Notepad++-style reference) and switched
-    ToolStrip's Items from plain text to a structured {label, icon}
-    array so each button can have a real icon, not just a name.
+    1. DateTimePicker's default Custom Format changed from "ddMMMyyyy"
+    to "dd MMM yyyy" (with spaces, renders as "11 Aug 2026"), and its
+    Format dropdown reordered so Custom sits at index 0 - it's the
+    default now, so it belongs first.
 */
 
-const CONTROL_DATA_VERSION = '1.2';
+const CONTROL_DATA_VERSION = '1.3';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -286,8 +270,8 @@ const CONTROL_DEFS = {
   DateTimePicker: {
     label: 'DateTimePicker', glyph: 'Dt', defaultW: 130, defaultH: 22,
     props: [
-      ['format', 'Format', 'select', 'Custom', { options: ['Long', 'Short', 'Time', 'Custom'] }],
-      ['customFormat', 'Custom Format', 'text', 'ddMMMyyyy'],
+      ['format', 'Format', 'select', 'Custom', { options: ['Custom', 'Long', 'Short', 'Time'] }],
+      ['customFormat', 'Custom Format', 'text', 'dd MMM yyyy'],
       ['value', 'Value', 'text', ''],
     ],
     events: ['ValueChanged'],
