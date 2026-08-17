@@ -1,42 +1,49 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.16
+    Version 1.17
 
     Revision:
 
-    1. Redesigned event snippets from raw insertable text into real
-    parameterized templates. Picking "Set another control's text" and
-    clicking Insert now shows actual form fields for that snippet's
-    parameters - a "Select Control" button for the target, a text input
-    for the value - and the code recomputes live as each field changes,
-    shown in a read-only preview. No more hand-editing placeholder text
-    like $OtherControlName.
+    1. Show message box now has Buttons and Icon options (OK/YesNo/
+    etc, Information/Warning/Error/etc) via a new generic 'select' param
+    type - previously it only exposed Message and Title, silently
+    dropping the rest of MessageBox.Show()'s real signature.
 
-    2. Fixed the root cause of garbled code from stacking snippets:
-    Insert used to append onto whatever was already in that action's
-    box, and the "Select Control" button would then paste a name at the
-    cursor or the end with no idea which snippet it belonged to. Insert
-    now replaces/binds this action to the chosen snippet instead of
-    appending - "+ Add action" is the only way to get a second,
-    independent action, exactly as it was meant to work.
+    2. Added a per-item cross-control action: "When item is checked,
+    set another control's property," scoped to only appear on the
+    ItemCheck event (a CheckedListBox's own event) via a new onlyFor
+    field on snippets. Ties ONE specific item to an action on another
+    control - check "Turbo Mode" and set ComboBox1 to option 2, check
+    "Eco Mode" and set it to option 1, as two separate snippet-bound
+    actions. Added two new param types to support it: itemIndex (a
+    dropdown populated live from the current control's own Items) and
+    select (a generic dropdown from a fixed option list, also used by
+    Show message box's new Buttons/Icon fields).
 
-    3. This very likely also explains "doesn't work for label" from
-    testing - Label.Text is genuinely correct WinForms syntax (Text is
-    a property every Control shares), so the most likely explanation is
-    that the control name got corrupted by the same appending bug in
-    (2), not anything specific to Label.
+    3. codegen.js: every generated event handler now starts with
+    param($sender, $e) - the standard PowerShell WinForms convention for
+    accessing an event's arguments (needed for ItemCheck's $e.Index and
+    $e.NewValue). Harmless on handlers that don't use it.
 
-    4. Data model note: each action now stores {code, snippetId,
-    params} instead of a bare string, kept in data.actions. data.code
-    stays a plain joined string in sync at all times, so codegen.js
-    needed zero changes - it keeps reading data.code exactly as before.
-    Old events with only a bare code string (e.g. ClickToClose) still
-    work unchanged; they're derived into a single freeform action the
-    first time they're opened.
+    4. MenuStrip, ToolStrip, and StatusStrip now auto-dock themselves
+    at creation (Top, Top, Bottom) instead of requiring a manual Dock
+    toggle. MenuStrip always forces itself to sort before any existing
+    Top-docked sibling, regardless of creation order; ToolStrip slots in
+    right after a MenuStrip sibling if one exists. Verified: add
+    ToolStrip first, then MenuStrip - the menu still ends up on top.
+
+    5. Added a Dock Index field to the Layout section (next to
+    Z-Index) - dockOrder was previously only auto-managed with no way
+    to view or override it directly.
+
+    6. ToolStrip's canvas preview now shows a small icon above each
+    button's label instead of plain text, closer to how a real toolbar
+    looks. No real icon-picking system exists yet (placeholder glyph
+    only) - a proper icon library is a separate future feature.
 */
 
-const ENGINE_VERSION = '1.16';
+const ENGINE_VERSION = '1.17';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -121,6 +128,26 @@ function createControl(type, x, y, parentId, tabPage) {
     // generated output, just which page you're looking at while building.
     ctrl.activeTabId = (props.tabs[0] && props.tabs[0].id) || null;
   }
+
+  // Menu/tool/status bars conventionally dock themselves - no reason to
+  // make the user manually flip Dock every time. MenuStrip always forces
+  // itself to sort before any already-docked Top sibling (real apps
+  // always put the menu above the toolbar, whichever was added first);
+  // ToolStrip slots in right after a MenuStrip sibling if one exists.
+  const sameGroup = (c) => (c.parentId || null) === (ctrl.parentId || null) && (c.tabPage || null) === (ctrl.tabPage || null);
+  if (type === 'MenuStrip') {
+    ctrl.props.dock = 'Top';
+    const topSiblings = state.controls.filter(c => sameGroup(c) && c.props.dock && c.props.dock !== 'None' && c.dockOrder != null);
+    ctrl.dockOrder = topSiblings.length ? Math.min(...topSiblings.map(c => c.dockOrder)) - 1 : ++state.dockOrderSeq;
+  } else if (type === 'ToolStrip') {
+    ctrl.props.dock = 'Top';
+    const menuSibling = state.controls.find(c => c.type === 'MenuStrip' && sameGroup(c) && c.dockOrder != null);
+    ctrl.dockOrder = menuSibling ? menuSibling.dockOrder + 1 : ++state.dockOrderSeq;
+  } else if (type === 'StatusStrip') {
+    ctrl.props.dock = 'Bottom';
+    ctrl.dockOrder = ++state.dockOrderSeq;
+  }
+
   state.controls.push(ctrl);
   return ctrl;
 }
@@ -749,7 +776,8 @@ function renderInner(c) {
     }
     case 'ToolStrip': {
       const items = (p.items || '').split('\n').filter(Boolean);
-      wrap.innerHTML = `<div class="rc-toolstrip">${items.map(it => `<div class="rc-toolstrip-btn">${escapeHtml(it)}</div>`).join('')}</div>`;
+      const iconSvg = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2" width="12" height="12" rx="1.5"/></svg>';
+      wrap.innerHTML = `<div class="rc-toolstrip">${items.map(it => `<div class="rc-toolstrip-btn"><span class="rc-toolstrip-icon">${iconSvg}</span><span class="rc-toolstrip-label">${escapeHtml(it)}</span></div>`).join('')}</div>`;
       break;
     }
     case 'NumericUpDown': {
@@ -1150,11 +1178,13 @@ const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
   {
     id: 'msgbox', label: 'Show message box',
-    template: `[System.Windows.Forms.MessageBox]::Show("{message}", "{title}")`,
-    help: 'Pops up a small dialog with a message and an OK button. Good for confirmations, errors, or simple status updates.',
+    template: `[System.Windows.Forms.MessageBox]::Show("{message}", "{title}", [System.Windows.Forms.MessageBoxButtons]::{buttons}, [System.Windows.Forms.MessageBoxIcon]::{icon})`,
+    help: 'Pops up a small dialog with a message. Buttons controls which button(s) are shown (OK, Yes/No, etc); Icon controls the symbol shown next to the message (info, warning, error, question, or none).',
     params: [
       { key: 'message', label: 'Message', type: 'text', default: 'Message text' },
       { key: 'title', label: 'Title', type: 'text', default: 'Title' },
+      { key: 'buttons', label: 'Buttons', type: 'select', options: ['OK', 'OKCancel', 'YesNo', 'YesNoCancel', 'RetryCancel', 'AbortRetryIgnore'], default: 'OK' },
+      { key: 'icon', label: 'Icon', type: 'select', options: ['None', 'Information', 'Warning', 'Error', 'Question'], default: 'Information' },
     ],
   },
   {
@@ -1181,11 +1211,25 @@ const EVENT_SNIPPETS = [
       { key: 'enabled', label: 'Enabled', type: 'boolean', default: true },
     ],
   },
+  {
+    id: 'itemCheckedSetProp', label: 'When item is checked, set another control\'s property',
+    template: `if ($e.Index -eq {itemIndex} -and $e.NewValue -eq [System.Windows.Forms.CheckState]::Checked) {\n    {target}.{property} = {value}\n}`,
+    help: 'Ties ONE specific checkbox item to an action on another control - each item can drive something different. Example: checking "Turbo Mode" (item 0) sets ComboBox1.SelectedIndex to 1, while checking "Eco Mode" (item 1) sets it to 0 - just add one of these per item you want wired up. For text-type properties, include your own quotes in New Value (e.g. "Hello").',
+    onlyFor: ['ItemCheck'],
+    params: [
+      { key: 'itemIndex', label: 'When Item', type: 'itemIndex' },
+      { key: 'target', label: 'Target Control', type: 'control' },
+      { key: 'property', label: 'Property', type: 'select', options: ['Text', 'Enabled', 'Visible', 'Checked', 'SelectedIndex', 'Value'], default: 'Text' },
+      { key: 'value', label: 'New Value', type: 'text', default: '' },
+    ],
+  },
 ];
 
 // Fills a snippet's template with current parameter values - 'control'
 // params become a $VariableName reference, 'boolean' becomes $true/$false,
-// 'text' is inserted as-is (the template itself supplies any quotes).
+// 'itemIndex'/'select' insert their raw value (already the correct token,
+// e.g. an index number or an enum member name), 'text' is inserted as-is
+// (the template itself supplies any quotes).
 function computeSnippetCode(snippet, params) {
   let code = snippet.template;
   snippet.params.forEach(p => {
@@ -1856,6 +1900,17 @@ function buildLayoutRows(ctrl) {
   zRow.querySelector('input').addEventListener('change', (e) => { ctrl.z = Number(e.target.value) || 0; render(); });
   frag.appendChild(zRow);
 
+  const isDocked = ctrl.props.dock && ctrl.props.dock !== 'None';
+  const dockOrderRow = document.createElement('div');
+  dockOrderRow.className = 'prop-row';
+  dockOrderRow.innerHTML = `<label title="Docking priority among siblings docked to the same edge - lower numbers claim their space first. Set automatically when Dock is turned on (MenuStrip/ToolStrip/StatusStrip always order themselves sensibly), but you can override it here.">Dock Index</label><input type="number" value="${ctrl.dockOrder != null ? ctrl.dockOrder : ''}" placeholder="${isDocked ? '0' : 'not docked'}" ${isDocked ? '' : 'disabled'}>`;
+  dockOrderRow.querySelector('input').addEventListener('change', (e) => {
+    const v = e.target.value.trim();
+    ctrl.dockOrder = v === '' ? null : Number(v);
+    render();
+  });
+  frag.appendChild(dockOrderRow);
+
   return frag;
 }
 
@@ -2291,7 +2346,7 @@ function buildInteractFixedBlock(ctrl) {
   return wrap;
 }
 
-function buildSnippetParamRow(snippet, action, param, sync) {
+function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
   const row = document.createElement('div');
   row.className = 'snippet-param-row';
   const label = document.createElement('label');
@@ -2331,6 +2386,46 @@ function buildSnippetParamRow(snippet, action, param, sync) {
       render();
     });
     row.appendChild(sw);
+  } else if (param.type === 'select') {
+    const sel = document.createElement('select');
+    param.options.forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o;
+      opt.textContent = o;
+      if (action.params[param.key] === o) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', (e) => {
+      action.params[param.key] = e.target.value;
+      action.code = computeSnippetCode(snippet, action.params);
+      sync();
+      render();
+    });
+    row.appendChild(sel);
+  } else if (param.type === 'itemIndex') {
+    // Only makes sense scoped to THIS control's own Items list (e.g. a
+    // CheckedListBox's ItemCheck event referencing one of its own items).
+    const sel = document.createElement('select');
+    const items = (ctrl.props.items || '').split('\n').filter(Boolean);
+    if (!items.length) {
+      const opt = document.createElement('option');
+      opt.textContent = '(no items - add some in ' + ctrl.type + '-specific > Items)';
+      sel.appendChild(opt);
+    }
+    items.forEach((it, idx) => {
+      const opt = document.createElement('option');
+      opt.value = String(idx);
+      opt.textContent = `${idx}: ${it}`;
+      if (String(action.params[param.key]) === String(idx)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', (e) => {
+      action.params[param.key] = e.target.value;
+      action.code = computeSnippetCode(snippet, action.params);
+      sync();
+      render();
+    });
+    row.appendChild(sel);
   } else {
     const input = document.createElement('input');
     input.type = 'text';
@@ -2399,7 +2494,7 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
     card.appendChild(boundHead);
 
     if (!action.params) action.params = {};
-    boundSnippet.params.forEach(p => card.appendChild(buildSnippetParamRow(boundSnippet, action, p, sync)));
+    boundSnippet.params.forEach(p => card.appendChild(buildSnippetParamRow(ctrl, boundSnippet, action, p, sync)));
 
     const preview = document.createElement('pre');
     preview.className = 'snippet-code-preview';
@@ -2414,13 +2509,15 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
   const snippetRow = document.createElement('div');
   snippetRow.className = 'snippet-row';
   const sel = document.createElement('select');
-  EVENT_SNIPPETS.forEach(s => {
-    const o = document.createElement('option');
-    o.textContent = s.label;
-    o.dataset.id = s.id;
-    o.dataset.help = s.help;
-    sel.appendChild(o);
-  });
+  EVENT_SNIPPETS
+    .filter(s => !s.onlyFor || s.onlyFor.includes(evtName))
+    .forEach(s => {
+      const o = document.createElement('option');
+      o.textContent = s.label;
+      o.dataset.id = s.id;
+      o.dataset.help = s.help;
+      sel.appendChild(o);
+    });
   const infoBtn = document.createElement('button');
   infoBtn.type = 'button';
   infoBtn.className = 'option-info-btn';
