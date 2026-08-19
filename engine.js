@@ -1,19 +1,22 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.22
+    Version 1.23
 
     Revision:
 
-    1. Added initThemeSwitch()/applyTheme() to wire up the new toolbar
-    theme switcher (Standard/Dark/Light) - sets document.documentElement's
-    [data-theme] attribute, which styles.css's theme blocks key off of,
-    and persists the choice in localStorage so it survives a reload.
-    Separate from state.currentFormat (the WinForms/HTML/WPF/WinUI
-    canvas preview skin) - this only affects the app's own chrome.
+    1. Dark is now the default theme (DEFAULT_THEME constant) instead
+    of Standard - only applies when no theme has been saved yet.
+
+    2. Added FORMAT_STATUS as a single source of truth for each output
+    format's implementation status (done/partial/stub) and its tooltip
+    text - initFormatSwitch() now sets each language button's title
+    from it, and switchCodeTab()'s scaffold note reads from the same
+    object instead of duplicating the wording, so the two can't drift
+    out of sync.
 */
 
-const ENGINE_VERSION = '1.22';
+const ENGINE_VERSION = '1.23';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -821,8 +824,27 @@ function initCanvasDrop() {
    Wiring: toolbar, modals
    ========================================================================= */
 
+// Single source of truth for each output format's implementation status -
+// used both for the toolbar language buttons' tooltips and the Show Code
+// modal's scaffold note, so the wording can't drift out of sync between
+// the two places it's shown.
+const FORMAT_STATUS = {
+  winforms: { level: 'done', tooltip: 'Fully implemented and tested.' },
+  html: { level: 'done', tooltip: 'Fully implemented and tested.' },
+  wpf: {
+    level: 'partial',
+    tooltip: 'Partially implemented: first-pass scaffold. Top-level layout and common properties generate, but nested containers and full event binding are simplified.',
+  },
+  winui: {
+    level: 'stub',
+    tooltip: 'Not implemented yet: generates a page shell with a TODO list of your controls for manual porting.',
+  },
+};
+
 function initFormatSwitch() {
   document.querySelectorAll('.format-switch button').forEach(btn => {
+    const status = FORMAT_STATUS[btn.dataset.format];
+    if (status) btn.title = status.tooltip;
     btn.addEventListener('click', () => {
       document.querySelectorAll('.format-switch button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -837,6 +859,7 @@ function initFormatSwitch() {
 // canvas. This only affects the app's own toolbar/toolbox/properties-pane/
 // status-bar colors and persists across sessions via localStorage.
 const THEME_STORAGE_KEY = 'guiDesignerTheme';
+const DEFAULT_THEME = 'dark';
 
 function applyTheme(theme) {
   if (theme === 'standard') {
@@ -854,8 +877,8 @@ function initThemeSwitch() {
   document.querySelectorAll('.theme-switch button').forEach(btn => {
     btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
   });
-  let saved = 'standard';
-  try { saved = localStorage.getItem(THEME_STORAGE_KEY) || 'standard'; } catch (e) { /* storage unavailable - default to standard */ }
+  let saved = DEFAULT_THEME;
+  try { saved = localStorage.getItem(THEME_STORAGE_KEY) || DEFAULT_THEME; } catch (e) { /* storage unavailable - use default */ }
   applyTheme(saved);
 }
 
@@ -887,13 +910,10 @@ function initShowCodeModal() {
 function switchCodeTab(tab) {
   document.querySelectorAll('.code-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   const note = document.getElementById('scaffoldNote');
-  const scaffolded = tab === 'wpf' || tab === 'winui';
+  const status = FORMAT_STATUS[tab];
+  const scaffolded = status && status.level !== 'done';
   note.style.display = scaffolded ? 'block' : 'none';
-  note.textContent = tab === 'wpf'
-    ? 'WPF export is a first-pass scaffold: top-level layout and common properties generate, but nested containers and full event binding are simplified.'
-    : tab === 'winui'
-      ? 'WinUI export is a roadmap item: this is a page shell with a TODO list of your controls for manual porting.'
-      : '';
+  note.textContent = scaffolded ? status.tooltip : '';
   document.getElementById('codeOutput').textContent = GENERATORS[tab]();
 }
 
