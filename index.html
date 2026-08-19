@@ -1,11 +1,20 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.7
+    Version 1.8
 
-    Revision: added the theme switcher control (Standard/Dark/Light)
-    to the toolbar - a 3-way button group matching the existing
-    format-switch pattern. Wired up in engine.js.
+    Revision:
+
+    1. Restructured the toolbar: Language selector now has a "Language:"
+    label and is split into two grouped families - PowerShell (WPF,
+    WinForms, WinUI) and Web (HTML) - with WPF tagged "(default)" within
+    the PowerShell group. Per-button implementation-status tooltips are
+    set dynamically by engine.js's initFormatSwitch(), not hardcoded here.
+
+    2. Moved the theme switcher to the right side of the toolbar (right
+    of the divider, before the action icon buttons) with a "Theme:"
+    label, and changed its default active button to Dark to match the
+    new default theme.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -14,7 +23,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="styles.css">
-<script>window.PAGE_VERSION = '1.7';</script>
+<script>window.PAGE_VERSION = '1.8';</script>
 </head>
 <body>
 
@@ -27,19 +36,31 @@
       <span class="brand-sub">drafting table</span>
     </div>
     <div class="toolbar-divider"></div>
-    <div class="format-switch" id="formatSwitch">
-      <button data-format="winforms" class="active">WinForms</button>
-      <button data-format="html">HTML</button>
-      <button data-format="wpf">WPF</button>
-      <button data-format="winui">WinUI</button>
+    <div class="lang-select-group">
+      <span class="lang-select-label">Language:</span>
+      <div class="lang-family">
+        <span class="lang-family-label">PowerShell</span>
+        <div class="format-switch" id="formatSwitchPs">
+          <button data-format="wpf">WPF <span class="format-default-tag">(default)</span></button>
+          <button data-format="winforms" class="active">WinForms</button>
+          <button data-format="winui">WinUI</button>
+        </div>
+      </div>
+      <div class="lang-family">
+        <span class="lang-family-label">Web</span>
+        <div class="format-switch" id="formatSwitchWeb">
+          <button data-format="html">HTML</button>
+        </div>
+      </div>
     </div>
+    <div class="toolbar-spacer"></div>
+    <div class="toolbar-divider"></div>
+    <span class="theme-select-label">Theme:</span>
     <div class="theme-switch" id="themeSwitch">
-      <button data-theme="standard" class="active">Standard</button>
-      <button data-theme="dark">Dark</button>
+      <button data-theme="standard">Standard</button>
+      <button data-theme="dark" class="active">Dark</button>
       <button data-theme="light">Light</button>
     </div>
-    <div class="toolbar-divider"></div>
-    <div class="toolbar-spacer"></div>
     <button class="btn btn-ghost" id="btnUndo" title="Undo (Ctrl+Z)">&#8630;</button>
     <button class="btn btn-ghost" id="btnRedo" title="Redo (Ctrl+Y)">&#8631;</button>
     <button class="btn btn-ghost" id="btnObjects" title="Object list (find controls hidden behind others)">&#9776;</button>
