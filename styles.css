@@ -1,15 +1,21 @@
 /*
     styles.css
     Written by: Johnathon Largent
-    Version 1.19
+    Version 1.20
 
     Revision:
 
-    1. Added a hard rule that the properties pane can never scroll
-    horizontally: overflow-x:hidden on .props-pane, plus min-width:0 on
-    every descendant so flex children can actually shrink below their
-    content's natural size instead of forcing overflow. Should prevent
-    this whole class of bug going forward, not just fix one instance.
+    1. Added a theme switcher: Standard (default, unchanged - the
+    original :root palette below is untouched), Dark, and Light. Dark
+    and Light are opt-in [data-theme] overrides of the same --bp-*
+    variables plus a few new ones (--bp-heading, --bp-card-radius,
+    --bp-btn-bg/-hover/-disabled) used only inside those theme blocks,
+    so Standard's colors, borders, and flush panel layout can't change.
+    Dark uses the requested warm near-black/steel-grey palette; Light
+    is a new brighter palette in the same warm-neutral family (no
+    dominant blue, matching the standing black/grey/silver/steel/red/
+    green preference). Card-style panels (border + 8px radius + gap)
+    and the dedicated button colors only activate under [data-theme].
 
     2. Replaced the old .toolstrip-item-icon-select/-preview styles
     with .icon-picker/.icon-picker-btn/.icon-picker-popover/
@@ -297,7 +303,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.19';
+  --stylesheet-version: '1.20';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -325,6 +331,123 @@
 
   --radius-sm: 3px;
   --radius-md: 6px;
+}
+
+/* ---------- Theme switcher ----------
+   Standard theme (default, no [data-theme] attribute) is the original
+   "blueprint" palette above, completely untouched. Dark and Light are
+   opt-in overrides of the SAME --bp-* variables plus a few new ones
+   (--bp-heading, --bp-card-radius, --bp-btn-bg/-hover/-disabled) that
+   only exist inside these theme blocks, so nothing here can change how
+   Standard looks. The card/pane surfaces + gap treatment only applies
+   under [data-theme], so Standard's flush edge-to-edge panel layout is
+   also untouched. */
+
+:root[data-theme="dark"] {
+  --bp-bg: #1a1a18;
+  --bp-panel: #242422;
+  --bp-panel-raised: #242422;
+  --bp-border: #3d3d3a;
+  --bp-border-soft: #333330;
+  --bp-text: #faf9f5;
+  --bp-heading: #c8ccd0;
+  --bp-text-muted: #b0aea3;
+  --bp-text-faint: #8a8778;
+
+  --bp-card-radius: 8px;
+  --bp-btn-bg: #52565c;
+  --bp-btn-bg-hover: #6b7076;
+  --bp-btn-bg-disabled: #47463f;
+}
+
+:root[data-theme="light"] {
+  --bp-bg: #f5f4ef;
+  --bp-panel: #fdfcf9;
+  --bp-panel-raised: #fdfcf9;
+  --bp-border: #d9d7cd;
+  --bp-border-soft: #e6e4da;
+  --bp-text: #201f1c;
+  --bp-heading: #4b4e52;
+  --bp-text-muted: #6f6d63;
+  --bp-text-faint: #8a8778;
+
+  --bp-card-radius: 8px;
+  --bp-btn-bg: #dcdfe1;
+  --bp-btn-bg-hover: #c7cbce;
+  --bp-btn-bg-disabled: #ece9e0;
+}
+
+/* Card/pane treatment - only kicks in once a theme sets --bp-card-radius,
+   so Standard's current flush panels are unaffected. */
+[data-theme="dark"] .app-shell,
+[data-theme="light"] .app-shell {
+  gap: 10px;
+  padding: 10px;
+  background: var(--bp-bg);
+}
+
+[data-theme="dark"] .toolbar,
+[data-theme="light"] .toolbar,
+[data-theme="dark"] .toolbox,
+[data-theme="light"] .toolbox,
+[data-theme="dark"] .props-pane,
+[data-theme="light"] .props-pane,
+[data-theme="dark"] .status-bar,
+[data-theme="light"] .status-bar {
+  border: 1px solid var(--bp-border);
+  border-radius: var(--bp-card-radius);
+}
+
+[data-theme="dark"] .modal,
+[data-theme="light"] .modal {
+  border-radius: var(--bp-card-radius);
+}
+
+[data-theme="dark"] .modal-header h2,
+[data-theme="light"] .modal-header h2 {
+  color: var(--bp-heading);
+}
+
+/* Dedicated button colors - only the solid .btn family (toolbar/modal
+   action buttons), not every small in-pane stepper control, so the
+   change stays contained to what reads as an actual "button". */
+[data-theme="dark"] .btn,
+[data-theme="light"] .btn {
+  background: var(--bp-btn-bg);
+}
+[data-theme="dark"] .btn:hover,
+[data-theme="light"] .btn:hover {
+  background: var(--bp-btn-bg-hover);
+}
+[data-theme="dark"] .btn:disabled,
+[data-theme="light"] .btn:disabled {
+  background: var(--bp-btn-bg-disabled);
+  color: var(--bp-text-faint);
+  cursor: not-allowed;
+}
+
+/* Theme switch control itself, in the toolbar */
+.theme-switch {
+  display: flex;
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+.theme-switch button {
+  background: transparent;
+  border: none;
+  color: var(--bp-text-muted);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.theme-switch button.active {
+  background: var(--bp-accent-2-dim);
+  color: var(--bp-accent-2);
 }
 
 * { box-sizing: border-box; }
