@@ -1,17 +1,19 @@
 /*
     engine.js
     Written by: Johnathon Largent
-    Version 1.21
+    Version 1.22
 
     Revision:
 
-    1. Wired up the status bar's "engine v1.0" text (statusVersion) -
-    it was dead markup that no JS ever touched. renderStatus() now sets
-    it from ENGINE_VERSION on every render, the same source of truth
-    the About modal already reads from.
+    1. Added initThemeSwitch()/applyTheme() to wire up the new toolbar
+    theme switcher (Standard/Dark/Light) - sets document.documentElement's
+    [data-theme] attribute, which styles.css's theme blocks key off of,
+    and persists the choice in localStorage so it survives a reload.
+    Separate from state.currentFormat (the WinForms/HTML/WPF/WinUI
+    canvas preview skin) - this only affects the app's own chrome.
 */
 
-const ENGINE_VERSION = '1.21';
+const ENGINE_VERSION = '1.22';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -830,6 +832,33 @@ function initFormatSwitch() {
   });
 }
 
+// UI chrome theme (Standard/Dark/Light) - separate from state.currentFormat,
+// which controls the WinForms/HTML/WPF/WinUI PREVIEW skin inside the design
+// canvas. This only affects the app's own toolbar/toolbox/properties-pane/
+// status-bar colors and persists across sessions via localStorage.
+const THEME_STORAGE_KEY = 'guiDesignerTheme';
+
+function applyTheme(theme) {
+  if (theme === 'standard') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+  document.querySelectorAll('.theme-switch button').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === theme);
+  });
+  try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { /* storage unavailable - theme just won't persist */ }
+}
+
+function initThemeSwitch() {
+  document.querySelectorAll('.theme-switch button').forEach(btn => {
+    btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
+  });
+  let saved = 'standard';
+  try { saved = localStorage.getItem(THEME_STORAGE_KEY) || 'standard'; } catch (e) { /* storage unavailable - default to standard */ }
+  applyTheme(saved);
+}
+
 function initShowCodeModal() {
   const overlay = document.getElementById('codeModalOverlay');
   document.getElementById('btnShowCode').addEventListener('click', () => {
@@ -987,6 +1016,7 @@ function initEngine() {
   initToolbox();
   initCanvasDrop();
   initFormatSwitch();
+  initThemeSwitch();
   initShowCodeModal();
   initAboutModal();
   initObjectsModal();
