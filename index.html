@@ -1,20 +1,18 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.8
+    Version 1.10
 
     Revision:
 
-    1. Restructured the toolbar: Language selector now has a "Language:"
-    label and is split into two grouped families - PowerShell (WPF,
-    WinForms, WinUI) and Web (HTML) - with WPF tagged "(default)" within
-    the PowerShell group. Per-button implementation-status tooltips are
-    set dynamically by engine.js's initFormatSwitch(), not hardcoded here.
-
-    2. Moved the theme switcher to the right side of the toolbar (right
-    of the divider, before the action icon buttons) with a "Theme:"
-    label, and changed its default active button to Dark to match the
-    new default theme.
+    1. Updated the stylesheet link and every script tag to the renamed
+    project files (Engine.js, Render.js, Properties-Pane.js,
+    Control-Data.js, Styles.css, CodeGen.js, CodeGen-HTML.js,
+    CodeGen-WinForms.js, CodeGen-WPF.js, CodeGen-WinUI.js) - this file
+    keeps its own exact name since GitHub Pages and browsers look for
+    "index.html" specifically. Also removed the About modal's "Codegen
+    (shared) version" row since codegen-shared.js was merged back into
+    CodeGen.js (one CODEGEN_VERSION again, not a separate shared one).
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -22,8 +20,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
-<link rel="stylesheet" href="styles.css">
-<script>window.PAGE_VERSION = '1.8';</script>
+<link rel="stylesheet" href="Styles.css">
+<script>window.PAGE_VERSION = '1.10';</script>
 </head>
 <body>
 
@@ -41,7 +39,7 @@
       <div class="lang-family">
         <span class="lang-family-label">PowerShell</span>
         <div class="format-switch" id="formatSwitchPs">
-          <button data-format="wpf">WPF <span class="format-default-tag">(default)</span></button>
+          <button data-format="wpf">WPF</button>
           <button data-format="winforms" class="active">WinForms</button>
           <button data-format="winui">WinUI</button>
         </div>
@@ -142,6 +140,10 @@
         <dt>Engine version</dt><dd id="aboutEngineVersion">1.0</dd>
         <dt>Control data version</dt><dd id="aboutControlDataVersion">1.0</dd>
         <dt>Codegen version</dt><dd id="aboutCodegenVersion">1.0</dd>
+        <dt>Codegen (HTML) version</dt><dd id="aboutCodegenHtmlVersion">1.0</dd>
+        <dt>Codegen (WinForms) version</dt><dd id="aboutCodegenWinFormsVersion">1.0</dd>
+        <dt>Codegen (WPF) version</dt><dd id="aboutCodegenWpfVersion">1.0</dd>
+        <dt>Codegen (WinUI) version</dt><dd id="aboutCodegenWinUiVersion">1.0</dd>
         <dt>Render version</dt><dd id="aboutRenderVersion">1.0</dd>
         <dt>Properties pane version</dt><dd id="aboutPropsPaneVersion">1.0</dd>
         <dt>Stylesheet version</dt><dd id="aboutStyleVersion">1.0</dd>
@@ -179,10 +181,14 @@
   </div>
 </div>
 
-<script src="control-data.js"></script>
-<script src="codegen.js"></script>
-<script src="render.js"></script>
-<script src="properties-pane.js"></script>
-<script src="engine.js"></script>
+<script src="Control-Data.js"></script>
+<script src="CodeGen-HTML.js"></script>
+<script src="CodeGen-WinForms.js"></script>
+<script src="CodeGen-WPF.js"></script>
+<script src="CodeGen-WinUI.js"></script>
+<script src="CodeGen.js"></script>
+<script src="Render.js"></script>
+<script src="Properties-Pane.js"></script>
+<script src="Engine.js"></script>
 </body>
 </html>
