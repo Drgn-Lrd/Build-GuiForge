@@ -1,11 +1,11 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.5
+    Version 1.7
 
-    Revision: added Control Data version and Codegen version rows to
-    the About modal - they were never added when those two files were
-    split out of engine.js, so the modal was silently missing them.
+    Revision: added the theme switcher control (Standard/Dark/Light)
+    to the toolbar - a 3-way button group matching the existing
+    format-switch pattern. Wired up in engine.js.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -14,7 +14,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="styles.css">
-<script>window.PAGE_VERSION = '1.5';</script>
+<script>window.PAGE_VERSION = '1.7';</script>
 </head>
 <body>
 
@@ -33,6 +33,12 @@
       <button data-format="wpf">WPF</button>
       <button data-format="winui">WinUI</button>
     </div>
+    <div class="theme-switch" id="themeSwitch">
+      <button data-theme="standard" class="active">Standard</button>
+      <button data-theme="dark">Dark</button>
+      <button data-theme="light">Light</button>
+    </div>
+    <div class="toolbar-divider"></div>
     <div class="toolbar-spacer"></div>
     <button class="btn btn-ghost" id="btnUndo" title="Undo (Ctrl+Z)">&#8630;</button>
     <button class="btn btn-ghost" id="btnRedo" title="Redo (Ctrl+Y)">&#8631;</button>
@@ -115,6 +121,8 @@
         <dt>Engine version</dt><dd id="aboutEngineVersion">1.0</dd>
         <dt>Control data version</dt><dd id="aboutControlDataVersion">1.0</dd>
         <dt>Codegen version</dt><dd id="aboutCodegenVersion">1.0</dd>
+        <dt>Render version</dt><dd id="aboutRenderVersion">1.0</dd>
+        <dt>Properties pane version</dt><dd id="aboutPropsPaneVersion">1.0</dd>
         <dt>Stylesheet version</dt><dd id="aboutStyleVersion">1.0</dd>
       </dl>
     </div>
@@ -152,6 +160,8 @@
 
 <script src="control-data.js"></script>
 <script src="codegen.js"></script>
+<script src="render.js"></script>
+<script src="properties-pane.js"></script>
 <script src="engine.js"></script>
 </body>
 </html>
