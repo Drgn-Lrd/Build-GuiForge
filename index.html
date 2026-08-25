@@ -1,18 +1,18 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.10
+    Version 1.11
 
     Revision:
 
-    1. Updated the stylesheet link and every script tag to the renamed
-    project files (Engine.js, Render.js, Properties-Pane.js,
-    Control-Data.js, Styles.css, CodeGen.js, CodeGen-HTML.js,
-    CodeGen-WinForms.js, CodeGen-WPF.js, CodeGen-WinUI.js) - this file
-    keeps its own exact name since GitHub Pages and browsers look for
-    "index.html" specifically. Also removed the About modal's "Codegen
-    (shared) version" row since codegen-shared.js was merged back into
-    CodeGen.js (one CODEGEN_VERSION again, not a separate shared one).
+    1. WPF is now the default format: its toolbar button is the active
+    one in the PowerShell language group (was WinForms), and it's the
+    default-active tab in the Show Code modal. Added the modal's new
+    WPF single-file/dual-file toggle (#wpfFileModeSwitch), the editable
+    XAML filename row (#wpfXamlFilenameRow), and a second labeled code
+    box (#xamlOutputLabel/#xamlOutput) plus its own copy button
+    (#btnCopyXaml) for dual-file mode's external .xaml content - wired
+    up in Engine.js, styled in Styles.css.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -21,7 +21,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.10';</script>
+<script>window.PAGE_VERSION = '1.11';</script>
 </head>
 <body>
 
@@ -39,8 +39,8 @@
       <div class="lang-family">
         <span class="lang-family-label">PowerShell</span>
         <div class="format-switch" id="formatSwitchPs">
-          <button data-format="wpf">WPF</button>
-          <button data-format="winforms" class="active">WinForms</button>
+          <button data-format="wpf" class="active">WPF</button>
+          <button data-format="winforms">WinForms</button>
           <button data-format="winui">WinUI</button>
         </div>
       </div>
@@ -111,15 +111,30 @@
     </div>
     <div class="modal-body">
       <div class="code-tabs">
-        <button data-tab="winforms" class="active">WinForms (PowerShell)</button>
+        <button data-tab="winforms">WinForms (PowerShell)</button>
         <button data-tab="html">HTML</button>
-        <button data-tab="wpf">WPF (XAML)</button>
+        <button data-tab="wpf" class="active">WPF (XAML)</button>
         <button data-tab="winui">WinUI (scaffold)</button>
       </div>
+      <div class="wpf-file-controls" id="wpfFileControls" style="display:none;">
+        <div class="format-switch" id="wpfFileModeSwitch">
+          <button data-mode="single" class="active">Single file (Embedded XAML)</button>
+          <button data-mode="dual">Dual file (External XAML)</button>
+        </div>
+        <div class="wpf-xaml-filename-row" id="wpfXamlFilenameRow" style="display:none;">
+          <label for="wpfXamlFilenameInput">XAML filename</label>
+          <input type="text" id="wpfXamlFilenameInput" placeholder="MainWindow.xaml">
+          <span class="wpf-xaml-filename-error" id="wpfXamlFilenameError"></span>
+        </div>
+      </div>
       <div class="scaffold-note" id="scaffoldNote" style="display:none;"></div>
+      <div class="code-output-label" id="codeOutputPrimaryLabel" style="display:none;">PowerShell (.ps1)</div>
       <pre class="code-output" id="codeOutput"></pre>
+      <div class="code-output-label" id="xamlOutputLabel" style="display:none;">XAML file</div>
+      <pre class="code-output" id="xamlOutput" style="display:none;"></pre>
     </div>
     <div class="modal-footer">
+      <button class="btn" id="btnCopyXaml" style="display:none;">Copy XAML</button>
       <button class="btn" id="btnCopyCode">Copy code</button>
     </div>
   </div>
