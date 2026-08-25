@@ -1,27 +1,16 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.22
+    Version 1.23
 
     Revision:
 
-    1. Fixed a version-tracking mistake from the last two edits: the
-    header comment was never updated to match --stylesheet-version
-    (stuck at 1.20 while the variable moved to 1.21), and the changelog
-    still had an old, unrelated entry left over instead of being fully
-    replaced. This entry now correctly covers everything since 1.19:
-    added the Standard/Dark/Light theme switcher ([data-theme] overrides
-    of the --bp-* variables, plus --bp-heading and --bp-btn-bg/-hover/
-    -disabled used only in the Dark/Light blocks); gave every theme
-    (including Standard, which had none before) a --bp-card-radius of
-    3px plus a real border and a 10px gap on the toolbar/toolbox/
-    props-pane/status-bar/modal, so they read as cards; and added the
-    .theme-switch/.lang-select-group/.lang-family/.lang-family-label
-    rules for the restructured toolbar.
-
-    2. Removed .format-default-tag - the "(default)" button text it
-    styled was never supposed to exist and has been removed from
-    index.html.
+    1. Added styles for the Show Code modal's new WPF single/dual-file
+    controls: .wpf-file-controls (row holding the mode toggle, reuses
+    .format-switch for the buttons themselves), .wpf-xaml-filename-row
+    and its text input/error text (.input-error border state, palette
+    red for the message), and .code-output-label for the "PowerShell
+    (.ps1)" / "XAML file" headers above each box in dual-file mode.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -304,7 +293,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.22';
+  --stylesheet-version: '1.23';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -1386,6 +1375,49 @@ body.picking-mode .ctrl { cursor: crosshair !important; }
   font-size: 11.5px; cursor: pointer;
 }
 .code-tabs button.active { color: var(--bp-accent); border-color: var(--bp-accent-dim); background: rgba(242,177,52,0.08); }
+
+.wpf-file-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.wpf-xaml-filename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+}
+.wpf-xaml-filename-row label {
+  font-size: 11px;
+  color: var(--bp-text-faint);
+  white-space: nowrap;
+}
+.wpf-xaml-filename-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bp-panel);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: 11.5px;
+  font-family: var(--bp-font-mono);
+}
+.wpf-xaml-filename-row input[type="text"].input-error { border-color: #e5484d; }
+.wpf-xaml-filename-error { font-size: 10.5px; color: #e5484d; }
+
+.code-output-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bp-text-faint);
+  margin: 8px 0 4px;
+}
+.code-output-label:first-of-type { margin-top: 0; }
 
 .code-output {
   background: #0b0d10; border: 1px solid var(--bp-border);
