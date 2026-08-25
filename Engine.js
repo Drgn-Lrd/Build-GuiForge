@@ -1,16 +1,25 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.25
+    Version 1.26
 
     Revision:
 
-    1. Removed the About modal's "Codegen (shared) version" row and its
-    JS wiring - codegen-shared.js was merged back into CodeGen.js, so
-    there's one CODEGEN_VERSION again, not a separate shared one.
+    1. WPF is now the default format: state.currentFormat starts as
+    'wpf' (was 'winforms') and FORMAT_STATUS.wpf is 'done' now that
+    CodeGen-WPF.js is at parity with CodeGen-WinForms.js - its scaffold
+    note no longer shows.
+
+    2. Show Code modal's WPF tab now wires up the single-file (embedded
+    XAML) vs dual-file (external XAML) toggle, the editable XAML
+    filename field (live-validated via isValidWpfXamlPath, committed via
+    setWpfXamlFileName), and the second code box that shows the
+    generated .xaml content in dual mode - all backed by
+    CodeGen-WPF.js's wpfFileMode/wpfXamlFileNameOverride state, which is
+    view-only and isn't part of the saved project.
 */
 
-const ENGINE_VERSION = '1.25';
+const ENGINE_VERSION = '1.26';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -28,7 +37,7 @@ const state = {
   gridSize: 5,
   snapEnabled: true,
   nudgeStep: 5,
-  currentFormat: 'winforms',
+  currentFormat: 'wpf',
   sectionOpen: {},       // title -> bool, persists collapse state across re-renders
   undoStack: [],
   redoStack: [],
@@ -826,10 +835,7 @@ function initCanvasDrop() {
 const FORMAT_STATUS = {
   winforms: { level: 'done', tooltip: 'Fully implemented and tested.' },
   html: { level: 'done', tooltip: 'Fully implemented and tested.' },
-  wpf: {
-    level: 'partial',
-    tooltip: 'Partially implemented: first-pass scaffold. Top-level layout and common properties generate, but nested containers and full event binding are simplified.',
-  },
+  wpf: { level: 'done', tooltip: 'Fully implemented and tested.' },
   winui: {
     level: 'stub',
     tooltip: 'Not implemented yet: generates a page shell with a TODO list of your controls for manual porting.',
@@ -881,7 +887,7 @@ function initShowCodeModal() {
   const overlay = document.getElementById('codeModalOverlay');
   document.getElementById('btnShowCode').addEventListener('click', () => {
     overlay.classList.add('open');
-    switchCodeTab(state.currentFormat === 'winforms' ? 'winforms' : state.currentFormat);
+    switchCodeTab(state.currentFormat);
   });
   document.getElementById('codeModalClose').addEventListener('click', () => overlay.classList.remove('open'));
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
@@ -900,6 +906,43 @@ function initShowCodeModal() {
       setTimeout(() => { btn.textContent = orig; }, 1200);
     } catch (err) { /* clipboard may be unavailable in this context */ }
   });
+
+  document.getElementById('btnCopyXaml').addEventListener('click', async () => {
+    const text = document.getElementById('xamlOutput').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById('btnCopyXaml');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1200);
+    } catch (err) { /* clipboard may be unavailable in this context */ }
+  });
+
+  document.querySelectorAll('#wpfFileModeSwitch button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#wpfFileModeSwitch button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      setWpfFileMode(btn.dataset.mode);
+      switchCodeTab('wpf');
+    });
+  });
+
+  const xamlInput = document.getElementById('wpfXamlFilenameInput');
+  const xamlError = document.getElementById('wpfXamlFilenameError');
+  xamlInput.addEventListener('input', () => {
+    const val = xamlInput.value.trim();
+    const bad = val && !isValidWpfXamlPath(val);
+    xamlInput.classList.toggle('input-error', bad);
+    xamlError.textContent = bad ? 'Use a filename or relative path ending in .xaml, e.g. ui.xaml or ./sub/ui.xaml' : '';
+  });
+  xamlInput.addEventListener('change', () => {
+    const result = setWpfXamlFileName(xamlInput.value);
+    xamlInput.classList.toggle('input-error', !result.ok);
+    xamlError.textContent = result.ok ? '' : result.error;
+    if (result.ok) xamlInput.value = result.value;
+    switchCodeTab('wpf');
+  });
+  xamlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') xamlInput.blur(); });
 }
 
 function switchCodeTab(tab) {
@@ -909,6 +952,22 @@ function switchCodeTab(tab) {
   const scaffolded = status && status.level !== 'done';
   note.style.display = scaffolded ? 'block' : 'none';
   note.textContent = scaffolded ? status.tooltip : '';
+
+  const isWpf = tab === 'wpf';
+  const dualMode = isWpf && getWpfFileMode() === 'dual';
+  document.getElementById('wpfFileControls').style.display = isWpf ? 'flex' : 'none';
+  document.getElementById('wpfXamlFilenameRow').style.display = dualMode ? 'flex' : 'none';
+  document.getElementById('codeOutputPrimaryLabel').style.display = isWpf ? 'block' : 'none';
+  document.getElementById('codeOutputPrimaryLabel').textContent = dualMode ? 'PowerShell (.ps1)' : 'PowerShell (.ps1, embedded XAML)';
+  document.getElementById('xamlOutputLabel').style.display = dualMode ? 'block' : 'none';
+  document.getElementById('xamlOutput').style.display = dualMode ? 'block' : 'none';
+  document.getElementById('btnCopyXaml').style.display = dualMode ? 'inline-block' : 'none';
+
+  if (dualMode) {
+    document.getElementById('wpfXamlFilenameInput').value = currentWpfXamlFileName();
+    document.getElementById('xamlOutput').textContent = generateWPFXaml();
+  }
+
   document.getElementById('codeOutput').textContent = GENERATORS[tab]();
 }
 
