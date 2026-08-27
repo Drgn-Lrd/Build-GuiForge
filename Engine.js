@@ -1,25 +1,22 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.26
+    Version 1.27
 
     Revision:
 
-    1. WPF is now the default format: state.currentFormat starts as
-    'wpf' (was 'winforms') and FORMAT_STATUS.wpf is 'done' now that
-    CodeGen-WPF.js is at parity with CodeGen-WinForms.js - its scaffold
-    note no longer shows.
-
-    2. Show Code modal's WPF tab now wires up the single-file (embedded
-    XAML) vs dual-file (external XAML) toggle, the editable XAML
-    filename field (live-validated via isValidWpfXamlPath, committed via
-    setWpfXamlFileName), and the second code box that shows the
-    generated .xaml content in dual mode - all backed by
-    CodeGen-WPF.js's wpfFileMode/wpfXamlFileNameOverride state, which is
-    view-only and isn't part of the saved project.
+    1. Fixed the Objects modal (hamburger menu) never listing the Form
+    itself, which made it impossible to re-select the Form/Main Panel
+    once child controls fully covered the canvas (e.g. several Dock=Fill
+    controls left no empty canvas area to click). A "Main Panel" row now
+    always appears at the top of the Objects list; clicking it behaves
+    exactly like clicking empty canvas (selectedId set to null, Form
+    properties shown). It's excluded during "Select Control" pick mode
+    (e.g. wiring another control's property) since the Form isn't a
+    valid target for that flow.
 */
 
-const ENGINE_VERSION = '1.26';
+const ENGINE_VERSION = '1.27';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -1021,6 +1018,27 @@ function initTopToolbar() {
 function buildObjectsList() {
   const container = document.getElementById('objectsList');
   container.innerHTML = '';
+
+  // Root "Main Panel" (the Form itself) - was previously unreachable here
+  // once child controls fully covered it (e.g. Dock=Fill left no empty
+  // canvas to click), since there was no way to re-select the form to
+  // get back to its properties. Selecting it mirrors clicking empty
+  // canvas: selectedId becomes null and the props pane shows Form props.
+  // Not offered as a "Select Control" pick-mode target (e.g. wiring
+  // another control's property) since the Form isn't a valid target for
+  // that flow - it's only here so the form can always be re-selected.
+  if (!state.pickingCallback) {
+    const formRow = document.createElement('div');
+    formRow.className = 'objects-row' + (state.selectedId === null ? ' active' : '');
+    formRow.style.paddingLeft = '10px';
+    formRow.innerHTML = `<span class="objects-row-name">Main Panel</span><span class="objects-row-type">Form</span>`;
+    formRow.title = 'Click to select the form.';
+    formRow.addEventListener('click', () => {
+      selectControl(null);
+      document.getElementById('objectsModalOverlay').classList.remove('open');
+    });
+    container.appendChild(formRow);
+  }
 
   function renderLevel(parentId, tabPage, depth) {
     const kids = state.controls
