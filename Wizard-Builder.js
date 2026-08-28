@@ -1,31 +1,19 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.5
 
     Revision:
 
-    1. Moved page-reorder drag handles onto the wizard itself: the
-    Contents nav strip's items (buildWizardContentsNav) are now
-    draggable and reorder the pages array directly on the canvas, the
-    same as the Pages editor's grip handle but without leaving the
-    wizard - reordering there was a properties-pane-only feature before,
-    which wasn't what was asked for. Only reachable when Contents is
-    Horizontal or Vertical, since that's the only on-canvas page list a
-    wizard has.
-
-    2. createWizardFromSetup now sizes the wizard to its actual filled
-    bounds (via containerClientRect, the same math the dock engine uses)
-    BEFORE creating the footer buttons and sets Dock=Fill - a wizard
-    conventionally takes over its whole host rather than sitting as a
-    small nested rectangle, and this way the footer buttons are
-    positioned for the real final size instead of the small pre-dock
-    default. Also, double-clicking the Wizard tool now adds it into
-    whichever container is currently selected (matching what dragging
-    onto that container would do) instead of always going to the Form.
+    1. Added the actual thing that was asked for: drag handles (plus
+    Up/Down buttons) in the guided SETUP MODAL's page list, so pages can
+    be reordered before the wizard is ever created - e.g. add a 4th page,
+    drag it to 3rd, then hit Create Wizard. The Contents-nav and Pages-
+    editor reordering added earlier were both AFTER-creation tools; this
+    is the before-creation one that was actually meant.
 */
 
-const WIZARD_BUILDER_VERSION = '1.4';
+const WIZARD_BUILDER_VERSION = '1.5';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -223,6 +211,51 @@ function renderWizardSetupList() {
     const row = document.createElement('div');
     row.className = 'tab-editor-item';
 
+    // Drag-and-drop reorder - this is the actual point of the setup
+    // modal: pick your page count/templates BEFORE creating anything,
+    // reordering a page you just added (e.g. it landed 4th, drag it to
+    // 3rd) without having to fix it up afterward in the Pages editor.
+    row.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('text/wizard-setup-page-index')) { e.preventDefault(); row.classList.add('drag-over'); }
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      if (!e.dataTransfer.types.includes('text/wizard-setup-page-index')) return;
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const fromIdx = Number(e.dataTransfer.getData('text/wizard-setup-page-index'));
+      if (Number.isNaN(fromIdx) || fromIdx === i) return;
+      wizardSetupDraftPages.splice(i, 0, wizardSetupDraftPages.splice(fromIdx, 1)[0]);
+      renderWizardSetupList();
+    });
+
+    const grip = document.createElement('div');
+    grip.className = 'wizard-page-grip';
+    grip.draggable = true;
+    grip.textContent = '\u2630';
+    grip.title = 'Drag to reorder this page.';
+    grip.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/wizard-setup-page-index', String(i));
+      row.classList.add('dragging');
+    });
+    grip.addEventListener('dragend', () => row.classList.remove('dragging'));
+
+    const reorder = document.createElement('div');
+    reorder.className = 'wizard-page-reorder';
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button'; upBtn.className = 'btn btn-ghost'; upBtn.textContent = '\u25B2';
+    upBtn.title = 'Move this page earlier.';
+    upBtn.disabled = i === 0;
+    upBtn.addEventListener('click', () => { wizardSetupDraftPages.splice(i - 1, 0, wizardSetupDraftPages.splice(i, 1)[0]); renderWizardSetupList(); });
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button'; downBtn.className = 'btn btn-ghost'; downBtn.textContent = '\u25BC';
+    downBtn.title = 'Move this page later.';
+    downBtn.disabled = i === wizardSetupDraftPages.length - 1;
+    downBtn.addEventListener('click', () => { wizardSetupDraftPages.splice(i + 1, 0, wizardSetupDraftPages.splice(i, 1)[0]); renderWizardSetupList(); });
+    reorder.appendChild(upBtn);
+    reorder.appendChild(downBtn);
+
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.className = 'menu-editor-label-input';
@@ -244,6 +277,8 @@ function renderWizardSetupList() {
       renderWizardSetupList();
     });
 
+    row.appendChild(grip);
+    row.appendChild(reorder);
     row.appendChild(nameInput);
     row.appendChild(tplBadge);
     row.appendChild(delBtn);
