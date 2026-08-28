@@ -1,19 +1,21 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
     Revision:
 
-    1. Added the Wizard container's canvas rendering: a plain body
-    background (no clickable header strip - page switching happens via
-    the Pages editor's Show/Active button, not on-canvas), a small
-    non-interactive page indicator overlay, and content filtering that
-    shows the active page's children plus any footer children (Back/Next/
-    Cancel etc.) regardless of which page is active.
+    1. Split the Wizard's canvas content into two layers: page content
+    (offset/shrunk to make room for the optional Contents nav strip) and
+    always-visible footer content (full bounds, spans under the nav
+    strip - matches how a real installer's button bar works). Added the
+    Contents nav strip itself (buildWizardContentsNav, Wizard-Builder.js)
+    - a clickable Horizontal tab-style strip or Vertical sidebar of page
+    names, same click-to-switch pattern already used by TabControl's
+    header.
 */
 
-const RENDER_VERSION = '1.1';
+const RENDER_VERSION = '1.2';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -49,20 +51,33 @@ function renderControl(c) {
       .forEach(ch => content.appendChild(renderControl(ch)));
     el.appendChild(content);
   } else if (def.isWizard) {
-    // No clickable tab strip here - a real wizard doesn't show page tabs
-    // to the end user, so the design surface doesn't imply one either.
-    // Only a plain background plus a non-interactive "Page X of Y" label.
+    // No clickable tab strip here (unless Contents is Horizontal/Vertical,
+    // which IS clickable, same click pattern as TabControl's header) - a
+    // plain wizard doesn't show page tabs to the end user, so the design
+    // surface doesn't imply one either. Footer children (Back/Next/Cancel,
+    // etc.) render in their own full-bounds layer on top, since a real
+    // installer's button bar spans under the Contents nav strip too -
+    // page content instead renders in a layer offset/shrunk to make room
+    // for that strip.
     const body = document.createElement('div');
     body.className = 'wizard-body';
     el.appendChild(body);
+    el.appendChild(buildWizardContentsNav(c));
     el.appendChild(buildWizardPageIndicator(c));
 
-    const content = document.createElement('div');
-    content.className = 'wizard-content';
+    const pageContent = document.createElement('div');
+    pageContent.className = 'wizard-content wizard-content-' + (c.props.contentsStyle || 'None').toLowerCase();
     state.controls
-      .filter(ch => ch.parentId === c.id && (ch.wizardFooter || ch.tabPage === c.activeTabId))
-      .forEach(ch => content.appendChild(renderControl(ch)));
-    el.appendChild(content);
+      .filter(ch => ch.parentId === c.id && !ch.wizardFooter && ch.tabPage === c.activeTabId)
+      .forEach(ch => pageContent.appendChild(renderControl(ch)));
+    el.appendChild(pageContent);
+
+    const footerContent = document.createElement('div');
+    footerContent.className = 'wizard-footer-content';
+    state.controls
+      .filter(ch => ch.parentId === c.id && ch.wizardFooter)
+      .forEach(ch => footerContent.appendChild(renderControl(ch)));
+    el.appendChild(footerContent);
   } else {
     const inner = document.createElement('div');
     inner.className = 'ctrl-inner';

@@ -11,9 +11,13 @@
     set; real instances are normally created via the guided setup modal
     in Wizard-Builder.js, which overwrites the pages array with the
     user's chosen pages/templates.
+
+    2. Added the Wizard's Contents property (None/Horizontal/Vertical) -
+    an optional step-list nav strip (tab-strip along the top, or a
+    sidebar down the left) modeled on real installer wizards.
 */
 
-const CONTROL_DATA_VERSION = '1.4';
+const CONTROL_DATA_VERSION = '1.5';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -363,6 +367,7 @@ const CONTROL_DEFS = {
     label: 'Multipage Wizard', glyph: 'Wz', defaultW: 460, defaultH: 320,
     props: [
       ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
+      ['contentsStyle', 'Contents', 'select', 'None', { options: ['None', 'Horizontal', 'Vertical'] }],
     ],
     events: [],
     isContainer: true,

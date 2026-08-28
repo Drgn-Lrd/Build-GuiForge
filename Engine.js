@@ -1,21 +1,31 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.28
+    Version 1.29
 
     Revision:
 
-    1. Added Wizard control support: createControl() seeds activeTabId
-    for Wizard the same way it does for TabControl; recomputeAllDocking()
-    docks each wizard page's children separately from its always-visible
-    footer children; the toolbox (drag-drop and double-click) intercepts
-    the Wizard tool to open the guided setup modal (Wizard-Builder.js)
-    instead of creating the control immediately; and the Objects modal
-    tree now lists a Wizard's pages (and a Footer group) the same way it
-    already does for TabControl's tabs.
+    1. Fixed Anchor never being reapplied when a container's size changed
+    via Dock (only manual drag-resize triggered it before) - e.g. setting
+    a Wizard's own Dock to Fill grew the wizard but left its Anchored
+    footer buttons stuck at their original pixel position instead of
+    tracking the new bottom edge. recomputeAllDocking() now cascades
+    Anchor to a container's children whenever its own size changes,
+    regardless of what caused the change.
+
+    2. containerClientRect() now also shrinks for a Wizard's Contents nav
+    strip (Wizard-Builder.js's wizardContentBounds), matching
+    recomputeAllDocking's existing TabControl/Wizard handling - a footer
+    child (tabPage null) still gets the full bounds.
+
+    3. Objects modal: clicking a TabControl/Wizard page header now
+    switches the canvas to that page (previously informational only),
+    and selecting a control that lives on a specific page does the same
+    automatically - so picking "CheckBox1" under "[Options]" shows the
+    Options page, the same as clicking "[Options]" itself would.
 */
 
-const ENGINE_VERSION = '1.28';
+const ENGINE_VERSION = '1.29';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -211,13 +221,15 @@ function recomputeAllDocking() {
         applyDockStack(kids, { w: c.w, h: Math.max(1, c.h - TAB_HEADER_HEIGHT) });
       });
     } else if (def.isWizard) {
-      // Each page's content docks within the full wizard bounds (no header
-      // strip to subtract, unlike TabControl); footer children (Back/Next/
-      // Cancel and anything else marked "always visible") dock separately
-      // since they're not scoped to any one page.
+      // Each page's content docks within the wizard's content area (full
+      // bounds, minus the optional Contents nav strip - wizardContentBounds,
+      // Wizard-Builder.js); footer children (Back/Next/Cancel and anything
+      // else marked "always visible") dock against the FULL bounds instead,
+      // since a real installer's footer bar spans under the nav strip too.
+      const contentBounds = wizardContentBounds(c);
       (c.props.pages || []).forEach(page => {
         const kids = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === page.id && !ch.wizardFooter);
-        applyDockStack(kids, { w: c.w, h: c.h });
+        applyDockStack(kids, contentBounds);
       });
       const footerKids = state.controls.filter(ch => ch.parentId === c.id && ch.wizardFooter);
       applyDockStack(footerKids, { w: c.w, h: c.h });
@@ -225,6 +237,28 @@ function recomputeAllDocking() {
       const kids = state.controls.filter(ch => ch.parentId === c.id);
       applyDockStack(kids, { w: c.w, h: c.h });
     }
+  });
+
+  cascadeAnchorsOnSizeChange();
+}
+
+// Anchor repositioning previously only ran during a manual drag-resize
+// (startResize's onMove) - a container resized purely by Dock (e.g. the
+// user setting a Wizard's own Dock to Fill) never triggered it, so
+// Anchored children (like a wizard's footer buttons) stayed stuck at
+// their original pixel position instead of tracking the new bounds. This
+// compares each container's size against what it was last render pass and,
+// if it changed, cascades Anchor the same way a manual resize would.
+const containerLastSize = {};
+function cascadeAnchorsOnSizeChange() {
+  state.controls.forEach(c => {
+    const prev = containerLastSize[c.id];
+    if (prev && (prev.w !== c.w || prev.h !== c.h)) {
+      state.controls.filter(ch => ch.parentId === c.id).forEach(child => {
+        applyAnchorFromOrigin(child, { x: child.x, y: child.y, w: child.w, h: child.h }, prev.w, prev.h, c.w, c.h);
+      });
+    }
+    containerLastSize[c.id] = { w: c.w, h: c.h };
   });
 }
 
@@ -283,9 +317,16 @@ function containerClientRect(parentId, tabPage) {
   if (parentId) {
     const p = getControl(parentId);
     if (!p) return { x: 0, y: 0, w: state.form.width, h: state.form.height };
-    let h = p.h;
+    let h = p.h, w = p.w;
     if (CONTROL_DEFS[p.type].isTabControl) h = Math.max(1, h - TAB_HEADER_HEIGHT);
-    bounds = { w: p.w, h };
+    else if (CONTROL_DEFS[p.type].isWizard && tabPage) {
+      // Only page content (a real tabPage id, not a footer child's null)
+      // is shrunk for the Contents nav strip - a footer button still gets
+      // the full bounds, same as recomputeAllDocking treats it.
+      const cb = wizardContentBounds(p);
+      w = cb.w; h = cb.h;
+    }
+    bounds = { w, h };
   } else {
     bounds = { w: state.form.width, h: state.form.height };
   }
@@ -1070,6 +1111,16 @@ function buildObjectsList() {
       row.innerHTML = `<span class="objects-row-name">${escapeHtml(c.name)}</span><span class="objects-row-type">${c.type}</span>`;
       row.title = state.pickingCallback ? 'Click to pick this control.' : 'Click to select this control.';
       row.addEventListener('click', () => {
+        // Selecting a control that lives on a specific TabControl/Wizard
+        // page also switches the canvas to that page - so, e.g., picking
+        // "CheckBox1" (which only exists on the Options page) from here
+        // shows Options, the same as clicking its "[Options]" header does.
+        if (c.tabPage && c.parentId) {
+          const parent = getControl(c.parentId);
+          if (parent && (CONTROL_DEFS[parent.type].isTabControl || CONTROL_DEFS[parent.type].isWizard)) {
+            parent.activeTabId = c.tabPage;
+          }
+        }
         if (state.pickingCallback) {
           const cb = state.pickingCallback;
           cancelControlPick();
@@ -1088,6 +1139,13 @@ function buildObjectsList() {
           tabHeader.className = 'objects-row objects-tab-header';
           tabHeader.style.paddingLeft = (10 + (depth + 1) * 16) + 'px';
           tabHeader.textContent = `[${tab.label}]`;
+          tabHeader.title = 'Click to switch the canvas to this tab.';
+          tabHeader.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            c.activeTabId = tab.id;
+            render();
+            document.getElementById('objectsModalOverlay').classList.remove('open');
+          });
           container.appendChild(tabHeader);
           renderLevel(c.id, tab.id, depth + 2);
         });
@@ -1097,6 +1155,13 @@ function buildObjectsList() {
           pageHeader.className = 'objects-row objects-tab-header';
           pageHeader.style.paddingLeft = (10 + (depth + 1) * 16) + 'px';
           pageHeader.textContent = `[${page.label}]`;
+          pageHeader.title = 'Click to switch the canvas to this page.';
+          pageHeader.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            c.activeTabId = page.id;
+            render();
+            document.getElementById('objectsModalOverlay').classList.remove('open');
+          });
           container.appendChild(pageHeader);
           renderLevel(c.id, page.id, depth + 2);
         });

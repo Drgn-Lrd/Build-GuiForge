@@ -283,6 +283,7 @@ const TOOLTIPS = {
   menuItems: 'Configure this menu bar: check a top-level menu to include it, check individual entries to include them, edit labels, or add your own custom menus and items.',
   tabs: 'The tab pages on this control. Rename, add, or remove pages here; click "Show" on a page to switch the canvas to it before placing controls - each page keeps its own separate set of children.',
   pages: 'The pages in this wizard. Add, rename, reorder, or remove pages here; click "Show" on a page to switch the canvas to it before placing controls. Each page can also have an optional custom validation expression checked before Next is allowed to proceed.',
+  contentsStyle: 'Optional step-list navigation, modeled on real installer wizards: None (no visible list, just Back/Next), Horizontal (a tab-like strip of page names across the top), or Vertical (a sidebar of page names down the left, like the classic Windows installer). Clicking a page name jumps straight to it while designing.',
 };
 
 function tt(key) { return TOOLTIPS[key] || ''; }

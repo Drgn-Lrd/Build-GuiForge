@@ -1,25 +1,44 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
     Revision:
 
-    1. New file. Everything specific to the Wizard control type that
-    isn't a small guard clause in an existing file: the guided setup
-    modal shown on drop (choose pages + starter templates), the starter
-    template content definitions, the Pages properties-pane editor
-    (mirrors the TabControl Tabs editor, plus reorder/template/validation),
-    the per-child "Wizard Page" property rows (Wizard Role, footer
-    visibility, Required-before-Next), and the WinForms codegen helpers
-    that generate the Show-<Name>Page / Test-<Name>PageRequirements
-    functions and the Back/Next/Cancel click bodies. Depends on
-    CONTROL_DEFS/DEFAULT_WIZARD_PAGES (Control-Data.js), state/getControl/
-    createControl/snap/render/selectControl (Engine.js), and
-    escapeHtml/section/tt (Properties-Pane.js) - load after Control-Data.js.
+    1. Fixed Test-<Name>PageRequirements generating a switch statement
+    with zero clauses (errored out) when no page had any Required
+    control or custom validation - now always emits at least a
+    `default { }` clause.
+
+    2. Footer buttons repositioned (Back left-of-center, Next center,
+    Cancel right) and anchored (Bottom, Left/Right) instead of fixed
+    Top-Left, so they track the bottom edge - including on a Dock=Fill
+    resize (paired with the Engine.js anchor-cascade fix) - instead of
+    staying stuck near their original creation-time position.
+
+    3. Added the Wizard's Contents nav (buildWizardContentsNav, for
+    Render.js) and wizardContentBounds() (for Engine.js's docking/clamp
+    math) supporting the new Horizontal/Vertical step-list styles, plus
+    matching WinForms codegen (wizardContentsNavCodegenLines) that
+    generates a real nav Panel of Labels, bolded by Show-<Name>Page.
 */
 
-const WIZARD_BUILDER_VERSION = '1.0';
+const WIZARD_BUILDER_VERSION = '1.1';
+
+const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
+const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
+
+// The area available to a wizard's PAGE content (not its always-visible
+// footer, which always spans the full control) - shrunk to make room for
+// the optional Horizontal/Vertical Contents nav strip, same idea as
+// TAB_HEADER_HEIGHT for TabControl.
+function wizardContentBounds(c) {
+  const cs = c.props.contentsStyle;
+  let w = c.w, h = c.h;
+  if (cs === 'Horizontal') h = Math.max(1, h - WIZARD_HORIZONTAL_CONTENTS_HEIGHT);
+  else if (cs === 'Vertical') w = Math.max(1, w - WIZARD_VERTICAL_CONTENTS_WIDTH);
+  return { w, h };
+}
 
 /* =========================================================================
    Starter page templates
@@ -63,15 +82,24 @@ function populateWizardPageTemplate(wizardCtrl, page) {
 
 function createWizardFooterButtons(wizardCtrl) {
   const y = wizardCtrl.h - 46;
+  const btnW = 80;
+  // Back sits left-of-center, Next dead center, Cancel at the right edge -
+  // each anchored so it tracks proportionally as the wizard resizes
+  // (Bottom keeps it near the bottom edge; Left/Right - see
+  // applyAnchorFromOrigin in Engine.js - scale the margin as a percentage
+  // of width/height rather than a fixed pixel offset, which is what lets
+  // Back/Next drift back toward their original relative position instead
+  // of a fixed absolute one).
   const specs = [
-    { role: 'cancel', text: 'Cancel', x: 20 },
-    { role: 'back', text: 'Back', x: wizardCtrl.w - 250 },
-    { role: 'next', text: 'Next', x: wizardCtrl.w - 170 },
+    { role: 'back', text: 'Back', x: Math.round(wizardCtrl.w * 0.30 - btnW / 2), anchor: 'Bottom, Left' },
+    { role: 'next', text: 'Next', x: Math.round(wizardCtrl.w * 0.5 - btnW / 2), anchor: 'Bottom, Left' },
+    { role: 'cancel', text: 'Cancel', x: wizardCtrl.w - 20 - btnW, anchor: 'Bottom, Right' },
   ];
   specs.forEach(spec => {
     const btn = createControl('Button', spec.x, y, wizardCtrl.id, null);
-    btn.w = 80;
+    btn.w = btnW;
     btn.props.text = spec.text;
+    btn.props.anchor = spec.anchor;
     btn.wizardFooter = true;
     btn.wizardRole = spec.role;
     btn.events.Click = { fn: `${btn.name}_Click`, code: '# Auto-generated wizard navigation (see generated code) - clear Wizard Role above to write your own.', ps1: '' };
@@ -381,6 +409,33 @@ function buildWizardChildRows(ctrl, parentCtrl) {
 }
 
 /* =========================================================================
+   Contents nav strip (Horizontal/Vertical) - both the canvas preview
+   (below) and the matching WinForms codegen (further down).
+   ========================================================================= */
+
+function buildWizardContentsNav(c) {
+  const cs = c.props.contentsStyle;
+  if (!cs || cs === 'None') return document.createDocumentFragment();
+  const pages = c.props.pages || [];
+  const nav = document.createElement('div');
+  nav.className = cs === 'Horizontal' ? 'wizard-nav-horizontal' : 'wizard-nav-vertical';
+  pages.forEach(page => {
+    const item = document.createElement('div');
+    item.className = 'wizard-nav-item' + (page.id === c.activeTabId ? ' active' : '');
+    item.textContent = page.label;
+    item.title = 'Click to switch to this page while designing.';
+    item.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      c.activeTabId = page.id;
+      selectControl(c.id);
+    });
+    nav.appendChild(item);
+  });
+  return nav;
+}
+
+/* =========================================================================
    Render.js helper: non-interactive page indicator overlay shown at the
    top of a Wizard while designing (page switching itself happens via the
    Pages editor's Show/Active button, not by clicking this).
@@ -419,9 +474,10 @@ function wizardRequiredCheckExpr(ctrl) {
 }
 
 // Generates the Show-<Name>Page function: flips page-panel Visible flags,
-// tracks the current index in a script-scope variable, and (if present)
-// updates the Next button's label and the Back button's Enabled state.
-function wizardShowFunctionLines(c, pageVarNames) {
+// tracks the current index in a script-scope variable, updates the Next
+// button's label and the Back button's Enabled state (if present), and
+// bolds the active page's label in the Contents nav strip (if any).
+function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   const name = c.name;
   const footerBtns = state.controls.filter(ch => ch.parentId === c.id && ch.wizardFooter);
   const nextBtn = footerBtns.find(b => b.wizardRole === 'next');
@@ -434,16 +490,69 @@ function wizardShowFunctionLines(c, pageVarNames) {
   lines.push(`    $script:${name}_CurrentPage = $Index`);
   if (nextBtn) lines.push(`    $${nextBtn.name}.Text = if ($Index -eq ($pages.Count - 1)) { "Finish" } else { "Next" }`);
   if (backBtn) lines.push(`    $${backBtn.name}.Enabled = ($Index -gt 0)`);
+  if (navVarNames && navVarNames.length) {
+    lines.push(`    $navLabels = @(${navVarNames.map(v => '$' + v).join(', ')})`);
+    lines.push(`    for ($i = 0; $i -lt $navLabels.Count; $i++) {`);
+    lines.push(`        if ($i -eq $Index) { $navLabels[$i].Font = New-Object System.Drawing.Font($navLabels[$i].Font.FontFamily, $navLabels[$i].Font.Size, [System.Drawing.FontStyle]::Bold) }`);
+    lines.push(`        else { $navLabels[$i].Font = New-Object System.Drawing.Font($navLabels[$i].Font.FontFamily, $navLabels[$i].Font.Size, [System.Drawing.FontStyle]::Regular) }`);
+    lines.push(`    }`);
+  }
   lines.push(`}`);
   return lines;
 }
 
+// Generates the Contents nav strip itself: a docked Panel holding one
+// static Label per page (real installers' step lists are informational,
+// not clickable) - Show-<Name>Page bolds whichever one is current.
+// Returns { lines, navVarNames } so the caller can wire navVarNames into
+// wizardShowFunctionLines above.
+function wizardContentsNavCodegenLines(c) {
+  const cs = c.props.contentsStyle;
+  if (!cs || cs === 'None') return { lines: [], navVarNames: [] };
+  const pages = c.props.pages || [];
+  const name = c.name;
+  const navVar = `${name}_Nav`;
+  const lines = [];
+  const navVarNames = [];
+
+  lines.push(`$${navVar} = New-Object System.Windows.Forms.Panel`);
+  if (cs === 'Horizontal') {
+    lines.push(`$${navVar}.Location = New-Object System.Drawing.Point(0, 0)`);
+    lines.push(`$${navVar}.Size = New-Object System.Drawing.Size(${c.w}, ${WIZARD_HORIZONTAL_CONTENTS_HEIGHT})`);
+  } else {
+    lines.push(`$${navVar}.Location = New-Object System.Drawing.Point(0, 0)`);
+    lines.push(`$${navVar}.Size = New-Object System.Drawing.Size(${WIZARD_VERTICAL_CONTENTS_WIDTH}, ${c.h})`);
+  }
+  lines.push(`$${navVar}.BackColor = [System.Drawing.Color]::FromArgb(236,236,236)`);
+  lines.push(`$${c.name}.Controls.Add($${navVar})`);
+
+  pages.forEach((page, i) => {
+    const labelVar = `${navVar}_${page.id}`;
+    const itemW = cs === 'Horizontal' ? Math.round(c.w / Math.max(1, pages.length)) : WIZARD_VERTICAL_CONTENTS_WIDTH;
+    const itemH = cs === 'Horizontal' ? WIZARD_HORIZONTAL_CONTENTS_HEIGHT : 28;
+    const x = cs === 'Horizontal' ? i * itemW : 0;
+    const y = cs === 'Horizontal' ? 0 : i * itemH;
+    lines.push(`$${labelVar} = New-Object System.Windows.Forms.Label`);
+    lines.push(`$${labelVar}.Text = "${(page.label || '').replace(/"/g, '""')}"`);
+    lines.push(`$${labelVar}.Location = New-Object System.Drawing.Point(${x}, ${y})`);
+    lines.push(`$${labelVar}.Size = New-Object System.Drawing.Size(${itemW}, ${itemH})`);
+    lines.push(`$${labelVar}.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter`);
+    lines.push(`$${navVar}.Controls.Add($${labelVar})`);
+    navVarNames.push(labelVar);
+  });
+
+  return { lines, navVarNames };
+}
+
 // Generates Test-<Name>PageRequirements: per page, checks every Required
 // child control plus that page's optional custom validation expression.
+// Always emits at least one clause (a bare `default { }` when no page has
+// anything to check) - an empty switch body errored out in testing.
 function wizardTestFunctionLines(c) {
   const name = c.name;
   const pages = c.props.pages || [];
   const lines = [];
+  let anyClause = false;
   lines.push(`function Test-${name}PageRequirements {`);
   lines.push(`    param([int]$Index)`);
   lines.push(`    switch ($Index) {`);
@@ -451,11 +560,13 @@ function wizardTestFunctionLines(c) {
     const reqChildren = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === page.id && ch.wizardRequired);
     const customExpr = (page.validation || '').trim();
     if (!reqChildren.length && !customExpr) return; // nothing to check on this page - falls through to default $true
+    anyClause = true;
     lines.push(`        ${i} {`);
     reqChildren.forEach(ch => lines.push(`            if (-not (${wizardRequiredCheckExpr(ch)})) { return $false }`));
     if (customExpr) lines.push(`            if (-not (${customExpr})) { return $false }`);
     lines.push(`        }`);
   });
+  if (!anyClause) lines.push(`        default { }`);
   lines.push(`    }`);
   lines.push(`    return $true`);
   lines.push(`}`);

@@ -1,19 +1,19 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.24
+    Version 1.25
 
     Revision:
 
-    1. Added styles for the Wizard control: .wizard-body/.wizard-content
-    (canvas preview, no header strip - mirrors .rc-tabcontrol-body/
-    .tabcontrol-content minus the tab strip height), .wizard-page-
-    indicator (small non-interactive "Page X of Y" overlay), the setup
-    modal's page list (.wizard-setup-add-row, reuses .tab-editor-item/
-    .menu-editor-label-input/.menu-editor-tag/.menu-del-btn from the
-    existing Tabs/Menu editors), and the Pages editor's added reorder
-    buttons and per-page validation textarea (.wizard-page-editor-toprow,
-    .wizard-page-reorder, .wizard-page-validation-row).
+    1. Fixed the Wizard setup modal's template dropdown rendering as an
+    unstyled/invisible browser-default select (it lives outside
+    #propsBody, so it fell outside every existing select-theming rule).
+
+    2. Split .wizard-content into position variants (-none/-horizontal/
+    -vertical) to make room for the new Contents nav strip, added the
+    strip's own styles (.wizard-nav-horizontal/-vertical/-item), and
+    added .wizard-footer-content (full-bounds layer for Back/Next/Cancel
+    etc., spanning under the nav strip like a real installer's button bar).
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -94,8 +94,9 @@
   overflow: hidden;
 }
 
-/* Wizard canvas preview - no header strip, page switching happens via the
-   Pages editor's Show/Active button rather than an on-canvas tab click. */
+/* Wizard canvas preview - no header strip unless Contents is on, page
+   switching happens via the Pages editor's Show/Active button (or the
+   Contents nav strip, if shown) rather than an on-canvas tab click. */
 .wizard-body {
   position: absolute;
   inset: 0;
@@ -104,9 +105,18 @@
 }
 .wizard-content {
   position: absolute;
-  inset: 0;
   overflow: hidden;
 }
+.wizard-content-none { inset: 0; }
+.wizard-content-horizontal { top: 32px; left: 0; right: 0; bottom: 0; }
+.wizard-content-vertical { top: 0; left: 140px; right: 0; bottom: 0; }
+.wizard-footer-content {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.wizard-footer-content .ctrl { pointer-events: auto; }
 .wizard-page-indicator {
   position: absolute;
   top: 4px; left: 6px;
@@ -119,6 +129,48 @@
   z-index: 5;
   user-select: none;
 }
+
+/* Wizard Contents nav strip (Horizontal tab-style / Vertical sidebar) */
+.wizard-nav-horizontal {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 32px;
+  display: flex;
+  background: #ECECEC;
+  border-bottom: 1px solid #ACA899;
+  z-index: 6;
+}
+.wizard-nav-vertical {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 140px;
+  display: flex;
+  flex-direction: column;
+  background: #ECECEC;
+  border-right: 1px solid #ACA899;
+  z-index: 6;
+  overflow-y: auto;
+}
+.wizard-nav-horizontal .wizard-nav-item {
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: #333;
+  cursor: pointer;
+  border-right: 1px solid #ACA899;
+  user-select: none;
+}
+.wizard-nav-vertical .wizard-nav-item {
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: #333;
+  cursor: pointer;
+  border-bottom: 1px solid #DDD8C8;
+  user-select: none;
+}
+.wizard-nav-item.active { background: #FFFFFF; font-weight: 600; }
+.wizard-nav-item:hover:not(.active) { background: #DCDCDC; }
 
 /* MenuStrip canvas preview */
 .rc-menustrip {
@@ -269,6 +321,17 @@
 .wizard-setup-add-row { display: flex; gap: 6px; margin-top: 2px; }
 .wizard-setup-add-row select { flex-shrink: 0; }
 .wizard-setup-add-row .tab-add-btn { margin-top: 0; flex: 1; }
+/* The setup modal lives outside #propsBody (appended straight to <body>),
+   so it falls outside every select-theming rule above - it rendered as
+   an unstyled/invisible browser-default dropdown until this was added. */
+#wizardSetupModalOverlay select {
+  background: var(--bp-panel-raised);
+  border: 1px solid var(--bp-border);
+  color: var(--bp-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  font-size: 11.5px;
+}
 .wizard-page-editor-item { flex-direction: column; align-items: stretch; gap: 6px; }
 .wizard-page-editor-toprow { display: flex; align-items: center; gap: 6px; }
 .wizard-page-reorder { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
@@ -339,7 +402,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.24';
+  --stylesheet-version: '1.25';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;

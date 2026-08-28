@@ -1,24 +1,18 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
     Revision:
 
-    1. Added Wizard codegen: each page becomes a same-sized Panel inside
-    the wizard's own (generated-as-Panel) control, only the first one
-    Visible; a generated Show-<Name>Page / Test-<Name>PageRequirements
-    function pair per wizard handles page switching, Next-label swapping
-    (Finish on the last page), Back-button enabling, and Required/custom
-    validation gating; children route into their page's panel (or the
-    wizard itself, for footer children) the same way TabControl children
-    already route into their TabPage; and Back/Next/Cancel buttons get
-    their Click code generated fresh from wizardRole (Wizard-Builder.js),
-    overriding whatever is stored on the button itself - same convention
-    already used for MenuStrip's autoAbout items.
+    1. Wizard page panels are now sized/positioned to the wizard's
+    content area (wizardContentBounds()) rather than its full bounds,
+    and the optional Contents nav strip (Horizontal/Vertical step list)
+    is generated as a real Panel of Labels, bolded by Show-<Name>Page -
+    matching the new canvas preview and the Wizard-Builder.js fixes.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.1';
+const CODEGEN_WINFORMS_VERSION = '1.2';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -222,21 +216,32 @@ function generateWinForms() {
       case 'Wizard': {
         const pages = p.pages || [];
         const pageVarNames = [];
+        // The page content area is shrunk (and offset) to make room for
+        // the optional Contents nav strip - same idea as the canvas
+        // preview's wizardContentBounds()/.wizard-content-* CSS classes.
+        const cb = wizardContentBounds(c);
+        const pageX = p.contentsStyle === 'Vertical' ? WIZARD_VERTICAL_CONTENTS_WIDTH : 0;
+        const pageY = p.contentsStyle === 'Horizontal' ? WIZARD_HORIZONTAL_CONTENTS_HEIGHT : 0;
         pages.forEach((page, i) => {
           const pageVar = `${c.name}_${page.id}`;
           lines.push(`$${pageVar} = New-Object System.Windows.Forms.Panel`);
-          lines.push(`$${pageVar}.Location = New-Object System.Drawing.Point(0, 0)`);
-          lines.push(`$${pageVar}.Size = New-Object System.Drawing.Size(${c.w}, ${c.h})`);
+          lines.push(`$${pageVar}.Location = New-Object System.Drawing.Point(${pageX}, ${pageY})`);
+          lines.push(`$${pageVar}.Size = New-Object System.Drawing.Size(${cb.w}, ${cb.h})`);
           lines.push(`$${pageVar}.Visible = $${i === 0}`);
           lines.push(`$${c.name}.Controls.Add($${pageVar})`);
           wizardPageVarFor[`${c.id}::${page.id}`] = pageVar;
           pageVarNames.push(pageVar);
         });
+        // The optional Contents nav strip (Horizontal/Vertical step list)
+        // is chrome belonging to the wizard itself, not a page - generated
+        // once here, independent of which page is currently showing.
+        const nav = wizardContentsNavCodegenLines(c);
+        lines.push(...nav.lines);
         // Show-<Name>Page and Test-<Name>PageRequirements only depend on
         // the page list and each child's own wizardRequired/validation
         // fields (all already known from state.controls at this point),
         // not on when those children get emitted by the main loop below.
-        lines.push(...wizardShowFunctionLines(c, pageVarNames));
+        lines.push(...wizardShowFunctionLines(c, pageVarNames, nav.navVarNames));
         lines.push(...wizardTestFunctionLines(c));
         lines.push(`$script:${c.name}_CurrentPage = 0`);
         wizardInitCalls.push(c.name);
