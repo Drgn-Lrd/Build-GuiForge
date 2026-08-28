@@ -1,18 +1,12 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.31
+    Version 1.32
 
     Revision:
 
-    1. Restored .wizard-nav-item.drag-over (canvas Contents nav drag
-    reorder came back). Added .wizard-nav-flat and friends (plain
-    clickable text, no per-item border/background) for the new Flat
-    Contents variants, .wizard-picker-item for the new Wizards toolbar
-    button's picker modal, and reworked .wizard-requirement-row from a
-    fixed 5-column grid to flexbox (variable field count now: 2 for a
-    boolean control, 3 otherwise) plus styles for the detected-requirement
-    read-only row and the Select-Control-button target picker.
+    1. Added .wizard-requirements-mode-row for the new All/Any combining
+    selector above the Additional Requirements list.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -365,6 +359,14 @@
 .wizard-page-template-row select { flex: 1; min-width: 0; }
 .wizard-requirements-wrap { display: flex; flex-direction: column; gap: 5px; padding-left: 2px; }
 .wizard-requirements-heading { font-size: 10px; color: var(--bp-text-faint); }
+.wizard-requirements-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.wizard-requirements-mode-row label { font-size: 10px; color: var(--bp-text-muted); flex-shrink: 0; }
+.wizard-requirements-mode-row select { flex: 1; font-size: 10.5px; padding: 3px 4px; }
 .wizard-requirement-row {
   display: flex;
   align-items: center;
@@ -459,7 +461,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.31';
+  --stylesheet-version: '1.32';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
