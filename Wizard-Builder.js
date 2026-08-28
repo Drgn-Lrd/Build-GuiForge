@@ -1,45 +1,22 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.3
 
     Revision:
 
-    1. Fixed Test-<Name>PageRequirements generating a switch statement
-    with zero clauses (errored out) when no page had any Required
-    control or custom validation - now always emits at least a
-    `default { }` clause.
+    1. Show-<Name>Page now also toggles the Back button's Visible (not
+    just Enabled) so it's actually hidden on the first page instead of
+    just greyed out - no Back from there. The Pages editor's designer
+    preview dims Back with a "Hidden on first page" hint when the canvas
+    is showing page 1, instead of silently matching runtime behavior.
 
-    2. Footer buttons repositioned (Back left-of-center, Next center,
-    Cancel right) and anchored (Bottom, Left/Right) instead of fixed
-    Top-Left, so they track the bottom edge - including on a Dock=Fill
-    resize (paired with the Engine.js anchor-cascade fix) - instead of
-    staying stuck near their original creation-time position.
-
-    3. Added the Wizard's Contents nav (buildWizardContentsNav, for
-    Render.js) and wizardContentBounds() (for Engine.js's docking/clamp
-    math) supporting the new Horizontal/Vertical step-list styles, plus
-    matching WinForms codegen (wizardContentsNavCodegenLines) that
-    generates a real nav Panel of Labels, bolded by Show-<Name>Page.
-
-    4. Page ids are now friendly and stable (wizardGeneratePageId:
-    PageWelcome, PageOptions, Page4, ...) instead of a random suffix -
-    they show up directly in generated variable names, e.g.
-    $Wizard1_PageOptions instead of $Wizard1_page7zjny1. Generated once
-    at creation, never touched by a later rename (same as TabControl's
-    tab.id).
-
-    5. Replaced the per-page "Custom validation" raw-text field with a
-    structured requirement picker (target control / property / comparator
-    / value), reusing the same getSettableProps()/resolveValueWidgetKind()
-    helpers the "Set another control's property" event snippet already
-    uses, instead of a free-text island that didn't match the rest of the
-    app. Still only ever feeds Test-<Name>PageRequirements for that one
-    page's switch clause - it never touches the shared Next button's
-    Enabled property directly, so it can't leak onto other pages.
+    2. Added a proper drag handle (grip icon, HTML5 drag-and-drop) to
+    each page row for reordering, alongside the existing Up/Down buttons
+    rather than replacing them.
 */
 
-const WIZARD_BUILDER_VERSION = '1.2';
+const WIZARD_BUILDER_VERSION = '1.3';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -322,8 +299,37 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   const outer = document.createElement('div');
   outer.className = 'tab-editor-item wizard-page-editor-item' + (page.id === ctrl.activeTabId ? ' active' : '');
 
+  // Drag-and-drop reorder (on top of the Up/Down buttons below, not
+  // instead of them - only the grip handle itself is draggable, so
+  // dragging doesn't fight with clicking/typing in the row's inputs).
+  outer.addEventListener('dragover', (e) => {
+    if (e.dataTransfer.types.includes('text/wizard-page-index')) { e.preventDefault(); outer.classList.add('drag-over'); }
+  });
+  outer.addEventListener('dragleave', () => outer.classList.remove('drag-over'));
+  outer.addEventListener('drop', (e) => {
+    if (!e.dataTransfer.types.includes('text/wizard-page-index')) return;
+    e.preventDefault();
+    outer.classList.remove('drag-over');
+    const fromIdx = Number(e.dataTransfer.getData('text/wizard-page-index'));
+    if (Number.isNaN(fromIdx) || fromIdx === pi) return;
+    pages.splice(pi, 0, pages.splice(fromIdx, 1)[0]);
+    render();
+  });
+
   const topRow = document.createElement('div');
   topRow.className = 'wizard-page-editor-toprow';
+
+  const grip = document.createElement('div');
+  grip.className = 'wizard-page-grip';
+  grip.draggable = true;
+  grip.textContent = '\u2630';
+  grip.title = 'Drag to reorder this page.';
+  grip.addEventListener('dragstart', (e) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/wizard-page-index', String(pi));
+    outer.classList.add('dragging');
+  });
+  grip.addEventListener('dragend', () => outer.classList.remove('dragging'));
 
   const reorder = document.createElement('div');
   reorder.className = 'wizard-page-reorder';
@@ -371,6 +377,7 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
     render();
   });
 
+  topRow.appendChild(grip);
   topRow.appendChild(reorder);
   topRow.appendChild(nameInput);
   topRow.appendChild(tplBadge);
@@ -645,7 +652,10 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   lines.push(`    for ($i = 0; $i -lt $pages.Count; $i++) { $pages[$i].Visible = ($i -eq $Index) }`);
   lines.push(`    $script:${name}_CurrentPage = $Index`);
   if (nextBtn) lines.push(`    $${nextBtn.name}.Text = if ($Index -eq ($pages.Count - 1)) { "Finish" } else { "Next" }`);
-  if (backBtn) lines.push(`    $${backBtn.name}.Enabled = ($Index -gt 0)`);
+  if (backBtn) {
+    lines.push(`    $${backBtn.name}.Visible = ($Index -gt 0)`);
+    lines.push(`    $${backBtn.name}.Enabled = ($Index -gt 0)`);
+  }
   if (navVarNames && navVarNames.length) {
     lines.push(`    $navLabels = @(${navVarNames.map(v => '$' + v).join(', ')})`);
     lines.push(`    for ($i = 0; $i -lt $navLabels.Count; $i++) {`);

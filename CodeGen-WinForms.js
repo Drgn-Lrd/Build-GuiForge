@@ -1,18 +1,25 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
     Revision:
 
-    1. Wizard page panels are now sized/positioned to the wizard's
-    content area (wizardContentBounds()) rather than its full bounds,
-    and the optional Contents nav strip (Horizontal/Vertical step list)
-    is generated as a real Panel of Labels, bolded by Show-<Name>Page -
-    matching the new canvas preview and the Wizard-Builder.js fixes.
+    1. Fixed a real bug: wizard footer buttons (Back/Next/Cancel) never
+    showed up at runtime no matter where they were positioned. Cause: a
+    wizard's full-size page Panel is added to the wizard's Controls
+    BEFORE its footer buttons, and in WinForms an earlier-added control
+    paints IN FRONT of one added later - so the page panel completely
+    covered the buttons behind it. Every wizardFooter child now calls
+    BringToFront() right after being added.
+
+    2. Added generated mouse-drag borderless-resize code (MouseDown/
+    MouseMove/MouseUp on the Form) when Form Border Style is None and
+    the new "Resizable (borderless)" toggle (Properties-Pane.js) is on -
+    a real None-bordered form has no OS resize grips otherwise.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.2';
+const CODEGEN_WINFORMS_VERSION = '1.3';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -46,6 +53,47 @@ function generateWinForms() {
   lines.push(`$Form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::${f.formBorderStyle}`);
   lines.push(`$Form.TopMost = $${f.topMost}`);
   lines.push('');
+
+  if (f.formBorderStyle === 'None' && f.borderlessResizable) {
+    // FormBorderStyle=None has no OS resize grips at all, so this adds a
+    // manual mouse-drag substitute: mousedown near any edge starts a
+    // resize, mousemove while resizing adjusts Bounds directly, mouseup
+    // ends it. Kept to plain WinForms events (no P/Invoke/WM_NCHITTEST)
+    // so it's easy to read/adjust, at the cost of being a little less
+    // snappy than a native OS-level resize border.
+    lines.push(`# Borderless resize support - FormBorderStyle=None has no OS resize`);
+    lines.push(`# grips, so drag within BorderlessResizeMargin pixels of any edge to resize.`);
+    lines.push(`$script:BorderlessResizeMargin = 6`);
+    lines.push(`$script:BorderlessResizing = $false`);
+    lines.push(`$script:BorderlessResizeMode = ''`);
+    lines.push(`$Form.Add_MouseDown({`);
+    lines.push(`    param($sender, $e)`);
+    lines.push(`    $m = $script:BorderlessResizeMargin`);
+    lines.push(`    $onRight = ($sender.ClientSize.Width - $e.X) -le $m`);
+    lines.push(`    $onBottom = ($sender.ClientSize.Height - $e.Y) -le $m`);
+    lines.push(`    $onLeft = $e.X -le $m`);
+    lines.push(`    $onTop = $e.Y -le $m`);
+    lines.push(`    if ($onRight -or $onBottom -or $onLeft -or $onTop) {`);
+    lines.push(`        $script:BorderlessResizing = $true`);
+    lines.push(`        $mode = ''`);
+    lines.push(`        if ($onTop) { $mode += 'T' } elseif ($onBottom) { $mode += 'B' }`);
+    lines.push(`        if ($onLeft) { $mode += 'L' } elseif ($onRight) { $mode += 'R' }`);
+    lines.push(`        $script:BorderlessResizeMode = $mode`);
+    lines.push(`    }`);
+    lines.push(`})`);
+    lines.push(`$Form.Add_MouseMove({`);
+    lines.push(`    param($sender, $e)`);
+    lines.push(`    if (-not $script:BorderlessResizing) { return }`);
+    lines.push(`    $b = $sender.Bounds`);
+    lines.push(`    if ($script:BorderlessResizeMode -match 'R') { $b.Width = [Math]::Max(200, $e.X) }`);
+    lines.push(`    if ($script:BorderlessResizeMode -match 'B') { $b.Height = [Math]::Max(150, $e.Y) }`);
+    lines.push(`    if ($script:BorderlessResizeMode -match 'L') { $dx = $e.X; $b.X += $dx; $b.Width -= $dx }`);
+    lines.push(`    if ($script:BorderlessResizeMode -match 'T') { $dy = $e.Y; $b.Y += $dy; $b.Height -= $dy }`);
+    lines.push(`    $sender.Bounds = $b`);
+    lines.push(`})`);
+    lines.push(`$Form.Add_MouseUp({ $script:BorderlessResizing = $false })`);
+    lines.push('');
+  }
 
   const tabPageVarFor = {}; // `${tabControlId}::${tabId}` -> generated $variable name
   const wizardPageVarFor = {}; // `${wizardId}::${pageId}` -> generated $variable name
@@ -295,6 +343,15 @@ function generateWinForms() {
     }
     lines.push(`$${addTarget}.Controls.Add($${c.name})`);
     if (c.type === 'MenuStrip') lines.push(`$Form.MainMenuStrip = $${c.name}`);
+    if (c.wizardFooter) {
+      // A wizard's page panels are added to the SAME parent (the wizard
+      // itself) earlier than footer children - and in WinForms, an
+      // earlier-added control paints IN FRONT of one added later. Left
+      // alone, a full-size page panel completely hides every footer
+      // button behind it, no matter where they're positioned. BringToFront
+      // forces footer children to the front regardless of add order.
+      lines.push(`$${c.name}.BringToFront()`);
+    }
     lines.push('');
   });
 

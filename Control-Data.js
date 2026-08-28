@@ -1,24 +1,13 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.6
 
     Revision:
 
-    1. Added the Wizard control type (Multipage Wizard) - a new container,
-    same tier as GroupBox/TabControl, listed under its own "Wizards"
-    toolbox heading. Ships with DEFAULT_WIZARD_PAGES as a fallback page
-    set; real instances are normally created via the guided setup modal
-    in Wizard-Builder.js, which overwrites the pages array with the
-    user's chosen pages/templates.
-
-    2. Added the Wizard's Contents property (None/Horizontal/Vertical) -
-    an optional step-list nav strip (tab-strip along the top, or a
-    sidebar down the left) modeled on real installer wizards.
-
-    3. DEFAULT_WIZARD_PAGES now uses friendly page ids (PageWelcome,
+    1. DEFAULT_WIZARD_PAGES now uses friendly page ids (PageWelcome,
     PageOptions, PageSummary) instead of random suffixes, matching
-    Wizard-Builder.js's new wizardGeneratePageId() - these ids show up
+    Wizard-Builder.js's wizardGeneratePageId() - these ids show up
     directly in generated variable names.
 */
 

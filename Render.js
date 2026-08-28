@@ -1,21 +1,19 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
     Revision:
 
-    1. Split the Wizard's canvas content into two layers: page content
-    (offset/shrunk to make room for the optional Contents nav strip) and
-    always-visible footer content (full bounds, spans under the nav
-    strip - matches how a real installer's button bar works). Added the
-    Contents nav strip itself (buildWizardContentsNav, Wizard-Builder.js)
-    - a clickable Horizontal tab-style strip or Vertical sidebar of page
-    names, same click-to-switch pattern already used by TabControl's
-    header.
+    1. The Wizard's canvas preview now dims the Back button with a
+    "Hidden on first page" hint (.wizard-footer-hidden-here) when the
+    canvas is currently showing the first page, matching the new
+    Show-<Name>Page runtime behavior (Wizard-Builder.js) without actually
+    removing it from the canvas - it stays selectable/movable regardless
+    of which page happens to be active while designing.
 */
 
-const RENDER_VERSION = '1.2';
+const RENDER_VERSION = '1.3';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -74,9 +72,18 @@ function renderControl(c) {
 
     const footerContent = document.createElement('div');
     footerContent.className = 'wizard-footer-content';
+    const onFirstPage = (c.props.pages || [])[0] && (c.props.pages || [])[0].id === c.activeTabId;
     state.controls
       .filter(ch => ch.parentId === c.id && ch.wizardFooter)
-      .forEach(ch => footerContent.appendChild(renderControl(ch)));
+      .forEach(ch => {
+        const childEl = renderControl(ch);
+        // Back is hidden (not just disabled) on the first page at runtime -
+        // dim it here rather than actually removing it, so it stays visible
+        // and selectable/movable while designing regardless of which page
+        // happens to be showing.
+        if (ch.wizardRole === 'back' && onFirstPage) childEl.classList.add('wizard-footer-hidden-here');
+        footerContent.appendChild(childEl);
+      });
     el.appendChild(footerContent);
   } else {
     const inner = document.createElement('div');

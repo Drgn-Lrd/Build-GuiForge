@@ -1,23 +1,21 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.26
+    Version 1.27
 
     Revision:
 
-    1. Fixed the Wizard setup modal's template dropdown rendering as an
-    unstyled/invisible browser-default select (it lives outside
-    #propsBody, so it fell outside every existing select-theming rule).
+    1. Fixed FormBorderStyle=None not actually hiding the design canvas's
+    title bar - the JS math was already correct, but the CSS rule for
+    .no-titlebar only re-skinned the bar (for the HTML preview's faux
+    browser-tab look), it never had a `display: none` for the genuine
+    no-title-bar case. Added one scoped to real (.fbs-none, non-HTML)
+    previews only, leaving the HTML mock bar untouched.
 
-    2. Split .wizard-content into position variants (-none/-horizontal/
-    -vertical) to make room for the new Contents nav strip, added the
-    strip's own styles (.wizard-nav-horizontal/-vertical/-item), and
-    added .wizard-footer-content (full-bounds layer for Back/Next/Cancel
-    etc., spanning under the nav strip like a real installer's button bar).
-
-    3. Replaced the per-page validation textarea styles with the new
-    structured requirement row (.wizard-requirement-row and friends) -
-    a grid of small selects/inputs instead of a free-text box.
+    2. Added .wizard-footer-hidden-here (dims the Back button with a
+    "Hidden on first page" hint when the canvas is on page 1) and the
+    drag-handle grip/drag-over styles for the Pages editor's new
+    drag-and-drop reordering.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -121,6 +119,19 @@
   pointer-events: none;
 }
 .wizard-footer-content .ctrl { pointer-events: auto; }
+.wizard-footer-hidden-here { opacity: 0.35; }
+.wizard-footer-hidden-here::after {
+  content: 'Hidden on first page';
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  font-size: 9px;
+  color: #b33;
+  background: rgba(255,255,255,0.85);
+  padding: 1px 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .wizard-page-indicator {
   position: absolute;
   top: 4px; left: 6px;
@@ -337,7 +348,19 @@
   font-size: 11.5px;
 }
 .wizard-page-editor-item { flex-direction: column; align-items: stretch; gap: 6px; }
+.wizard-page-editor-item.drag-over { border-color: var(--bp-accent-2); border-style: dashed; }
+.wizard-page-editor-item.dragging { opacity: 0.4; }
 .wizard-page-editor-toprow { display: flex; align-items: center; gap: 6px; }
+.wizard-page-grip {
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--bp-text-faint);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 1px;
+  user-select: none;
+}
+.wizard-page-grip:active { cursor: grabbing; }
 .wizard-page-reorder { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
 .wizard-page-reorder button { font-size: 9px; line-height: 1; padding: 1px 5px; }
 .wizard-requirements-wrap { display: flex; flex-direction: column; gap: 5px; padding-left: 2px; }
@@ -414,7 +437,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.26';
+  --stylesheet-version: '1.27';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -857,6 +880,11 @@ button, input, select, textarea {
 .design-form.no-titlebar .design-form-titlebar {
   background: #f4f1ea; color: #6b6f76; font-family: var(--bp-font-mono); font-size: 10.5px;
 }
+/* FormBorderStyle=None means NO title bar at all in real WinForms - the
+   rule above only re-skins it as a faux browser-tab bar for the HTML
+   preview (skin-html), which still wants something shown there. For an
+   actual WinForms/WPF/WinUI preview with None, hide it outright instead. */
+.design-form.fbs-none:not(.skin-html) .design-form-titlebar { display: none; }
 
 .form-resize-handle { position: absolute; z-index: 20; }
 .frh-e { top: 26px; right: -4px; bottom: 0; width: 8px; cursor: ew-resize; }

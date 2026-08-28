@@ -1,31 +1,19 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.29
+    Version 1.30
 
     Revision:
 
-    1. Fixed Anchor never being reapplied when a container's size changed
-    via Dock (only manual drag-resize triggered it before) - e.g. setting
-    a Wizard's own Dock to Fill grew the wizard but left its Anchored
-    footer buttons stuck at their original pixel position instead of
-    tracking the new bottom edge. recomputeAllDocking() now cascades
-    Anchor to a container's children whenever its own size changes,
-    regardless of what caused the change.
-
-    2. containerClientRect() now also shrinks for a Wizard's Contents nav
-    strip (Wizard-Builder.js's wizardContentBounds), matching
-    recomputeAllDocking's existing TabControl/Wizard handling - a footer
-    child (tabPage null) still gets the full bounds.
-
-    3. Objects modal: clicking a TabControl/Wizard page header now
-    switches the canvas to that page (previously informational only),
-    and selecting a control that lives on a specific page does the same
-    automatically - so picking "CheckBox1" under "[Options]" shows the
-    Options page, the same as clicking "[Options]" itself would.
+    1. Added state.form.borderlessResizable and folded it into
+    renderFormChrome's isResizable check - FormBorderStyle=None normally
+    disables resize handles entirely (accurate to real WinForms, which
+    has no OS resize grips once the border/title bar is gone), but this
+    lets the canvas show them anyway when the user has opted into the new
+    generated mouse-drag borderless-resize code (CodeGen-WinForms.js).
 */
 
-const ENGINE_VERSION = '1.29';
+const ENGINE_VERSION = '1.30';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -59,6 +47,7 @@ const state = {
     maximizeBox: true,
     closeBox: true,
     formBorderStyle: 'Sizable', // real WinForms enum - replaces a plain true/false "resizable" toggle
+    borderlessResizable: false, // only meaningful when formBorderStyle is 'None' - adds mouse-drag edge resizing since None has no OS resize grips
     startPosition: 'CenterScreen',
     topMost: true,
     events: { Load: { fn: 'Form_Load', code: '', ps1: '' } },
@@ -397,7 +386,7 @@ function renderFormChrome() {
   const fbs = state.form.formBorderStyle || 'Sizable';
   const noTitlebar = isHtml || fbs === 'None';
   const isToolWindow = fbs === 'FixedToolWindow' || fbs === 'SizableToolWindow';
-  const isResizable = fbs === 'Sizable' || fbs === 'SizableToolWindow';
+  const isResizable = fbs === 'Sizable' || fbs === 'SizableToolWindow' || (fbs === 'None' && state.form.borderlessResizable);
   const titlebarHeight = noTitlebar ? 0 : (isToolWindow ? 20 : 26);
 
   formEl.style.width = state.form.width + 'px';
