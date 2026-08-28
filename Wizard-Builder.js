@@ -1,44 +1,19 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.12
+    Version 1.13
 
     Revision:
 
-    1. All starter-template top-of-page labels (Welcome/Options/Summary,
-    plus the previously-empty Blank template, which now gets one too)
-    moved 15px lower (y:20 -> y:35 - the shared default "highest label
-    point" across every template) and given matching format props
-    (fontSize 14, fontBold true) so every page's title label looks the
-    same regardless of template. Welcome's body label (Label2) is now
-    full-width within the page's content area and center-aligned
-    (fullWidth flag on the template spec, resolved against
-    wizardContentBounds in populateWizardPageTemplate). Summary's
-    RichTextBox now defaults ReadOnly=true (it's meant to be an
-    auto-populated log, not hand-typed - new prop, Control-Data.js/
-    CodeGen-WinForms.js) and its instructional label no longer names a
-    specific button, since which button shows depends on whether a
-    Summary-of-Actions-Taken page follows it (see #2/#3). Added a new
-    summaryAfter template ("Summary of Actions Taken") - same shape as
-    Summary (title label + read-only RichTextBox) - as an unwired
-    placeholder second summary page for later configuration.
-
-    2. wizardShowFunctionLines now gives the Next button a "Run" label
-    (instead of "Next") on any Summary-template page that ISN'T the
-    wizard's last page - i.e. a Summary of Tasks page followed by a
-    Summary of Actions Taken page. A Summary page that IS the last page
-    still gets "Finish" like before (unchanged single-summary-page
-    behavior); everything else still gets "Next".
-
-    3. The Pages editor's "+ Add page" button now calls
-    populateWizardPageTemplate for the page it just created (it starts
-    on the Blank template, which now has real starter content), matching
-    what already happens for every page created via the initial setup
-    modal - previously a freshly-added page stayed empty until the
-    Template dropdown was changed away and back.
+    1. Welcome template's body label (Label2) updated for Control-Data.js
+    1.10's new 9-point Text Align value scheme - textAlign: 'Center' is
+    no longer a valid value now that Label.textAlign is a literal
+    ContentAlignment name, so it's now textAlign: 'MiddleCenter'. No
+    other template label sets textAlign, so every other page's title
+    label picks up the new MiddleLeft default untouched.
 */
 
-const WIZARD_BUILDER_VERSION = '1.12';
+const WIZARD_BUILDER_VERSION = '1.13';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -79,7 +54,7 @@ const WIZARD_TEMPLATES = {
     // actual content width, so this stays centered-on-form even if the
     // wizard gets resized or gains a Contents nav strip that eats into
     // the available width.
-    { type: 'Label', x: 20, y: 69, w: 380, h: 80, fullWidth: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'Center' } },
+    { type: 'Label', x: 20, y: 69, w: 380, h: 80, fullWidth: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'MiddleCenter' } },
   ],
   options: [
     { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
