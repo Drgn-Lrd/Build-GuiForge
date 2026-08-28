@@ -1,452 +1,457 @@
 /*
-    Render.js
+    Control-Data.js
     Written by: Johnathon Largent
-    Version 1.6
+    Version 1.10
 
     Revision:
 
-    1. Fixed Label's canvas preview never actually reflecting Text Align:
-    it was passing p.textAlign.toLowerCase() straight through as a CSS
-    text-align value, which was fine for the old Left/Center/Right-only
-    scheme but produces invalid values like "middleleft" now that
-    textAlign is a full ContentAlignment name (Control-Data.js 1.10) -
-    invalid CSS values are silently ignored, so alignment changes never
-    showed up. New contentAlignParts() splits the value into text-align
-    (horizontal) plus a flex alignItems/justifyContent pair (vertical),
-    and .rc-label is now a flex container so "Middle"/"Top"/"Bottom"
-    actually have something to act on.
+    1. Label's Text Align is now a real two-axis alignment control
+    (contentAlignEditor, Properties-Pane.js) - the full 9-point
+    Top/Middle/Bottom x Left/Center/Right grid, same spirit as the
+    Anchor editor - instead of a Left/Center/Right-only dropdown that
+    silently assumed Top vertically. Default is MiddleLeft.
 */
 
-const RENDER_VERSION = '1.6';
+const CONTROL_DATA_VERSION = '1.10';
 
-function renderControl(c) {
-  const def = CONTROL_DEFS[c.type];
-  const el = document.createElement('div');
-  el.className = 'ctrl' + (c.id === state.selectedId ? ' selected' : '') + (c.interact ? ' interact-mode' : '');
-  el.style.left = c.x + 'px';
-  el.style.top = c.y + 'px';
-  el.style.width = c.w + 'px';
-  el.style.height = c.h + 'px';
-  el.style.zIndex = c.z;
-  el.dataset.id = c.id;
+// Which properties make sense to SET on another control from event action
+// code, per control type - used by the "Set another control's property"
+// snippet so the Property dropdown only ever shows options that control
+// type actually has (fixes picking e.g. SelectedIndex on a NumericUpDown,
+// which has no such property and would error at runtime).
+const SETTABLE_PROPS_BY_TYPE = {
+  Button: ['Text', 'Enabled', 'Visible'],
+  Label: ['Text', 'Enabled', 'Visible'],
+  TextBox: ['Text', 'Enabled', 'Visible', 'ReadOnly'],
+  MaskedTextBox: ['Text', 'Enabled', 'Visible'],
+  CheckBox: ['Checked', 'Text', 'Enabled', 'Visible'],
+  RadioButton: ['Checked', 'Text', 'Enabled', 'Visible'],
+  ComboBox: ['SelectedIndex', 'Text', 'Enabled', 'Visible'],
+  ListBox: ['SelectedIndex', 'Enabled', 'Visible'],
+  CheckedListBox: ['Enabled', 'Visible'],
+  Panel: ['Enabled', 'Visible'],
+  GroupBox: ['Text', 'Enabled', 'Visible'],
+  PictureBox: ['Enabled', 'Visible'],
+  ProgressBar: ['Value', 'Enabled', 'Visible'],
+  TrackBar: ['Value', 'Enabled', 'Visible'],
+  NumericUpDown: ['Value', 'Enabled', 'Visible'],
+  DateTimePicker: ['Value', 'Enabled', 'Visible'],
+  RichTextBox: ['Text', 'Enabled', 'Visible', 'ReadOnly'],
+  LinkLabel: ['Text', 'Enabled', 'Visible'],
+};
+const DEFAULT_SETTABLE_PROPS = ['Enabled', 'Visible'];
 
-  const badge = document.createElement('div');
-  badge.className = 'ctrl-badge';
-  badge.textContent = c.name + '  ' + c.x + ',' + c.y + '  ' + c.w + '\u00d7' + c.h;
-  el.appendChild(badge);
-
-  if (def.isTabControl) {
-    // Tab switching is a structural design action, not a runtime preview
-    // interaction, so the header must stay clickable even when Interact
-    // is off - it lives outside .ctrl-inner (which is pointer-events:none
-    // unless interacting) rather than going through renderInner().
-    el.appendChild(buildTabHeaderStrip(c));
-
-    const body = document.createElement('div');
-    body.className = 'rc-tabcontrol-body';
-    el.appendChild(body);
-
-    const content = document.createElement('div');
-    content.className = 'tabcontrol-content';
-    state.controls
-      .filter(ch => ch.parentId === c.id && ch.tabPage === c.activeTabId)
-      .forEach(ch => content.appendChild(renderControl(ch)));
-    el.appendChild(content);
-  } else if (def.isWizard) {
-    // No clickable tab strip here (unless Contents is Horizontal/Vertical,
-    // which IS clickable, same click pattern as TabControl's header) - a
-    // plain wizard doesn't show page tabs to the end user, so the design
-    // surface doesn't imply one either. Footer children (Back/Next/Cancel,
-    // etc.) render in their own full-bounds layer on top, since a real
-    // installer's button bar spans under the Contents nav strip too -
-    // page content instead renders in a layer offset/shrunk to make room
-    // for that strip.
-    const body = document.createElement('div');
-    body.className = 'wizard-body';
-    el.appendChild(body);
-    el.appendChild(buildWizardContentsNav(c));
-    el.appendChild(buildWizardPageIndicator(c));
-
-    const pageContent = document.createElement('div');
-    const cs = c.props.contentsStyle || 'None';
-    const contentClass = cs.startsWith('Vertical') ? 'vertical' : cs.startsWith('Horizontal') ? 'horizontal' : 'none';
-    pageContent.className = 'wizard-content wizard-content-' + contentClass;
-    state.controls
-      .filter(ch => ch.parentId === c.id && !ch.wizardFooter && ch.tabPage === c.activeTabId)
-      .forEach(ch => pageContent.appendChild(renderControl(ch)));
-    el.appendChild(pageContent);
-
-    const footerContent = document.createElement('div');
-    footerContent.className = 'wizard-footer-content';
-    const onFirstPage = (c.props.pages || [])[0] && (c.props.pages || [])[0].id === c.activeTabId;
-    state.controls
-      .filter(ch => ch.parentId === c.id && ch.wizardFooter)
-      .forEach(ch => {
-        const childEl = renderControl(ch);
-        // Back is hidden (not just disabled) on the first page at runtime -
-        // dim it here rather than actually removing it, so it stays visible
-        // and selectable/movable while designing regardless of which page
-        // happens to be showing.
-        if (ch.wizardRole === 'back' && onFirstPage) childEl.classList.add('wizard-footer-hidden-here');
-        footerContent.appendChild(childEl);
-      });
-    el.appendChild(footerContent);
-  } else {
-    const inner = document.createElement('div');
-    inner.className = 'ctrl-inner';
-    inner.style.cssText += borderStyleFor(c.props, c.type);
-    inner.style.boxSizing = 'border-box';
-    inner.appendChild(renderInner(c));
-    el.appendChild(inner);
-
-    if (def.isContainer) {
-      state.controls.filter(ch => ch.parentId === c.id).forEach(ch => el.appendChild(renderControl(ch)));
-    }
-  }
-
-  if (c.id === state.selectedId) {
-    ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].forEach(pos => {
-      const h = document.createElement('div');
-      h.className = 'resize-handle rh-' + pos;
-      h.dataset.handle = pos;
-      el.appendChild(h);
-    });
-  }
-
-  el.addEventListener('mousedown', onControlMouseDown);
-  return el;
+function getSettableProps(type) {
+  return SETTABLE_PROPS_BY_TYPE[type] || DEFAULT_SETTABLE_PROPS;
 }
 
-function buildTabHeaderStrip(c) {
-  const header = document.createElement('div');
-  header.className = 'rc-tabcontrol-header';
-  (c.props.tabs || []).forEach(tab => {
-    const btn = document.createElement('div');
-    btn.className = 'rc-tabcontrol-tab' + (tab.id === c.activeTabId ? ' active' : '');
-    btn.textContent = tab.label;
-    btn.title = 'Click to switch to this tab page while designing.';
-    btn.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      c.activeTabId = tab.id;
-      selectControl(c.id);
-    });
-    header.appendChild(btn);
-  });
-  return header;
+// What kind of widget the Value field should be, given the target
+// control's type and which property was picked - e.g. a real date input
+// for DateTimePicker.Value, a dropdown of the target's own item labels
+// for ComboBox/ListBox.SelectedIndex, a toggle for boolean properties.
+function resolveValueWidgetKind(targetType, property) {
+  if (property === 'Checked' || property === 'Enabled' || property === 'Visible' || property === 'ReadOnly') return 'boolean';
+  if (property === 'Value' && targetType === 'DateTimePicker') return 'date';
+  if (property === 'Value' && (targetType === 'NumericUpDown' || targetType === 'TrackBar' || targetType === 'ProgressBar')) return 'number';
+  if (property === 'SelectedIndex' && (targetType === 'ComboBox' || targetType === 'ListBox')) return 'targetItemIndex';
+  return 'text';
 }
 
-function fontStyleFor(p) {
-  return `font-family:${p.fontFamily};font-size:${p.fontSize}px;font-weight:${p.fontBold ? '700' : '400'};font-style:${p.fontItalic ? 'italic' : 'normal'};`;
+// Small starter icon library for ToolStrip buttons - a real icon system
+// (browsable library, custom uploads) is a bigger future feature; this is
+// just enough to make New/Open/Save look like actual toolbar buttons
+// instead of plain text. 16x16 line-art, same style as the toolbox icons.
+const TOOLSTRIP_ICONS = {
+  none: '',
+  new: '<path d="M4 1.5h5l3 3v10h-8v-13z"/><path d="M9 1.5v3h3"/>',
+  open: '<path d="M1.5 4.5v9a1 1 0 001 1h11a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H2.5a1 1 0 00-1 1z"/>',
+  save: '<rect x="2" y="2" width="12" height="12" rx="1"/><rect x="4.7" y="2" width="4.6" height="3.8"/><rect x="4.2" y="9" width="7.6" height="5"/>',
+};
+
+function toolStripIconSvg(key) {
+  const inner = TOOLSTRIP_ICONS[key] || '';
+  return `<svg class="tool-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 }
 
-const BORDER_STYLE_VISIBLE_TYPES = new Set([
-  'TextBox', 'ComboBox', 'ListBox', 'NumericUpDown', 'DateTimePicker',
-  'RichTextBox', 'PictureBox', 'Panel', 'GroupBox',
-]);
+const DEFAULT_TOOLSTRIP_ITEMS = [
+  { id: 'new', label: 'New', icon: 'new' },
+  { id: 'open', label: 'Open', icon: 'open' },
+  { id: 'save', label: 'Save', icon: 'save' },
+];
 
-function borderStyleFor(p, type) {
-  if (!p || !('borderStyle' in p) || !BORDER_STYLE_VISIBLE_TYPES.has(type)) return '';
-  switch (p.borderStyle) {
-    case 'None': return 'border:none;';
-    case 'Fixed3D': return 'border:2px inset #dcdcdc;';
-    case 'FixedSingle': default: return 'border:1px solid #7d8390;';
-  }
+// Property field shorthand: [key, label, type, default, extra]
+// type: text | number | px | checkbox | color | select | textarea
+const COMMON_APPEARANCE_PROPS = [
+  ['backColor', 'Back Color', 'color', '#F0F0F0'],
+  ['foreColor', 'Fore Color', 'color', '#000000'],
+  ['fontFamily', 'Font Family', 'select', 'Segoe UI', { options: ['Segoe UI', 'Arial', 'Tahoma', 'Consolas', 'Verdana', 'Times New Roman'] }],
+  ['fontSize', 'Font Size', 'px', 9],
+  ['fontBold', 'Bold', 'checkbox', false],
+  ['fontItalic', 'Italic', 'checkbox', false],
+  ['borderStyle', 'Border Style', 'select', 'FixedSingle', { options: ['None', 'FixedSingle', 'Fixed3D'] }],
+];
+
+const COMMON_BEHAVIOR_PROPS = [
+  ['visible', 'Visible', 'checkbox', true],
+  ['enabled', 'Enabled', 'checkbox', true],
+  ['tabIndex', 'Tab Index', 'number', 0],
+  ['toolTip', 'Tool Tip', 'text', ''],
+  ['dock', 'Dock', 'select', 'None', { options: ['None', 'Top', 'Bottom', 'Left', 'Right', 'Fill', 'TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'] }],
+  ['anchor', 'Anchor', 'anchorEditor', 'Top, Left'],
+  ['cursor', 'Cursor', 'select', 'Default', { options: ['Default', 'Hand', 'IBeam', 'Wait', 'Cross', 'SizeAll'] }],
+];
+
+// System-color-ish defaults per control type, applied on top of the common
+// grey (#F0F0F0) default so text-entry surfaces read as white like a real
+// Windows install rather than every control sharing one flat grey.
+const TYPE_BACKCOLOR_OVERRIDES = {
+  TextBox: '#FFFFFF', ComboBox: '#FFFFFF', ListBox: '#FFFFFF',
+  RichTextBox: '#FFFFFF', NumericUpDown: '#FFFFFF', DateTimePicker: '#FFFFFF',
+};
+
+// Default MenuStrip content: preset top-level menus (checkbox-enabled), each
+// with its own preset sub-items (also checkbox-enabled) plus room for the
+// user to add fully custom top-level menus and custom sub-items. Every
+// non-separator item ships with real default code (editable per-item),
+// not just a label - so File > Exit, Help > About, etc. actually do
+// something out of the box instead of being empty stubs.
+const PRESET_MENU_DEFAULT = [
+  {
+    id: 'file', label: 'File', enabled: true, preset: true,
+    items: [
+      { id: 'file_new', label: 'New', enabled: true, preset: true, code: '# TODO: reset the form/document to a blank state' },
+      { id: 'file_open', label: 'Open...', enabled: true, preset: true, code: '$dlg = New-Object System.Windows.Forms.OpenFileDialog\nif ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {\n    # TODO: load $($dlg.FileName)\n}' },
+      { id: 'file_save', label: 'Save', enabled: true, preset: true, code: '$dlg = New-Object System.Windows.Forms.SaveFileDialog\nif ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {\n    # TODO: save to $($dlg.FileName)\n}' },
+      { id: 'file_sep1', label: '-', enabled: true, preset: true, code: '' },
+      { id: 'file_exit', label: 'Exit', enabled: true, preset: true, code: '$Form.Close()' },
+    ],
+  },
+  {
+    id: 'view', label: 'View', enabled: true, preset: true,
+    items: [
+      { id: 'view_zoomin', label: 'Zoom In', enabled: true, preset: true, code: '$script:ZoomLevel = [Math]::Min(200, $script:ZoomLevel + 10)\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
+      { id: 'view_zoomout', label: 'Zoom Out', enabled: true, preset: true, code: '$script:ZoomLevel = [Math]::Max(50, $script:ZoomLevel - 10)\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
+      { id: 'view_reset', label: 'Reset Zoom', enabled: true, preset: true, code: '$script:ZoomLevel = 100\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
+    ],
+  },
+  {
+    id: 'help', label: 'Help', enabled: true, preset: true,
+    items: [
+      { id: 'help_docs', label: 'Documentation', enabled: true, preset: true, code: 'Start-Process "https://example.com/docs"' },
+      { id: 'help_about', label: 'About', enabled: true, preset: true, code: '', autoAbout: true },
+    ],
+  },
+];
+
+// Default TabControl content: two starter tab pages. Each tab page holds
+// its own separate set of children (tracked via each child's `tabPage`
+// field), so controls placed on Tab1 don't show up on Tab2.
+const DEFAULT_TABS = [
+  { id: 'tab1', label: 'Tab1' },
+  { id: 'tab2', label: 'Tab2' },
+];
+
+// Fallback page set for a Wizard control - only used if one is ever
+// created outside the guided setup modal (e.g. programmatically). Real
+// instances get their pages array overwritten by createWizardFromSetup()
+// in Wizard-Builder.js, which also populates each page's template content
+// and the Back/Next/Cancel footer buttons.
+const DEFAULT_WIZARD_PAGES = [
+  { id: 'PageWelcome', label: 'Welcome', template: 'welcome', requirements: [] },
+  { id: 'PageOptions', label: 'Options', template: 'options', requirements: [] },
+  { id: 'PageSummary', label: 'Summary', template: 'summary', requirements: [] },
+];
+
+const CONTROL_DEFS = {
+  Button: {
+    label: 'Button', glyph: 'Bt', defaultW: 90, defaultH: 26,
+    props: [['text', 'Text', 'text', 'Button']],
+    events: ['Click', 'ClickToClose'],
+  },
+  Label: {
+    label: 'Label', glyph: 'Ab', defaultW: 90, defaultH: 20,
+    props: [
+      ['text', 'Text', 'text', 'Label'],
+      ['textAlign', 'Text Align', 'contentAlignEditor', 'MiddleLeft'],
+    ],
+    events: ['Click'],
+  },
+  TextBox: {
+    label: 'TextBox', glyph: 'Tb', defaultW: 120, defaultH: 22,
+    props: [
+      ['text', 'Text', 'text', ''],
+      ['multiline', 'Multiline', 'checkbox', false],
+      ['readOnly', 'Read Only', 'checkbox', false],
+      ['passwordChar', 'Password Char', 'text', ''],
+      ['maxLength', 'Max Length', 'number', 0],
+    ],
+    events: ['TextChanged', 'Enter', 'Leave', 'KeyDown'],
+  },
+  CheckBox: {
+    label: 'CheckBox', glyph: 'Ck', defaultW: 110, defaultH: 22,
+    props: [
+      ['text', 'Text', 'text', 'CheckBox'],
+      ['checked', 'Checked', 'checkbox', false],
+    ],
+    events: ['CheckedChanged', 'Click'],
+  },
+  RadioButton: {
+    label: 'Radio Button', glyph: 'Rb', defaultW: 110, defaultH: 22,
+    props: [
+      ['text', 'Text', 'text', 'RadioButton'],
+      ['checked', 'Checked', 'checkbox', false],
+      ['groupName', 'Group Name', 'text', 'group1'],
+    ],
+    events: ['CheckedChanged', 'Click'],
+  },
+  ComboBox: {
+    label: 'ComboBox', glyph: 'Cb', defaultW: 130, defaultH: 22,
+    props: [
+      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
+      ['selectedIndex', 'Selected Index', 'number', -1],
+      ['dropDownStyle', 'DropDown Style', 'select', 'DropDown', { options: ['DropDown', 'DropDownList', 'Simple'] }],
+      ['text', 'Text (design-time)', 'hidden', ''],
+    ],
+    events: ['SelectedIndexChanged', 'TextChanged'],
+  },
+  ListBox: {
+    label: 'ListBox', glyph: 'Lb', defaultW: 130, defaultH: 90,
+    props: [
+      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
+      ['selectionMode', 'Selection Mode', 'select', 'One', { options: ['None', 'One', 'MultiSimple', 'MultiExtended'] }],
+      ['selectedIndices', 'Selected Indices (design-time)', 'hidden', []],
+    ],
+    events: ['SelectedIndexChanged'],
+  },
+  CheckedListBox: {
+    label: 'CheckedListBox', glyph: 'Cl', defaultW: 140, defaultH: 100,
+    props: [
+      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
+      ['checkOnClick', 'Check On Click', 'checkbox', true],
+      ['checkedIndices', 'Checked Indices (design-time)', 'hidden', []],
+    ],
+    events: ['ItemCheck'],
+  },
+  Panel: {
+    label: 'Panel', glyph: 'Pn', defaultW: 200, defaultH: 140,
+    props: [], events: ['Click'], isContainer: true,
+  },
+  GroupBox: {
+    label: 'GroupBox', glyph: 'Gb', defaultW: 200, defaultH: 140,
+    props: [['text', 'Text', 'text', 'GroupBox']],
+    events: [], isContainer: true,
+  },
+  PictureBox: {
+    label: 'PictureBox', glyph: 'Px', defaultW: 100, defaultH: 100,
+    props: [
+      ['imageSource', 'Image Source', 'text', ''],
+      ['sizeMode', 'Size Mode', 'select', 'Zoom', { options: ['Normal', 'StretchImage', 'AutoSize', 'CenterImage', 'Zoom'] }],
+    ],
+    events: ['Click'],
+  },
+  ProgressBar: {
+    label: 'ProgressBar', glyph: '%%', defaultW: 150, defaultH: 20,
+    props: [
+      ['min', 'Min', 'number', 0],
+      ['max', 'Max', 'number', 100],
+      ['value', 'Value', 'number', 40],
+    ],
+    events: [],
+  },
+  TrackBar: {
+    label: 'TrackBar', glyph: '/\\', defaultW: 150, defaultH: 30,
+    props: [
+      ['min', 'Min', 'number', 0],
+      ['max', 'Max', 'number', 10],
+      ['value', 'Value', 'number', 5],
+      ['tickFrequency', 'Tick Frequency', 'number', 1],
+    ],
+    events: ['ValueChanged', 'Scroll'],
+  },
+  NumericUpDown: {
+    label: 'NumericUpDown', glyph: '#u', defaultW: 80, defaultH: 22,
+    props: [
+      ['min', 'Min', 'number', 0],
+      ['max', 'Max', 'number', 100],
+      ['value', 'Value', 'number', 0],
+      ['increment', 'Increment', 'number', 1],
+      ['decimalPlaces', 'Decimal Places', 'number', 0],
+    ],
+    events: ['ValueChanged'],
+  },
+  DateTimePicker: {
+    label: 'DateTimePicker', glyph: 'Dt', defaultW: 130, defaultH: 22,
+    props: [
+      ['format', 'Format', 'select', 'Custom', { options: ['Custom', 'Long', 'Short', 'Time'] }],
+      ['customFormat', 'Custom Format', 'text', 'dd MMM yyyy'],
+      ['value', 'Value', 'text', ''],
+    ],
+    events: ['ValueChanged'],
+  },
+  RichTextBox: {
+    label: 'RichTextBox', glyph: 'Rt', defaultW: 180, defaultH: 100,
+    props: [
+      ['text', 'Text', 'textarea', ''],
+      ['readOnly', 'Read Only', 'checkbox', false],
+    ],
+    events: ['TextChanged'],
+  },
+  LinkLabel: {
+    label: 'LinkLabel', glyph: 'Ln', defaultW: 100, defaultH: 20,
+    props: [
+      ['text', 'Text', 'text', 'link'],
+      ['url', 'URL', 'text', 'https://'],
+    ],
+    events: ['LinkClicked'],
+  },
+  MenuStrip: {
+    label: 'MenuStrip', glyph: 'Mn', defaultW: 400, defaultH: 26,
+    props: [
+      ['menuItems', 'Menu Items', 'menuEditor', PRESET_MENU_DEFAULT],
+    ],
+    events: [],
+    isMenuStrip: true,
+  },
+  TabControl: {
+    label: 'TabControl', glyph: 'Tc', defaultW: 320, defaultH: 220,
+    props: [
+      ['tabs', 'Tabs', 'tabEditor', DEFAULT_TABS],
+    ],
+    events: [],
+    isContainer: true,
+    isTabControl: true,
+  },
+  MaskedTextBox: {
+    label: 'MaskedTextBox', glyph: 'Mt', defaultW: 130, defaultH: 22,
+    props: [
+      ['mask', 'Mask', 'text', '(000) 000-0000'],
+      ['text', 'Text', 'text', ''],
+    ],
+    events: ['TextChanged', 'MaskInputRejected'],
+  },
+  FlowLayoutPanel: {
+    label: 'FlowLayoutPanel', glyph: 'Fl', defaultW: 220, defaultH: 140,
+    props: [
+      ['flowDirection', 'Flow Direction', 'select', 'LeftToRight', { options: ['LeftToRight', 'TopDown', 'RightToLeft', 'BottomUp'] }],
+      ['wrapContents', 'Wrap Contents', 'checkbox', true],
+    ],
+    events: ['Click'],
+    isContainer: true,
+  },
+  TableLayoutPanel: {
+    label: 'TableLayoutPanel', glyph: 'Tl', defaultW: 220, defaultH: 140,
+    props: [
+      ['columnCount', 'Columns', 'number', 2],
+      ['rowCount', 'Rows', 'number', 2],
+    ],
+    events: ['Click'],
+    isContainer: true,
+  },
+  StatusStrip: {
+    label: 'StatusStrip', glyph: 'Ss', defaultW: 400, defaultH: 24,
+    props: [
+      ['text', 'Text', 'text', 'Ready'],
+    ],
+    events: [],
+  },
+  ToolStrip: {
+    label: 'ToolStrip', glyph: 'Ts', defaultW: 300, defaultH: 26,
+    props: [
+      ['items', 'Items', 'toolStripItemsEditor', DEFAULT_TOOLSTRIP_ITEMS],
+    ],
+    events: [],
+  },
+  Wizard: {
+    label: 'Multipage Wizard', glyph: 'Wz', defaultW: 460, defaultH: 320,
+    props: [
+      ['contentsStyle', 'Contents', 'select', 'None', { options: ['None', 'Horizontal', 'Horizontal Flat', 'Vertical', 'Vertical Flat'] }],
+      ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
+    ],
+    events: [],
+    isContainer: true,
+    isWizard: true,
+  },
+};
+
+// Real vector icons for the toolbox, one per control type - replaces the
+// old two-letter glyph abbreviations (Bt/Tb/Ck/etc). Each entry is just
+// the inner SVG markup; toolIconSvg() wraps it in a shared 16x16 <svg>
+// using currentColor so it follows the theme automatically.
+const TOOL_ICONS = {
+  Button: `<rect x="1.5" y="4.5" width="13" height="7" rx="1.5"/>`,
+  Label: `<path d="M2 4.5h7M2 8h10M2 11.5h5"/>`,
+  TextBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M4.2 6.2v3.6"/>`,
+  CheckBox: `<rect x="3" y="3" width="10" height="10" rx="1.5"/><path d="M5.2 8.2l2 2 3.6-4.2"/>`,
+  RadioButton: `<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>`,
+  ComboBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M10.3 6.7l1.4 1.5 1.4-1.5"/>`,
+  ListBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h5"/>`,
+  CheckedListBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><rect x="3.3" y="4.3" width="2.6" height="2.6" rx="0.4"/><path d="M3.7 5.6l0.6 0.6 1.2-1.3"/><path d="M7.3 5.6h5.2"/><rect x="3.3" y="9" width="2.6" height="2.6" rx="0.4"/><path d="M7.3 10.3h5.2"/>`,
+  Panel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/>`,
+  GroupBox: `<path d="M1.5 4.6V13.5h13V4.6H8.3M1.5 4.6h2.3M6.3 4.6c0-1.15.9-2.1 2-2.1s2 .95 2 2.1"/>`,
+  PictureBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><circle cx="5.3" cy="6" r="1.2"/><path d="M2 12l3.7-3.8 2.5 2.3L12 6.8l2 2.4"/>`,
+  ProgressBar: `<rect x="1.5" y="6" width="13" height="4" rx="1"/><rect x="2.3" y="6.8" width="6.5" height="2.4" fill="currentColor" stroke="none"/>`,
+  TrackBar: `<path d="M1.5 8h13"/><circle cx="9.5" cy="8" r="2.1" fill="currentColor" stroke="none"/>`,
+  NumericUpDown: `<rect x="1.5" y="4" width="9" height="8" rx="1"/><path d="M12.3 6.3l1.2-1.3 1.2 1.3M12.3 9.7l1.2 1.3 1.2-1.3"/>`,
+  DateTimePicker: `<rect x="1.5" y="3.3" width="13" height="10.7" rx="1"/><path d="M1.5 6.4h13M4.7 1.8v2.9M11.3 1.8v2.9M4 9h1.3M7.4 9h1.3M10.7 9h1.3M4 11.3h1.3"/>`,
+  RichTextBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h6"/>`,
+  LinkLabel: `<path d="M6.6 9.4l2.8-2.8"/><path d="M5.3 8.3a1.9 1.9 0 010-2.7l1.3-1.3a1.9 1.9 0 012.7 2.7l-.6.6"/><path d="M10.7 7.7a1.9 1.9 0 010 2.7l-1.3 1.3a1.9 1.9 0 01-2.7-2.7l.6-.6"/>`,
+  MenuStrip: `<rect x="1.5" y="3.3" width="13" height="3.4" rx="0.7"/><path d="M5.3 3.3v3.4M9.5 3.3v3.4"/><path d="M2 10.2h12M2 12.7h8"/>`,
+  TabControl: `<path d="M1.5 5.3V4a1 1 0 011-1h4l1.3 1.6h6.2a1 1 0 011 1v.7"/><rect x="1.5" y="5.3" width="13" height="8.2" rx="1"/><path d="M5.8 5.3v8.2"/>`,
+  MaskedTextBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M4 6.5h1.4M6.4 6.5h1.4M8.8 6.5h1.4M4 9.2h6.2"/>`,
+  FlowLayoutPanel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><rect x="3" y="3" width="4" height="3.2" rx="0.5"/><rect x="8" y="3" width="4" height="3.2" rx="0.5"/><rect x="3" y="7.2" width="4" height="3.2" rx="0.5"/>`,
+  TableLayoutPanel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M8 1.5v13M1.5 8h13"/>`,
+  StatusStrip: `<rect x="1.5" y="10.5" width="13" height="4" rx="0.7"/><path d="M4 12.5h4"/>`,
+  ToolStrip: `<rect x="1.5" y="3.3" width="13" height="4.4" rx="0.7"/><rect x="3" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="6.2" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="9.4" y="4.3" width="2.2" height="2.4" rx="0.4"/>`,
+  Wizard: `<rect x="1.5" y="2" width="13" height="9" rx="1"/><path d="M4 5.7h5M4 8h3.3"/><path d="M2 13.5h12M9.8 11l2.2 2-2.2 2" transform="translate(0,-1.2)"/>`,
+};
+
+function toolIconSvg(type) {
+  const inner = TOOL_ICONS[type] || '';
+  return `<svg class="tool-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 }
 
-// Splits a ContentAlignment value like "MiddleCenter" into the CSS this
-// tool actually needs to render it: text-align for the horizontal axis
-// (also governs how wrapped lines sit) and a flex alignItems/justifyContent
-// pair for the vertical axis, since .rc-label is otherwise just a block
-// div with no notion of "vertical middle" on its own.
-function contentAlignParts(align) {
-  const a = align || 'MiddleLeft';
-  const alignItems = a.startsWith('Top') ? 'flex-start' : a.startsWith('Bottom') ? 'flex-end' : 'center';
-  const textAlign = a.endsWith('Left') ? 'left' : a.endsWith('Right') ? 'right' : 'center';
-  const justifyContent = textAlign === 'left' ? 'flex-start' : textAlign === 'right' ? 'flex-end' : 'center';
-  return { alignItems, textAlign, justifyContent };
-}
+// Short usage description shown as a tooltip on each toolbox item -
+// what the control is for, in plain terms, since the icon/label alone
+// doesn't explain behavior for less-common controls.
+const TOOL_DESCRIPTIONS = {
+  Button: 'A clickable button. Wire its Click event to run code when pressed.',
+  Label: 'Static, read-only text. Not interactive - use for captions and headings.',
+  TextBox: 'A single- or multi-line field the user can type into.',
+  CheckBox: 'An independent on/off toggle. Multiple can be checked at once.',
+  RadioButton: 'A mutually-exclusive choice. Give matching Group Name to radio buttons that should only allow one selection.',
+  ComboBox: 'A dropdown the user can pick from (or type into, depending on DropDown Style). Enter choices in Items, one per line.',
+  ListBox: 'A scrollable list of choices, optionally multi-select. Enter choices in Items, one per line.',
+  CheckedListBox: 'Like ListBox, but every item gets its own checkbox - always a visible list, NOT a dropdown. Good for "pick any of these" scenarios where you want every option visible at once, not collapsed.',
+  Panel: 'A plain, unlabeled container for grouping other controls. Drag controls onto it to make them children.',
+  GroupBox: 'A labeled, bordered container for grouping related controls - the border and title make the grouping visible to the user.',
+  PictureBox: 'Displays an image. Set Image Source to a file path or URL.',
+  ProgressBar: 'Shows progress toward completion. Set Min/Max to the range, and Value to the current position - the fill on screen is (Value-Min)/(Max-Min).',
+  TrackBar: 'A draggable slider for picking a numeric value within Min/Max, in steps of Tick Frequency.',
+  NumericUpDown: 'A number field with up/down spinner arrows, constrained to Min/Max in steps of Increment.',
+  DateTimePicker: 'Lets the user pick a date (or time, if Format is Time). The Format property controls how it displays.',
+  RichTextBox: 'A multi-line text area for longer content than a TextBox is meant for.',
+  LinkLabel: 'Text styled and behaving like a hyperlink. Set URL to where it should navigate.',
+  MenuStrip: 'A top menu bar (File/Edit/View/etc). Comes with preset File/View/Help menus you can check on/off, edit, or add custom ones to - each item can have its own click code.',
+  MaskedTextBox: 'A TextBox that enforces a fixed input pattern (Mask), like a phone number or date field - the user can only type where the mask allows it.',
+  FlowLayoutPanel: 'A container that auto-arranges its children in a row or column, wrapping to the next line when it runs out of space - like text wrapping, but for controls.',
+  TableLayoutPanel: 'A container that arranges its children in a grid of rows and columns, each cell sized to fit its content.',
+  StatusStrip: 'A thin bar (usually docked to the bottom) showing status text - "Ready", progress, or similar.',
+  ToolStrip: 'A horizontal bar of buttons (usually docked to the top) for quick-access actions - New/Open/Save style toolbars.',
+  TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
+  Wizard: 'A multi-page installer-style wizard. Dropping this opens a setup dialog to choose your pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically. Use the Pages editor to add/rename/reorder/remove pages afterward.',
+};
 
-function renderInner(c) {
-  const p = c.props;
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'width:100%;height:100%;' + (p.visible === false ? 'opacity:0.35;' : '');
-
-  switch (c.type) {
-    case 'Button': {
-      wrap.innerHTML = `<div class="rc-button" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};">${escapeHtml(p.text)}</div>`;
-      break;
-    }
-    case 'Label': {
-      const align = contentAlignParts(p.textAlign);
-      wrap.innerHTML = `<div class="rc-label" style="${fontStyleFor(p)}color:${p.foreColor};display:flex;align-items:${align.alignItems};justify-content:${align.justifyContent};text-align:${align.textAlign};width:100%;height:100%;box-sizing:border-box;">${escapeHtml(p.text)}</div>`;
-      break;
-    }
-    case 'TextBox': {
-      if (p.multiline) {
-        wrap.innerHTML = `<textarea class="rc-textbox rc-textbox-multiline" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};" maxlength="${p.maxLength || ''}" ${p.readOnly ? 'readonly' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</textarea>`;
-      } else {
-        wrap.innerHTML = `<input type="${p.passwordChar ? 'password' : 'text'}" class="rc-textbox" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};" value="${escapeHtml(p.text)}" maxlength="${p.maxLength || ''}" ${p.readOnly ? 'readonly' : ''} ${c.interact ? '' : 'disabled'}>`;
-      }
-      if (c.interact) wrap.querySelector('input,textarea').addEventListener('input', (e) => { p.text = e.target.value; });
-      break;
-    }
-    case 'MaskedTextBox': {
-      wrap.innerHTML = `<input type="text" class="rc-textbox" style="${fontStyleFor(p)}" placeholder="${escapeHtml(p.mask)}" value="${escapeHtml(p.text)}" ${c.interact ? '' : 'disabled'}>`;
-      if (c.interact) wrap.querySelector('input').addEventListener('input', (e) => { p.text = e.target.value; });
-      break;
-    }
-    case 'CheckBox': {
-      wrap.innerHTML = `<label class="rc-check" style="${fontStyleFor(p)}color:${p.foreColor};"><input type="checkbox" ${p.checked ? 'checked' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</label>`;
-      if (c.interact) wrap.querySelector('input').addEventListener('change', (e) => { p.checked = e.target.checked; });
-      break;
-    }
-    case 'RadioButton': {
-      wrap.innerHTML = `<label class="rc-radio" style="${fontStyleFor(p)}color:${p.foreColor};"><input type="radio" ${p.checked ? 'checked' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</label>`;
-      if (c.interact) wrap.querySelector('input').addEventListener('change', (e) => { p.checked = e.target.checked; });
-      break;
-    }
-    case 'ComboBox': {
-      const items = (p.items || '').split('\n').filter(Boolean);
-      if (p.dropDownStyle === 'DropDownList') {
-        // Pick-only: a native select is the correct fit here.
-        wrap.innerHTML = `<select class="rc-combo" style="${fontStyleFor(p)}" ${c.interact ? '' : 'disabled'}>${items.map((it, i) => `<option ${i === p.selectedIndex ? 'selected' : ''}>${escapeHtml(it)}</option>`).join('')}</select>`;
-        if (c.interact) wrap.querySelector('select').addEventListener('change', (e) => {
-          p.selectedIndex = e.target.selectedIndex;
-          p.text = items[e.target.selectedIndex] || '';
-        });
-      } else {
-        // DropDown / Simple: the user can type a custom value, not just
-        // pick from the list - a native <select> can never do that, so
-        // this needs a real editable field. A datalist keeps the existing
-        // items available as suggestions without blocking free typing.
-        const listId = 'dl_' + c.id;
-        const currentText = p.text != null && p.text !== '' ? p.text : (items[p.selectedIndex] || '');
-        wrap.innerHTML = `<input type="text" class="rc-combo rc-combo-editable" list="${listId}" style="${fontStyleFor(p)}" placeholder="Type or pick an item..." value="${escapeHtml(currentText)}" ${c.interact ? '' : 'disabled'}>
-          <datalist id="${listId}">${items.map(it => `<option value="${escapeHtml(it)}"></option>`).join('')}</datalist>`;
-        if (c.interact) wrap.querySelector('input').addEventListener('input', (e) => {
-          p.text = e.target.value;
-          p.selectedIndex = items.indexOf(e.target.value);
-        });
-      }
-      break;
-    }
-    case 'ListBox': {
-      const items = (p.items || '').split('\n').filter(Boolean);
-      const list = document.createElement('div');
-      list.className = 'rc-listbox-custom';
-      list.style.cssText = fontStyleFor(p);
-      if (!p.selectedIndices) p.selectedIndices = [];
-
-      items.forEach((it, i) => {
-        const row = document.createElement('div');
-        row.className = 'rc-listbox-item' + (p.selectedIndices.includes(i) ? ' selected' : '');
-        row.textContent = it;
-        if (c.interact && p.selectionMode !== 'None') {
-          row.addEventListener('click', (e) => {
-            const mode = p.selectionMode;
-            if (mode === 'One') {
-              p.selectedIndices = [i];
-            } else if (mode === 'MultiSimple') {
-              // Real WinForms MultiSimple: plain click-click-click toggles
-              // an item in/out of the selection, no modifier key needed.
-              const idx = p.selectedIndices.indexOf(i);
-              if (idx >= 0) p.selectedIndices.splice(idx, 1);
-              else p.selectedIndices.push(i);
-            } else if (mode === 'MultiExtended') {
-              if (e.shiftKey && p.selectedIndices.length) {
-                const anchor = p.selectedIndices[p.selectedIndices.length - 1];
-                const [lo, hi] = anchor < i ? [anchor, i] : [i, anchor];
-                const range = [];
-                for (let k = lo; k <= hi; k++) range.push(k);
-                p.selectedIndices = range;
-              } else if (e.ctrlKey || e.metaKey) {
-                const idx = p.selectedIndices.indexOf(i);
-                if (idx >= 0) p.selectedIndices.splice(idx, 1);
-                else p.selectedIndices.push(i);
-              } else {
-                p.selectedIndices = [i];
-              }
-            }
-            render();
-          });
-        }
-        list.appendChild(row);
-      });
-      wrap.appendChild(list);
-      break;
-    }
-    case 'CheckedListBox': {
-      const items = (p.items || '').split('\n').filter(Boolean);
-      const list = document.createElement('div');
-      list.className = 'rc-listbox-custom rc-checkedlistbox';
-      list.style.cssText = fontStyleFor(p);
-      if (!p.checkedIndices) p.checkedIndices = [];
-
-      items.forEach((it, i) => {
-        const row = document.createElement('div');
-        row.className = 'rc-listbox-item rc-checkedlistbox-item';
-        const isChecked = p.checkedIndices.includes(i);
-        const box = document.createElement('span');
-        box.className = 'rc-checkedlistbox-box' + (isChecked ? ' checked' : '');
-        box.textContent = isChecked ? '\u2611' : '\u2610';
-        const label = document.createElement('span');
-        label.textContent = it;
-        row.appendChild(box);
-        row.appendChild(label);
-        if (c.interact) {
-          row.addEventListener('click', () => {
-            const idx = p.checkedIndices.indexOf(i);
-            if (idx >= 0) p.checkedIndices.splice(idx, 1);
-            else p.checkedIndices.push(i);
-            render();
-          });
-        }
-        list.appendChild(row);
-      });
-      wrap.appendChild(list);
-      break;
-    }
-    case 'Panel': {
-      wrap.innerHTML = `<div class="rc-panel" style="background:${p.backColor};"></div>`;
-      break;
-    }
-    case 'FlowLayoutPanel': {
-      wrap.innerHTML = `<div class="rc-flowpanel" style="background:${p.backColor};" title="Flow: ${p.flowDirection}"></div>`;
-      break;
-    }
-    case 'TableLayoutPanel': {
-      const cols = Math.max(1, p.columnCount || 1);
-      const rows = Math.max(1, p.rowCount || 1);
-      const vLines = Array.from({ length: cols - 1 }, (_, i) => `<div class="rc-table-vline" style="left:${(100 / cols) * (i + 1)}%;"></div>`).join('');
-      const hLines = Array.from({ length: rows - 1 }, (_, i) => `<div class="rc-table-hline" style="top:${(100 / rows) * (i + 1)}%;"></div>`).join('');
-      wrap.innerHTML = `<div class="rc-tablepanel" style="background:${p.backColor};">${vLines}${hLines}</div>`;
-      break;
-    }
-    case 'GroupBox': {
-      wrap.innerHTML = `<div class="rc-groupbox" style="background:${p.backColor};"><span class="gb-title">${escapeHtml(p.text)}</span></div>`;
-      break;
-    }
-    case 'PictureBox': {
-      wrap.innerHTML = `<div class="rc-picture">${p.imageSource ? escapeHtml(p.imageSource) : 'PictureBox'}</div>`;
-      break;
-    }
-    case 'ProgressBar': {
-      const pct = Math.max(0, Math.min(100, ((p.value - p.min) / (p.max - p.min || 1)) * 100));
-      wrap.innerHTML = `<div class="rc-progress"><div class="rc-progress-fill" style="width:${pct}%;"></div></div>`;
-      break;
-    }
-    case 'TrackBar': {
-      wrap.innerHTML = `<div class="rc-track"><input type="range" min="${p.min}" max="${p.max}" value="${p.value}" ${c.interact ? '' : 'disabled'}></div>`;
-      if (c.interact) wrap.querySelector('input').addEventListener('input', (e) => { p.value = Number(e.target.value); });
-      break;
-    }
-    case 'MenuStrip': {
-      wrap.appendChild(renderMenuStripPreview(p));
-      break;
-    }
-    case 'StatusStrip': {
-      wrap.innerHTML = `<div class="rc-statusstrip">${escapeHtml(p.text)}</div>`;
-      break;
-    }
-    case 'ToolStrip': {
-      const items = p.items || [];
-      wrap.innerHTML = `<div class="rc-toolstrip">${items.map(it => `<div class="rc-toolstrip-btn"><span class="rc-toolstrip-icon">${toolStripIconSvg(it.icon)}</span><span class="rc-toolstrip-label">${escapeHtml(it.label)}</span></div>`).join('')}</div>`;
-      break;
-    }
-    case 'NumericUpDown': {
-      wrap.innerHTML = `<input type="number" class="rc-numeric" style="${fontStyleFor(p)}" min="${p.min}" max="${p.max}" step="${p.increment}" value="${p.value}" ${c.interact ? '' : 'disabled'}>`;
-      if (c.interact) wrap.querySelector('input').addEventListener('change', (e) => { p.value = Number(e.target.value) || 0; });
-      break;
-    }
-    case 'DateTimePicker': {
-      if (c.interact) {
-        const inputType = p.format === 'Time' ? 'time' : 'date';
-        wrap.innerHTML = `<input type="${inputType}" class="rc-datetime-input" style="${fontStyleFor(p)}">`;
-        const inp = wrap.querySelector('input');
-        if (p.value) inp.value = p.value;
-        inp.addEventListener('change', (e) => { p.value = e.target.value; });
-      } else {
-        wrap.innerHTML = `<div class="rc-datetime" style="${fontStyleFor(p)}">${escapeHtml(formatDateTimePreview(p))}</div>`;
-      }
-      break;
-    }
-    case 'RichTextBox': {
-      wrap.innerHTML = `<textarea class="rc-richtext" style="${fontStyleFor(p)}background:${p.backColor || '#FFFFFF'};color:${p.foreColor};" ${p.readOnly ? 'readonly' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</textarea>`;
-      if (c.interact) wrap.querySelector('textarea').addEventListener('input', (e) => { p.text = e.target.value; });
-      break;
-    }
-    case 'LinkLabel': {
-      wrap.innerHTML = `<div class="rc-link" style="${fontStyleFor(p)}">${escapeHtml(p.text)}</div>`;
-      break;
-    }
-  }
-  return wrap;
-}
-
-// Renders a Date using .NET-style custom format tokens (the same tokens
-// WinForms' DateTimePicker.CustomFormat uses), so the designer preview
-// and the real generated behavior agree. Supports the common tokens:
-// dd/d, MMM/MMMM/MM/M, yyyy/yy, HH/hh/H/h, mm, ss, tt.
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-function formatDateCustom(d, fmt) {
-  const pad = (n, len) => String(n).padStart(len, '0');
-  const h24 = d.getHours();
-  const h12 = ((h24 + 11) % 12) + 1;
-  return fmt.replace(/yyyy|yy|MMMM|MMM|MM|M|dddd|ddd|dd|d|HH|H|hh|h|mm|ss|tt/g, (token) => {
-    switch (token) {
-      case 'yyyy': return String(d.getFullYear());
-      case 'yy': return pad(d.getFullYear() % 100, 2);
-      case 'MMMM': return MONTH_FULL[d.getMonth()];
-      case 'MMM': return MONTH_ABBR[d.getMonth()];
-      case 'MM': return pad(d.getMonth() + 1, 2);
-      case 'M': return String(d.getMonth() + 1);
-      case 'dddd': return d.toLocaleDateString(undefined, { weekday: 'long' });
-      case 'ddd': return d.toLocaleDateString(undefined, { weekday: 'short' });
-      case 'dd': return pad(d.getDate(), 2);
-      case 'd': return String(d.getDate());
-      case 'HH': return pad(h24, 2);
-      case 'H': return String(h24);
-      case 'hh': return pad(h12, 2);
-      case 'h': return String(h12);
-      case 'mm': return pad(d.getMinutes(), 2);
-      case 'ss': return pad(d.getSeconds(), 2);
-      case 'tt': return h24 < 12 ? 'AM' : 'PM';
-      default: return token;
-    }
-  });
-}
-
-function formatDateTimePreview(p) {
-  let d = p.value ? new Date(p.value) : new Date();
-  if (isNaN(d.getTime())) d = new Date();
-  switch (p.format) {
-    case 'Long': return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    case 'Short': return d.toLocaleDateString();
-    case 'Time': return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    case 'Custom': return formatDateCustom(d, p.customFormat || 'dd MMM yyyy');
-    default: return d.toLocaleDateString();
-  }
-}
-
-function renderMenuStripPreview(p) {
-  const bar = document.createElement('div');
-  bar.className = 'rc-menustrip';
-  (p.menuItems || []).filter(m => m.enabled).forEach(m => {
-    const top = document.createElement('div');
-    top.className = 'rc-menustrip-item';
-    top.textContent = m.label;
-    const sub = document.createElement('div');
-    sub.className = 'rc-menustrip-sub';
-    (m.items || []).filter(it => it.enabled).forEach(it => {
-      const row = document.createElement('div');
-      if (it.label === '-') { row.className = 'rc-menustrip-sep'; }
-      else { row.className = 'rc-menustrip-subitem'; row.textContent = it.label; }
-      sub.appendChild(row);
-    });
-    if (sub.children.length) top.appendChild(sub);
-    bar.appendChild(top);
-  });
-  return bar;
-}
+const TOOLBOX_GROUPS = [
+  { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'MaskedTextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
+  { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'CheckedListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
+  { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl', 'FlowLayoutPanel', 'TableLayoutPanel'] },
+  { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
+  { heading: 'Menus & Bars', types: ['MenuStrip', 'ToolStrip', 'StatusStrip'] },
+];
+// Wizard is intentionally NOT in the toolbox above - it doesn't behave
+// like a draggable-to-a-spot control (it fills its host, opens a setup
+// modal, etc.), so it gets its own dedicated toolbar button + picker
+// modal instead (see the Wizards toolbar button, Wizard-Builder.js).
+const WIZARD_TYPES = [
+  { type: 'Wizard', label: 'Multipage Wizard', description: 'An installer-style wizard with a guided page setup, Back/Next/Cancel navigation, and per-page requirements.' },
+];
