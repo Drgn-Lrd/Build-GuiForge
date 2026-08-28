@@ -1,17 +1,20 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.5
 
     Revision:
 
-    1. Added the "Disable another control while checked" event snippet
-    (mirrorUnchecked), mirroring the existing "Enable another control
-    while checked" one but inverted - Enabled = -not Checked instead of
-    = Checked.
+    1. Added the "Add to Summary of Tasks log" event snippet
+    (summaryLogAdd) - appends one line of text to a target control
+    (typically the read-only RichTextBox on a wizard's Summary page,
+    Wizard-Builder.js/Control-Data.js) via AppendText, so checking a box
+    or clicking a button can build up a running "what this will do" list.
+    Not restricted to a specific event - useful from CheckedChanged,
+    Click, or anything else.
 */
 
-const PROPERTIES_PANE_VERSION = '1.4';
+const PROPERTIES_PANE_VERSION = '1.5';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -88,6 +91,15 @@ const EVENT_SNIPPETS = [
       { key: 'target', label: 'Target Control', type: 'control' },
       { key: 'property', label: 'Property', type: 'targetProperty' },
       { key: 'value', label: 'New Value', type: 'targetValue' },
+    ],
+  },
+  {
+    id: 'summaryLogAdd', label: 'Add to Summary of Tasks log',
+    template: `{target}.AppendText("{message}" + [Environment]::NewLine)`,
+    help: 'Appends one line of text to a summary/log-style control - typically the read-only RichTextBox on a wizard\'s Summary page - building up a running list of what this wizard will do (or did) as the user interacts with earlier controls. Each firing adds another line; it doesn\'t clear or replace anything already there.',
+    params: [
+      { key: 'target', label: 'Target Control', type: 'control' },
+      { key: 'message', label: 'Log Message', type: 'text', default: 'This will install the selected feature.' },
     ],
   },
 ];
