@@ -1,12 +1,13 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.32
+    Version 1.33
 
     Revision:
 
-    1. Added .wizard-requirements-mode-row for the new All/Any combining
-    selector above the Additional Requirements list.
+    1. Added .content-align-editor-row/-grid/-cell - the 3x3 grid picker
+    for Label's new Text Align (contentAlignEditor, Properties-Pane.js) -
+    same visual family as the Anchor editor's chip row.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -50,6 +51,26 @@
   cursor: pointer;
 }
 .anchor-editor-chip input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--bp-accent-2); flex-shrink: 0; }
+
+/* Content align editor (Label Text Align - 3x3 ContentAlignment grid, single-select) */
+.content-align-editor-row { grid-template-columns: 60px 1fr; align-items: center; }
+.content-align-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 20px);
+  grid-template-rows: repeat(3, 20px);
+  gap: 3px;
+}
+.content-align-editor-cell {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--bp-border);
+  border-radius: 3px;
+  background: var(--bp-panel-2);
+  cursor: pointer;
+}
+.content-align-editor-cell:hover { border-color: var(--bp-accent-2); }
+.content-align-editor-cell.active { background: var(--bp-accent-2); border-color: var(--bp-accent-2); }
 
 /* TabControl canvas preview */
 .rc-tabcontrol-header {
@@ -461,7 +482,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.32';
+  --stylesheet-version: '1.33';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
