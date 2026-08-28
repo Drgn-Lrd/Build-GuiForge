@@ -1,21 +1,12 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.27
+    Version 1.28
 
     Revision:
 
-    1. Fixed FormBorderStyle=None not actually hiding the design canvas's
-    title bar - the JS math was already correct, but the CSS rule for
-    .no-titlebar only re-skinned the bar (for the HTML preview's faux
-    browser-tab look), it never had a `display: none` for the genuine
-    no-title-bar case. Added one scoped to real (.fbs-none, non-HTML)
-    previews only, leaving the HTML mock bar untouched.
-
-    2. Added .wizard-footer-hidden-here (dims the Back button with a
-    "Hidden on first page" hint when the canvas is on page 1) and the
-    drag-handle grip/drag-over styles for the Pages editor's new
-    drag-and-drop reordering.
+    1. Added .wizard-nav-item.drag-over (dashed outline) for the Contents
+    nav strip's new on-canvas page-reorder drag-and-drop.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -186,6 +177,7 @@
 }
 .wizard-nav-item.active { background: #FFFFFF; font-weight: 600; }
 .wizard-nav-item:hover:not(.active) { background: #DCDCDC; }
+.wizard-nav-item.drag-over { outline: 2px dashed #4a7fd1; outline-offset: -2px; }
 
 /* MenuStrip canvas preview */
 .rc-menustrip {
@@ -437,7 +429,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.27';
+  --stylesheet-version: '1.28';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;

@@ -1,22 +1,31 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.3
+    Version 1.4
 
     Revision:
 
-    1. Show-<Name>Page now also toggles the Back button's Visible (not
-    just Enabled) so it's actually hidden on the first page instead of
-    just greyed out - no Back from there. The Pages editor's designer
-    preview dims Back with a "Hidden on first page" hint when the canvas
-    is showing page 1, instead of silently matching runtime behavior.
+    1. Moved page-reorder drag handles onto the wizard itself: the
+    Contents nav strip's items (buildWizardContentsNav) are now
+    draggable and reorder the pages array directly on the canvas, the
+    same as the Pages editor's grip handle but without leaving the
+    wizard - reordering there was a properties-pane-only feature before,
+    which wasn't what was asked for. Only reachable when Contents is
+    Horizontal or Vertical, since that's the only on-canvas page list a
+    wizard has.
 
-    2. Added a proper drag handle (grip icon, HTML5 drag-and-drop) to
-    each page row for reordering, alongside the existing Up/Down buttons
-    rather than replacing them.
+    2. createWizardFromSetup now sizes the wizard to its actual filled
+    bounds (via containerClientRect, the same math the dock engine uses)
+    BEFORE creating the footer buttons and sets Dock=Fill - a wizard
+    conventionally takes over its whole host rather than sitting as a
+    small nested rectangle, and this way the footer buttons are
+    positioned for the real final size instead of the small pre-dock
+    default. Also, double-clicking the Wizard tool now adds it into
+    whichever container is currently selected (matching what dragging
+    onto that container would do) instead of always going to the Form.
 */
 
-const WIZARD_BUILDER_VERSION = '1.3';
+const WIZARD_BUILDER_VERSION = '1.4';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -120,6 +129,20 @@ function wizardGeneratePageId(label, existingIds) {
 
 function createWizardFromSetup(pageConfigs, x, y, parentId, tabPage) {
   const ctrl = createControl('Wizard', x, y, parentId, tabPage);
+  // A wizard conventionally takes over its entire host (the whole Form, or
+  // whatever panel/container it was placed into) rather than sitting as a
+  // small nested rectangle - default it to Dock=Fill, and size it to that
+  // filled size immediately (via the same containerClientRect the dock
+  // engine itself uses) so the footer buttons created below are
+  // positioned relative to the real final size, not the small pre-dock
+  // default. Without this they'd be computed for a 460x320 box and only
+  // get moved to match the real size on a LATER resize, never this one.
+  const fillRect = containerClientRect(parentId, tabPage);
+  ctrl.w = Math.max(1, fillRect.w);
+  ctrl.h = Math.max(1, fillRect.h);
+  ctrl.props.dock = 'Fill';
+  ctrl.dockOrder = ++state.dockOrderSeq;
+
   const ids = [];
   ctrl.props.pages = pageConfigs.map(pc => {
     const id = wizardGeneratePageId(pc.label, ids);
@@ -582,17 +605,46 @@ function buildWizardContentsNav(c) {
   const pages = c.props.pages || [];
   const nav = document.createElement('div');
   nav.className = cs === 'Horizontal' ? 'wizard-nav-horizontal' : 'wizard-nav-vertical';
-  pages.forEach(page => {
+  pages.forEach((page, pi) => {
     const item = document.createElement('div');
     item.className = 'wizard-nav-item' + (page.id === c.activeTabId ? ' active' : '');
     item.textContent = page.label;
-    item.title = 'Click to switch to this page while designing.';
-    item.addEventListener('mousedown', (e) => {
+    item.title = 'Click to switch to this page, or drag to reorder it, while designing.';
+    item.draggable = true;
+
+    // mousedown still needs to stop the wizard's own select/move gesture
+    // from also firing, but NOT preventDefault - that would block the
+    // browser from ever starting the native drag below.
+    item.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+    item.addEventListener('click', (e) => {
       e.stopPropagation();
-      e.preventDefault();
       c.activeTabId = page.id;
       selectControl(c.id);
     });
+
+    // Drag-and-drop page reorder, directly on the wizard's own Contents
+    // nav strip - the on-canvas equivalent of the Pages editor's grip
+    // handle, for reordering without leaving the wizard itself.
+    item.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/wizard-page-index', String(pi));
+    });
+    item.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('text/wizard-page-index')) { e.preventDefault(); item.classList.add('drag-over'); }
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+    item.addEventListener('drop', (e) => {
+      if (!e.dataTransfer.types.includes('text/wizard-page-index')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      item.classList.remove('drag-over');
+      const fromIdx = Number(e.dataTransfer.getData('text/wizard-page-index'));
+      if (Number.isNaN(fromIdx) || fromIdx === pi) return;
+      pages.splice(pi, 0, pages.splice(fromIdx, 1)[0]);
+      render();
+    });
+
     nav.appendChild(item);
   });
   return nav;

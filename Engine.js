@@ -1,19 +1,23 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.30
+    Version 1.31
 
     Revision:
 
-    1. Added state.form.borderlessResizable and folded it into
-    renderFormChrome's isResizable check - FormBorderStyle=None normally
-    disables resize handles entirely (accurate to real WinForms, which
-    has no OS resize grips once the border/title bar is gone), but this
-    lets the canvas show them anyway when the user has opted into the new
-    generated mouse-drag borderless-resize code (CodeGen-WinForms.js).
+    1. WinForms is now the default format (currentFormat) instead of
+    WPF - WPF isn't currently testable for the in-progress Wizard
+    feature, so defaulting to it made every fresh load start on a format
+    that can't be exercised yet.
+
+    2. Double-clicking the Wizard tool now adds it into whichever
+    container is currently selected (matching what dragging onto that
+    container would do) instead of always going to the Form - a wizard
+    conventionally takes over its whole host, so it should default into
+    wherever you're already working, not always the top level.
 */
 
-const ENGINE_VERSION = '1.30';
+const ENGINE_VERSION = '1.31';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -31,7 +35,7 @@ const state = {
   gridSize: 5,
   snapEnabled: true,
   nudgeStep: 5,
-  currentFormat: 'wpf',
+  currentFormat: 'winforms',
   sectionOpen: {},       // title -> bool, persists collapse state across re-renders
   undoStack: [],
   redoStack: [],
@@ -810,7 +814,20 @@ function initToolbox() {
         e.dataTransfer.setData('text/plain', type);
       });
       item.addEventListener('dblclick', () => {
-        if (type === 'Wizard') { openWizardSetupModal(20, 20, null, null); return; }
+        if (type === 'Wizard') {
+          // A wizard conventionally takes over its whole host rather than
+          // sitting as a small nested rectangle - if a container is
+          // currently selected, add the new wizard into it (matching what
+          // dragging onto that container would do); otherwise it lands on
+          // the Form, same as everything else. createWizardFromSetup sets
+          // Dock=Fill on it either way, so it fills whichever one it is.
+          const sel = state.selectedId ? getControl(state.selectedId) : null;
+          const isSelContainer = sel && CONTROL_DEFS[sel.type].isContainer;
+          const parentId = isSelContainer ? sel.id : null;
+          const tabPage = isSelContainer && (CONTROL_DEFS[sel.type].isTabControl || CONTROL_DEFS[sel.type].isWizard) ? sel.activeTabId : null;
+          openWizardSetupModal(20, 20, parentId, tabPage);
+          return;
+        }
         const c = createControl(type, 20, 20, null);
         selectControl(c.id);
       });

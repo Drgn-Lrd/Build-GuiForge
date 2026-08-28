@@ -1,25 +1,24 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.3
+    Version 1.4
 
     Revision:
 
-    1. Fixed a real bug: wizard footer buttons (Back/Next/Cancel) never
-    showed up at runtime no matter where they were positioned. Cause: a
-    wizard's full-size page Panel is added to the wizard's Controls
-    BEFORE its footer buttons, and in WinForms an earlier-added control
-    paints IN FRONT of one added later - so the page panel completely
-    covered the buttons behind it. Every wizardFooter child now calls
-    BringToFront() right after being added.
-
-    2. Added generated mouse-drag borderless-resize code (MouseDown/
-    MouseMove/MouseUp on the Form) when Form Border Style is None and
-    the new "Resizable (borderless)" toggle (Properties-Pane.js) is on -
-    a real None-bordered form has no OS resize grips otherwise.
+    1. Fixed a real bug: $Form.Size sets the OUTER window bounds
+    (title bar/border included), so with a title bar present the actual
+    client area ended up shorter than state.form.height by however tall
+    that title bar is - every child control's Y coordinate assumes a
+    client area of exactly that height, so content anchored near the
+    bottom (a wizard's footer buttons, for instance) was clipped until
+    the window was manually resized larger at runtime. Looked fine in
+    the designer (which already grows the outer preview box by the
+    title bar height on top of the client size) but not the generated
+    app. Switched to $Form.ClientSize, which guarantees the client area
+    itself - not the outer window - is exactly the configured size.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.3';
+const CODEGEN_WINFORMS_VERSION = '1.4';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -44,7 +43,18 @@ function generateWinForms() {
   }
   lines.push(`$Form = New-Object System.Windows.Forms.Form`);
   lines.push(`$Form.Text = "${f.text}"`);
-  lines.push(`$Form.Size = New-Object System.Drawing.Size(${f.width}, ${f.height})`);
+  // ClientSize, not Size: .Size sets the OUTER window bounds (title bar
+  // and border included), so with a title bar present the actual usable
+  // client area ends up shorter than state.form.height by however tall
+  // that title bar is - every child control's Y coordinate assumes a
+  // client area of exactly this height/width (matching the designer,
+  // which already grows the outer preview box by the title bar height on
+  // top of this for display - see renderFormChrome in Engine.js), so
+  // content anchored near the bottom (like a wizard's footer buttons)
+  // would get clipped until the window was manually resized larger.
+  // ClientSize tells WinForms to size the OUTER window however it needs
+  // to, so the client area itself is guaranteed to be exactly this size.
+  lines.push(`$Form.ClientSize = New-Object System.Drawing.Size(${f.width}, ${f.height})`);
   lines.push(`$Form.BackColor = ${psColor(f.backColor)}`);
   lines.push(`$Form.StartPosition = "${f.startPosition}"`);
   lines.push(`$Form.MinimizeBox = $${f.minimizeBox}`);

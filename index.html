@@ -21,7 +21,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.12';</script>
+<script>window.PAGE_VERSION = '1.13';</script>
 </head>
 <body>
 
@@ -39,8 +39,8 @@
       <div class="lang-family">
         <span class="lang-family-label">PowerShell</span>
         <div class="format-switch" id="formatSwitchPs">
-          <button data-format="wpf" class="active">WPF</button>
-          <button data-format="winforms">WinForms</button>
+          <button data-format="wpf">WPF</button>
+          <button data-format="winforms" class="active">WinForms</button>
           <button data-format="winui">WinUI</button>
         </div>
       </div>
@@ -111,9 +111,9 @@
     </div>
     <div class="modal-body">
       <div class="code-tabs">
-        <button data-tab="winforms">WinForms (PowerShell)</button>
+        <button data-tab="winforms" class="active">WinForms (PowerShell)</button>
         <button data-tab="html">HTML</button>
-        <button data-tab="wpf" class="active">WPF (XAML)</button>
+        <button data-tab="wpf">WPF (XAML)</button>
         <button data-tab="winui">WinUI (scaffold)</button>
       </div>
       <div class="wpf-file-controls" id="wpfFileControls" style="display:none;">
