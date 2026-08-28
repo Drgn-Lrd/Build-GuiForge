@@ -1,19 +1,18 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.9
+    Version 1.10
 
     Revision:
 
-    1. RichTextBox gained a Read Only property (matches TextBox's), off
-    by default - needed so a RichTextBox used as an auto-populated log
-    (e.g. a wizard Summary page, Wizard-Builder.js) can be locked against
-    hand-typing. Wired into CodeGen-WinForms.js. Also added to
-    SETTABLE_PROPS_BY_TYPE.RichTextBox so the "Set another control's
-    property" event snippet can toggle it too.
+    1. Label's Text Align is now a real two-axis alignment control
+    (contentAlignEditor, Properties-Pane.js) - the full 9-point
+    Top/Middle/Bottom x Left/Center/Right grid, same spirit as the
+    Anchor editor - instead of a Left/Center/Right-only dropdown that
+    silently assumed Top vertically. Default is MiddleLeft.
 */
 
-const CONTROL_DATA_VERSION = '1.9';
+const CONTROL_DATA_VERSION = '1.10';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -173,7 +172,7 @@ const CONTROL_DEFS = {
     label: 'Label', glyph: 'Ab', defaultW: 90, defaultH: 20,
     props: [
       ['text', 'Text', 'text', 'Label'],
-      ['textAlign', 'Text Align', 'select', 'Left', { options: ['Left', 'Center', 'Right'] }],
+      ['textAlign', 'Text Align', 'contentAlignEditor', 'MiddleLeft'],
     ],
     events: ['Click'],
   },
