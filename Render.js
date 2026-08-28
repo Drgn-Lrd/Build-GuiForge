@@ -1,19 +1,17 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.3
+    Version 1.4
 
     Revision:
 
-    1. The Wizard's canvas preview now dims the Back button with a
-    "Hidden on first page" hint (.wizard-footer-hidden-here) when the
-    canvas is currently showing the first page, matching the new
-    Show-<Name>Page runtime behavior (Wizard-Builder.js) without actually
-    removing it from the canvas - it stays selectable/movable regardless
-    of which page happens to be active while designing.
+    1. Fixed the page-content wrapper's class picking to recognize the
+    new "Horizontal Flat"/"Vertical Flat" Contents values (Control-Data.js)
+    - it was deriving the CSS class from a lowercased exact match, which
+    broke once those values stopped being single words.
 */
 
-const RENDER_VERSION = '1.3';
+const RENDER_VERSION = '1.4';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -64,7 +62,9 @@ function renderControl(c) {
     el.appendChild(buildWizardPageIndicator(c));
 
     const pageContent = document.createElement('div');
-    pageContent.className = 'wizard-content wizard-content-' + (c.props.contentsStyle || 'None').toLowerCase();
+    const cs = c.props.contentsStyle || 'None';
+    const contentClass = cs.startsWith('Vertical') ? 'vertical' : cs.startsWith('Horizontal') ? 'horizontal' : 'none';
+    pageContent.className = 'wizard-content wizard-content-' + contentClass;
     state.controls
       .filter(ch => ch.parentId === c.id && !ch.wizardFooter && ch.tabPage === c.activeTabId)
       .forEach(ch => pageContent.appendChild(renderControl(ch)));

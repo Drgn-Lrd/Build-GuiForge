@@ -1,29 +1,29 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.6
+    Version 1.8
 
     Revision:
 
-    1. Removed drag-and-drop from the setup modal and canvas Contents nav,
-    keeping only Up/Down arrows everywhere pages can be reordered
-    (setup modal, Pages editor, canvas) - redundant with the arrows in
-    the same spot, not genuinely useful extra places to work.
-
-    2. Each page's Template is now an editable dropdown (was a static
-    badge) on its own line in both the setup modal and the Pages editor,
-    applying that template's starter controls immediately when changed
-    (adds to the page, doesn't clear it first). Removed the separate
-    template selector next to "+ Add page" in both places, since there's
-    now one place to set it instead of two - add a page, then pick its
-    template from its own row.
-
-    3. Split the Pages editor's row onto two lines (reorder/name/Show/
-    Delete, then Template) instead of cramming everything - it doesn't
-    truncate the page name anymore.
+    1. Made the Required/Additional-Requirements/Events-handler
+    relationship for boolean-kind (Checked) controls genuinely
+    bidirectional instead of the one-way (event -> detected requirement)
+    version from the previous revision. New single mutator
+    wizardSyncBooleanGate(wizardCtrl, targetCtrl, required) is now what
+    the "Required before Next" toggle and "+ Add requirement" (when only
+    boolean-kind controls exist on the page) both call - it sets
+    wizardRequired AND writes/removes the actual CheckedChanged event
+    action (mirrorChecked targeting Next), so flipping either one updates
+    the other two, since the Pages editor's detected-requirements scan
+    picks up whatever the event action says on every render regardless
+    of which path wrote it. Retargeting a comparator-based requirement
+    row to a boolean-kind control now converts it into a synced gate
+    instead of leaving two separate representations of the same thing.
+    Removed the "Also detected from..." note - the toggle itself is the
+    truth now, so there's nothing left to separately explain.
 */
 
-const WIZARD_BUILDER_VERSION = '1.6';
+const WIZARD_BUILDER_VERSION = '1.8';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -35,8 +35,8 @@ const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
 function wizardContentBounds(c) {
   const cs = c.props.contentsStyle;
   let w = c.w, h = c.h;
-  if (cs === 'Horizontal') h = Math.max(1, h - WIZARD_HORIZONTAL_CONTENTS_HEIGHT);
-  else if (cs === 'Vertical') w = Math.max(1, w - WIZARD_VERTICAL_CONTENTS_WIDTH);
+  if (cs === 'Horizontal' || cs === 'Horizontal Flat') h = Math.max(1, h - WIZARD_HORIZONTAL_CONTENTS_HEIGHT);
+  else if (cs === 'Vertical' || cs === 'Vertical Flat') w = Math.max(1, w - WIZARD_VERTICAL_CONTENTS_WIDTH);
   return { w, h };
 }
 
@@ -159,6 +159,103 @@ function createWizardFromSetup(pageConfigs, x, y, parentId, tabPage) {
 
 let wizardSetupPending = null; // { x, y, parentId, tabPage } for the drop currently being configured
 
+/* =========================================================================
+   Wizards toolbar button - "choose a wizard" picker modal. Wizard isn't in
+   the normal toolbox (it doesn't behave like a draggable-to-a-spot
+   control), so this is its own dedicated entry point instead - and one
+   that scales to more wizard TYPES later (WIZARD_TYPES, Control-Data.js)
+   without needing a redesign.
+   ========================================================================= */
+
+function getWizardPickerOverlay() {
+  let overlay = document.getElementById('wizardPickerModalOverlay');
+  if (overlay) return overlay;
+
+  overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'wizardPickerModalOverlay';
+  overlay.innerHTML = `
+    <div class="modal" style="width:360px;">
+      <div class="modal-header">
+        <h2>Add a Wizard</h2>
+        <button class="btn icon-btn btn-ghost" id="wizardPickerClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="wizardPickerList"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="wizardPickerCancel">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeWizardPickerModal(); });
+  document.getElementById('wizardPickerClose').addEventListener('click', closeWizardPickerModal);
+  document.getElementById('wizardPickerCancel').addEventListener('click', closeWizardPickerModal);
+
+  return overlay;
+}
+
+function closeWizardPickerModal() {
+  const overlay = document.getElementById('wizardPickerModalOverlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+// Placing a wizard into whatever's currently selected (or the Form) is
+// shared by both entry points below - the picker modal (when there's a
+// choice to make) and the direct-launch path (when there isn't).
+function wizardTargetFromSelection() {
+  const sel = state.selectedId ? getControl(state.selectedId) : null;
+  const isSelContainer = sel && CONTROL_DEFS[sel.type].isContainer;
+  const parentId = isSelContainer ? sel.id : null;
+  const tabPage = isSelContainer && (CONTROL_DEFS[sel.type].isTabControl || CONTROL_DEFS[sel.type].isWizard) ? sel.activeTabId : null;
+  return { parentId, tabPage };
+}
+
+function openWizardPickerModal() {
+  // Only one wizard type exists so far - skip straight to it instead of
+  // making the user pick from a list of one. Once WIZARD_TYPES grows,
+  // this naturally starts showing the picker on its own.
+  if (WIZARD_TYPES.length <= 1) {
+    const { parentId, tabPage } = wizardTargetFromSelection();
+    if (WIZARD_TYPES[0] && WIZARD_TYPES[0].type === 'Wizard') openWizardSetupModal(20, 20, parentId, tabPage);
+    return;
+  }
+
+  const overlay = getWizardPickerOverlay();
+  const list = document.getElementById('wizardPickerList');
+  list.innerHTML = '';
+  WIZARD_TYPES.forEach(entry => {
+    const item = document.createElement('div');
+    item.className = 'tab-editor-item wizard-picker-item';
+    item.innerHTML = `<div class="wizard-picker-item-text"><div class="wizard-picker-item-label">${escapeHtml(entry.label)}</div><div class="wizard-picker-item-desc">${escapeHtml(entry.description)}</div></div>`;
+    item.title = 'Add this to the currently selected container (or the Form, if nothing\'s selected).';
+    item.addEventListener('click', () => {
+      closeWizardPickerModal();
+      const { parentId, tabPage } = wizardTargetFromSelection();
+      if (entry.type === 'Wizard') openWizardSetupModal(20, 20, parentId, tabPage);
+    });
+    list.appendChild(item);
+  });
+  overlay.classList.add('open');
+}
+
+// Every container a new wizard could be added into - the Form itself
+// ("Main Panel") plus any container control that exists, keyed the same
+// way createControl expects (parentId/tabPage). Used by the setup modal's
+// target dropdown so switching where the wizard lands doesn't require
+// closing the modal and re-launching it from a different selection.
+function wizardAvailableTargets() {
+  const targets = [{ parentId: null, tabPage: null, label: 'Main Panel' }];
+  state.controls.forEach(c => {
+    if (!CONTROL_DEFS[c.type].isContainer) return;
+    const tabPage = (CONTROL_DEFS[c.type].isTabControl || CONTROL_DEFS[c.type].isWizard) ? c.activeTabId : null;
+    targets.push({ parentId: c.id, tabPage, label: c.name });
+  });
+  return targets;
+}
+
 function getWizardSetupOverlay() {
   let overlay = document.getElementById('wizardSetupModalOverlay');
   if (overlay) return overlay;
@@ -173,6 +270,10 @@ function getWizardSetupOverlay() {
         <button class="btn icon-btn btn-ghost" id="wizardSetupClose">&times;</button>
       </div>
       <div class="modal-body">
+        <div class="prop-row" id="wizardSetupTargetRow" style="display:none;">
+          <label title="Which panel/container to add this wizard into.">Add into</label>
+          <select id="wizardSetupTargetSelect"></select>
+        </div>
         <div class="items-hint" style="margin-bottom:8px;">Choose the pages for this wizard. You can add, rename, reorder, or remove pages later from the Pages editor.</div>
         <div id="wizardSetupPagesList"></div>
         <button type="button" class="btn btn-ghost tab-add-btn" id="wizardSetupAddBtn">+ Add page</button>
@@ -281,6 +382,35 @@ function openWizardSetupModal(x, y, parentId, tabPage) {
     { label: 'Summary', template: 'summary' },
   ];
   const overlay = getWizardSetupOverlay();
+
+  // Only worth showing a dropdown if there's an actual choice to make -
+  // with nothing but the Form to add into, it'd be a one-item selector.
+  const targets = wizardAvailableTargets();
+  const targetRow = document.getElementById('wizardSetupTargetRow');
+  const targetSelect = document.getElementById('wizardSetupTargetSelect');
+  if (targets.length > 1) {
+    targetSelect.innerHTML = '';
+    targets.forEach((t, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = t.label;
+      if (t.parentId === parentId && t.tabPage === tabPage) opt.selected = true;
+      targetSelect.appendChild(opt);
+    });
+    // Nothing in the list matched the incoming parentId/tabPage (shouldn't
+    // normally happen, but stay safe) - fall back to whatever rendered as
+    // selected by default (index 0) rather than leaving it inconsistent.
+    if (!targets.some(t => t.parentId === parentId && t.tabPage === tabPage)) targetSelect.value = '0';
+    targetSelect.onchange = (e) => {
+      const t = targets[Number(e.target.value)];
+      wizardSetupPending.parentId = t.parentId;
+      wizardSetupPending.tabPage = t.tabPage;
+    };
+    targetRow.style.display = '';
+  } else {
+    targetRow.style.display = 'none';
+  }
+
   renderWizardSetupList();
   overlay.classList.add('open');
 }
@@ -411,26 +541,41 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   reqWrap.className = 'wizard-requirements-wrap';
   const reqHeading = document.createElement('div');
   reqHeading.className = 'wizard-requirements-heading';
-  reqHeading.title = 'Extra conditions - beyond any controls checked "Required before Next" on the control itself - that must hold before Next can leave THIS page. Built with the same control/property pickers used everywhere else in the app, not raw code. Gates only this page\'s turn at the shared Next button, never the button\'s Enabled property directly, so it can\'t leak onto other pages.';
-  reqHeading.textContent = 'Additional requirements (optional)';
+  reqHeading.title = 'Extra conditions - beyond any controls checked "Required before Next" on the control itself - that must hold before Next can leave THIS page. Detected ones (grey, "from event handler") come from a control\'s own CheckedChanged handler that already enables/disables Next directly - nothing to configure, they just show what\'s already wired up. Add more manually below for anything not covered that way. Gates only this page\'s turn at the shared Next button, never the button\'s Enabled property directly, so it can\'t leak onto other pages.';
+  reqHeading.textContent = 'Additional requirements';
   reqWrap.appendChild(reqHeading);
+
+  const detected = wizardDetectedRequirementsForPage(ctrl, page);
+  detected.forEach(d => reqWrap.appendChild(buildWizardDetectedRequirementRow(d)));
 
   if (!page.requirements) page.requirements = [];
   const pageControls = state.controls.filter(ch => ch.parentId === ctrl.id && ch.tabPage === page.id && !ch.wizardFooter);
   if (!pageControls.length) {
-    const hint = document.createElement('div');
-    hint.className = 'items-hint';
-    hint.textContent = 'Add a control to this page first to set up a requirement.';
-    reqWrap.appendChild(hint);
+    if (!detected.length) {
+      const hint = document.createElement('div');
+      hint.className = 'items-hint';
+      hint.textContent = 'Add a control to this page first to set up a requirement.';
+      reqWrap.appendChild(hint);
+    }
   } else {
     page.requirements.forEach((req, ri) => reqWrap.appendChild(buildWizardRequirementRow(ctrl, page, req, ri, pageControls)));
     const addReqBtn = document.createElement('button');
     addReqBtn.type = 'button';
     addReqBtn.className = 'btn btn-ghost tab-add-btn';
     addReqBtn.textContent = '+ Add requirement';
+    addReqBtn.title = 'For a checkbox-like control, use its own "Required before Next" toggle instead - it stays in sync with this list automatically. This button is for comparator-based requirements (numeric/text controls) that don\'t have an equivalent toggle.';
     addReqBtn.addEventListener('click', () => {
-      const t = pageControls[0];
-      page.requirements.push({ targetId: t.id, property: getSettableProps(t.type)[0], comparator: 'eq', value: true });
+      // A boolean-kind (Checked) target is better served by its own
+      // Required toggle - which keeps this list AND the event handler in
+      // sync automatically - so prefer a non-boolean target here and only
+      // fall back to syncing a boolean one directly if nothing else exists.
+      const nonBoolTarget = pageControls.find(c => resolveValueWidgetKind(c.type, wizardPrimaryGateProperty(c.type)) !== 'boolean');
+      if (nonBoolTarget) {
+        page.requirements.push({ targetId: nonBoolTarget.id, property: wizardPrimaryGateProperty(nonBoolTarget.type), comparator: 'eq', value: 0 });
+      } else {
+        const notYetRequired = pageControls.find(c => !c.wizardRequired);
+        if (notYetRequired) wizardSyncBooleanGate(ctrl, notYetRequired, true);
+      }
       render();
     });
     reqWrap.appendChild(addReqBtn);
@@ -455,73 +600,111 @@ const WIZARD_COMPARATORS = [
 // the exact same helpers the "Set another control's property" event snippet
 // already uses, so this feels like the rest of the app instead of a raw
 // textarea island.
+// The property to gate on is auto-derived from the control's type instead
+// of asking the user to pick one - realistically there's only ever one
+// property worth comparing per type (Checked for a CheckBox, Value for a
+// NumericUpDown, ...), so a whole dropdown for it was one control too many.
+const WIZARD_PRIMARY_GATE_PROPERTY = {
+  CheckBox: 'Checked', RadioButton: 'Checked',
+  TextBox: 'Text', MaskedTextBox: 'Text', RichTextBox: 'Text',
+  ComboBox: 'SelectedIndex', ListBox: 'SelectedIndex', CheckedListBox: 'CheckedItems.Count',
+  NumericUpDown: 'Value', TrackBar: 'Value', ProgressBar: 'Value',
+  DateTimePicker: 'Value',
+};
+function wizardPrimaryGateProperty(type) {
+  return WIZARD_PRIMARY_GATE_PROPERTY[type] || getSettableProps(type)[0] || 'Text';
+}
+
+// A requirement row is 2 fields for a boolean control (target, Checked/
+// Unchecked) or 3 for anything else (target, comparator, value) - never
+// more than that, and never a property dropdown at all.
 function buildWizardRequirementRow(ctrl, page, req, ri, pageControls) {
   const row = document.createElement('div');
   row.className = 'wizard-requirement-row';
 
   if (!req.targetId || !pageControls.some(c => c.id === req.targetId)) req.targetId = pageControls[0].id;
   const target = getControl(req.targetId);
-
-  const targetSelect = document.createElement('select');
-  pageControls.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id; opt.textContent = `${c.name} (${c.type})`;
-    if (c.id === req.targetId) opt.selected = true;
-    targetSelect.appendChild(opt);
-  });
-  targetSelect.addEventListener('change', (e) => {
-    req.targetId = e.target.value;
-    req.property = getSettableProps(getControl(req.targetId).type)[0];
-    render();
-  });
-
-  const propSelect = document.createElement('select');
-  const props = getSettableProps(target.type);
-  if (!props.includes(req.property)) req.property = props[0];
-  props.forEach(pr => {
-    const opt = document.createElement('option');
-    opt.value = pr; opt.textContent = pr;
-    if (pr === req.property) opt.selected = true;
-    propSelect.appendChild(opt);
-  });
-  propSelect.addEventListener('change', (e) => { req.property = e.target.value; render(); });
-
-  const compSelect = document.createElement('select');
-  WIZARD_COMPARATORS.forEach(cmp => {
-    const opt = document.createElement('option');
-    opt.value = cmp.id; opt.textContent = cmp.label;
-    if (cmp.id === req.comparator) opt.selected = true;
-    compSelect.appendChild(opt);
-  });
-  compSelect.addEventListener('change', (e) => { req.comparator = e.target.value; });
-
+  req.property = wizardPrimaryGateProperty(target.type);
   const kind = resolveValueWidgetKind(target.type, req.property);
-  let valueInput;
-  if (kind === 'boolean') {
-    valueInput = document.createElement('select');
-    ['true', 'false'].forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v; opt.textContent = v;
-      if (String(!!req.value) === v) opt.selected = true;
-      valueInput.appendChild(opt);
+
+  const targetWrap = document.createElement('div');
+  targetWrap.className = 'snippet-param-control wizard-requirement-target';
+  const targetDisplay = document.createElement('span');
+  targetDisplay.className = 'snippet-param-control-name';
+  targetDisplay.textContent = `${target.name} (${target.type})`;
+  const pickBtn = document.createElement('button');
+  pickBtn.type = 'button';
+  pickBtn.className = 'btn btn-ghost pick-control-btn';
+  pickBtn.innerHTML = '\u2316 Select Control';
+  pickBtn.title = 'Click, then click a control on this page (on the canvas) to require it - same picker used everywhere else in the app.';
+  pickBtn.addEventListener('click', () => {
+    startControlPick((picked) => {
+      if (!pageControls.some(c => c.id === picked.id)) {
+        alert(`${picked.name} isn't on this page, so it can't be a requirement for leaving it - pick a control that's actually placed on "${page.label}".`);
+        return;
+      }
+      const pickedKind = resolveValueWidgetKind(picked.type, wizardPrimaryGateProperty(picked.type));
+      if (pickedKind === 'boolean') {
+        // Boolean-kind targets live in the toggle+event sync, not this
+        // comparator list - convert instead of leaving two representations
+        // of the same thing lying around.
+        page.requirements.splice(ri, 1);
+        wizardSyncBooleanGate(ctrl, picked, true);
+      } else {
+        req.targetId = picked.id;
+        req.property = wizardPrimaryGateProperty(picked.type);
+        req.comparator = 'eq';
+        req.value = 0;
+      }
+      render();
     });
-    valueInput.addEventListener('change', (e) => { req.value = e.target.value === 'true'; });
-  } else if (kind === 'number') {
-    valueInput = document.createElement('input');
-    valueInput.type = 'number';
-    valueInput.value = typeof req.value === 'number' ? req.value : 0;
-    valueInput.addEventListener('change', (e) => { req.value = Number(e.target.value) || 0; });
+  });
+  targetWrap.appendChild(targetDisplay);
+  targetWrap.appendChild(pickBtn);
+  row.appendChild(targetWrap);
+  row.className = 'wizard-requirement-row' + (kind === 'boolean' ? ' wizard-requirement-row-2' : ' wizard-requirement-row-3');
+
+  if (kind === 'boolean') {
+    const stateSelect = document.createElement('select');
+    [{ v: 'true', t: 'Checked' }, { v: 'false', t: 'Unchecked' }].forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o.v; opt.textContent = o.t;
+      if (String(!!req.value) === o.v) opt.selected = true;
+      stateSelect.appendChild(opt);
+    });
+    req.comparator = 'eq';
+    stateSelect.addEventListener('change', (e) => { req.value = e.target.value === 'true'; });
+    row.appendChild(stateSelect);
   } else {
-    // targetItemIndex/date/text all fall back to a plain text field here -
-    // good enough for the comparator-based cases this covers (a control's
-    // own Required checkbox already handles the common non-comparator
-    // "must be filled in/checked/selected" case).
-    valueInput = document.createElement('input');
-    valueInput.type = 'text';
-    valueInput.value = req.value != null ? req.value : '';
-    valueInput.addEventListener('change', (e) => { req.value = e.target.value; });
+    const compSelect = document.createElement('select');
+    WIZARD_COMPARATORS.forEach(cmp => {
+      const opt = document.createElement('option');
+      opt.value = cmp.id; opt.textContent = cmp.label;
+      if (cmp.id === req.comparator) opt.selected = true;
+      compSelect.appendChild(opt);
+    });
+    compSelect.addEventListener('change', (e) => { req.comparator = e.target.value; });
+    row.appendChild(compSelect);
+
+    let valueInput;
+    if (kind === 'number') {
+      valueInput = document.createElement('input');
+      valueInput.type = 'number';
+      valueInput.value = typeof req.value === 'number' ? req.value : 0;
+      valueInput.addEventListener('change', (e) => { req.value = Number(e.target.value) || 0; });
+    } else {
+      // targetItemIndex/date/text fall back to a plain text field - good
+      // enough for the comparator-based cases this covers (a control's own
+      // Required checkbox already handles the plain "must be filled in/
+      // checked/selected" case without needing a comparator at all).
+      valueInput = document.createElement('input');
+      valueInput.type = 'text';
+      valueInput.value = req.value != null ? req.value : '';
+      valueInput.addEventListener('change', (e) => { req.value = e.target.value; });
+    }
+    valueInput.className = 'wizard-requirement-value';
+    row.appendChild(valueInput);
   }
-  valueInput.className = 'wizard-requirement-value';
 
   const delBtn = document.createElement('button');
   delBtn.type = 'button';
@@ -529,12 +712,27 @@ function buildWizardRequirementRow(ctrl, page, req, ri, pageControls) {
   delBtn.textContent = '\u2715';
   delBtn.title = 'Remove this requirement.';
   delBtn.addEventListener('click', () => { page.requirements.splice(ri, 1); render(); });
-
-  row.appendChild(targetSelect);
-  row.appendChild(propSelect);
-  row.appendChild(compSelect);
-  row.appendChild(valueInput);
   row.appendChild(delBtn);
+
+  return row;
+}
+
+// Read-only row for a requirement detected from an existing event handler
+// (see wizardDetectedRequirementsForPage) - shown alongside the editable
+// ones above, but not deletable here since there's nothing to delete: it
+// goes away on its own if the handler that created it does.
+function buildWizardDetectedRequirementRow(detected) {
+  const row = document.createElement('div');
+  row.className = 'wizard-requirement-row wizard-requirement-row-detected';
+  const text = document.createElement('div');
+  text.className = 'wizard-requirement-detected-text';
+  text.textContent = `${detected.ctrl.name} must be ${detected.checkedRequired ? 'Checked' : 'Unchecked'}`;
+  text.title = `Detected from ${detected.ctrl.name}'s own CheckedChanged handler (it already enables/disables the wizard's Next button directly) - not something to configure here separately.`;
+  const badge = document.createElement('span');
+  badge.className = 'menu-editor-tag';
+  badge.textContent = 'from event handler';
+  row.appendChild(text);
+  row.appendChild(badge);
   return row;
 }
 
@@ -547,6 +745,77 @@ const WIZARD_REQUIRED_SUPPORTED_TYPES = [
   'CheckBox', 'RadioButton', 'TextBox', 'MaskedTextBox', 'RichTextBox',
   'ComboBox', 'ListBox', 'CheckedListBox', 'NumericUpDown', 'DateTimePicker',
 ];
+
+// Detects whether a control's OWN CheckedChanged handler already gates a
+// given Wizard's Next button via the Enable/Disable-another-control-while-
+// checked snippets (mirrorChecked/mirrorUnchecked) - i.e. the user wired
+// this up through the ordinary Events UI rather than the Required
+// checkbox. Returns null if there's no such handler, or
+// { checkedRequired: true/false } if there is (true = must be Checked to
+// enable Next, false = must be Unchecked).
+function wizardDetectNextGate(ctrl, wizardCtrl) {
+  const nextBtn = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.wizardFooter && ch.wizardRole === 'next');
+  if (!nextBtn) return null;
+  const evt = ctrl.events && ctrl.events.CheckedChanged;
+  if (!evt || !evt.actions) return null;
+  const match = evt.actions.find(a => (a.snippetId === 'mirrorChecked' || a.snippetId === 'mirrorUnchecked') && a.params && a.params.target === nextBtn.name);
+  if (!match) return null;
+  return { checkedRequired: match.snippetId === 'mirrorChecked' };
+}
+
+// Same detection, run across every non-footer control on one page - used
+// to auto-populate the Pages editor's Additional Requirements list and to
+// feed Test-<Name>PageRequirements, so wiring "enable Next while checked"
+// through the normal Events UI IS setting up the wizard requirement,
+// instead of the two systems staying blind to each other.
+function wizardDetectedRequirementsForPage(wizardCtrl, page) {
+  const pageControls = state.controls.filter(ch => ch.parentId === wizardCtrl.id && ch.tabPage === page.id && !ch.wizardFooter);
+  const found = [];
+  pageControls.forEach(ctrl => {
+    const gate = wizardDetectNextGate(ctrl, wizardCtrl);
+    if (gate) found.push({ ctrl, checkedRequired: gate.checkedRequired });
+  });
+  return found;
+}
+
+// The single mutator for a boolean-kind (Checked-property) requirement -
+// the "Required before Next" toggle, the "+ Add requirement" button, and
+// a requirement row's own "Select Control" retarget all funnel through
+// this, so all three (toggle, Additional Requirements list, and the
+// control's own CheckedChanged handler) always agree with each other
+// instead of being three independent paths to roughly the same effect.
+// Writing/removing the actual event action is what wizardDetectNextGate
+// picks back up on the next render, closing the loop.
+function wizardSyncBooleanGate(wizardCtrl, targetCtrl, required) {
+  targetCtrl.wizardRequired = required;
+  const nextBtn = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.wizardFooter && ch.wizardRole === 'next');
+  if (!nextBtn) return;
+
+  const existing = targetCtrl.events && targetCtrl.events.CheckedChanged;
+  const actions = (existing && existing.actions) ? existing.actions.slice() : [];
+  const idx = actions.findIndex(a => (a.snippetId === 'mirrorChecked' || a.snippetId === 'mirrorUnchecked') && a.params && a.params.target === nextBtn.name);
+
+  if (required) {
+    const snippet = EVENT_SNIPPETS.find(s => s.id === 'mirrorChecked');
+    const params = { target: nextBtn.name };
+    const action = { snippetId: 'mirrorChecked', params, code: computeSnippetCode(snippet, params) };
+    if (idx >= 0) actions[idx] = action; else actions.push(action);
+  } else if (idx >= 0) {
+    actions.splice(idx, 1);
+  }
+
+  if (!targetCtrl.events) targetCtrl.events = {};
+  if (actions.length) {
+    targetCtrl.events.CheckedChanged = {
+      fn: (existing && existing.fn) || `${targetCtrl.name}_CheckedChanged`,
+      ps1: (existing && existing.ps1) || '',
+      code: actions.map(a => a.code).join('\n\n'),
+      actions,
+    };
+  } else if (existing) {
+    delete targetCtrl.events.CheckedChanged;
+  }
+}
 
 function buildWizardChildRows(ctrl, parentCtrl) {
   const frag = document.createElement('div');
@@ -572,9 +841,10 @@ function buildWizardChildRows(ctrl, parentCtrl) {
   }
 
   const footerRow = document.createElement('div');
-  footerRow.className = 'prop-row';
+  footerRow.className = 'toggle-row';
   const footerDisabled = !!ctrl.wizardRole;
-  footerRow.innerHTML = `<label title="When on, this control shows on every page instead of just the page it was placed on - used for footer buttons, step counters, etc.">Show on all pages (footer)</label><input type="checkbox" ${ctrl.wizardFooter ? 'checked' : ''} ${footerDisabled ? 'disabled' : ''}>`;
+  footerRow.title = 'When on, this control shows on every page instead of just the page it was placed on - used for footer buttons, step counters, etc.';
+  footerRow.innerHTML = `<span class="toggle-label">Show on all pages (footer)</span><label class="switch"><input type="checkbox" ${ctrl.wizardFooter ? 'checked' : ''} ${footerDisabled ? 'disabled' : ''}><span class="track"></span></label>`;
   footerRow.querySelector('input').addEventListener('change', (e) => {
     ctrl.wizardFooter = e.target.checked;
     ctrl.tabPage = ctrl.wizardFooter ? null : parentCtrl.activeTabId;
@@ -583,10 +853,26 @@ function buildWizardChildRows(ctrl, parentCtrl) {
   frag.appendChild(footerRow);
 
   if (!ctrl.wizardFooter && WIZARD_REQUIRED_SUPPORTED_TYPES.includes(ctrl.type)) {
+    const kind = resolveValueWidgetKind(ctrl.type, wizardPrimaryGateProperty(ctrl.type));
+    // Keep the flag itself in sync with whatever the event handler
+    // actually says every render - if someone wired the event manually,
+    // this toggle should already show ON, not need a separate note to
+    // explain the discrepancy.
+    if (kind === 'boolean') {
+      const gate = wizardDetectNextGate(ctrl, parentCtrl);
+      if (gate) ctrl.wizardRequired = true;
+    }
     const reqRow = document.createElement('div');
-    reqRow.className = 'prop-row';
-    reqRow.innerHTML = `<label title="If on, the wizard won't let the user click Next off this page until this control is satisfied (checked, non-empty, or a real selection, depending on type).">Required before Next</label><input type="checkbox" ${ctrl.wizardRequired ? 'checked' : ''}>`;
-    reqRow.querySelector('input').addEventListener('change', (e) => { ctrl.wizardRequired = e.target.checked; render(); });
+    reqRow.className = 'toggle-row';
+    reqRow.title = kind === 'boolean'
+      ? 'If on, the wizard won\'t let the user click Next off this page until this control is checked - also wires (or removes) a CheckedChanged handler that enables Next directly, so this toggle, the Additional Requirements list, and the Events section all stay in agreement.'
+      : 'If on, the wizard won\'t let the user click Next off this page until this control is satisfied (non-empty or a real selection, depending on type).';
+    reqRow.innerHTML = `<span class="toggle-label">Required before Next</span><label class="switch"><input type="checkbox" ${ctrl.wizardRequired ? 'checked' : ''}><span class="track"></span></label>`;
+    reqRow.querySelector('input').addEventListener('change', (e) => {
+      if (kind === 'boolean') wizardSyncBooleanGate(parentCtrl, ctrl, e.target.checked);
+      else ctrl.wizardRequired = e.target.checked;
+      render();
+    });
     frag.appendChild(reqRow);
   }
 
@@ -601,20 +887,48 @@ function buildWizardChildRows(ctrl, parentCtrl) {
 function buildWizardContentsNav(c) {
   const cs = c.props.contentsStyle;
   if (!cs || cs === 'None') return document.createDocumentFragment();
+  const flat = cs.includes('Flat');
+  const vertical = cs.startsWith('Vertical');
   const pages = c.props.pages || [];
   const nav = document.createElement('div');
-  nav.className = cs === 'Horizontal' ? 'wizard-nav-horizontal' : 'wizard-nav-vertical';
-  pages.forEach(page => {
+  nav.className = (vertical ? 'wizard-nav-vertical' : 'wizard-nav-horizontal') + (flat ? ' wizard-nav-flat' : '');
+  pages.forEach((page, pi) => {
     const item = document.createElement('div');
     item.className = 'wizard-nav-item' + (page.id === c.activeTabId ? ' active' : '');
     item.textContent = page.label;
-    item.title = 'Click to switch to this page while designing.';
-    item.addEventListener('mousedown', (e) => {
+    item.title = 'Click to switch to this page, or drag to reorder it, while designing.';
+    item.draggable = true;
+
+    // mousedown still needs to stop the wizard's own select/move gesture
+    // from also firing, but NOT preventDefault - that would block the
+    // browser from ever starting the native drag below.
+    item.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+    item.addEventListener('click', (e) => {
       e.stopPropagation();
-      e.preventDefault();
       c.activeTabId = page.id;
       selectControl(c.id);
     });
+
+    item.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/wizard-page-index', String(pi));
+    });
+    item.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('text/wizard-page-index')) { e.preventDefault(); item.classList.add('drag-over'); }
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+    item.addEventListener('drop', (e) => {
+      if (!e.dataTransfer.types.includes('text/wizard-page-index')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      item.classList.remove('drag-over');
+      const fromIdx = Number(e.dataTransfer.getData('text/wizard-page-index'));
+      if (Number.isNaN(fromIdx) || fromIdx === pi) return;
+      pages.splice(pi, 0, pages.splice(fromIdx, 1)[0]);
+      render();
+    });
+
     nav.appendChild(item);
   });
   return nav;
@@ -697,6 +1011,8 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
 function wizardContentsNavCodegenLines(c) {
   const cs = c.props.contentsStyle;
   if (!cs || cs === 'None') return { lines: [], navVarNames: [] };
+  const flat = cs.includes('Flat');
+  const horizontal = cs.startsWith('Horizontal');
   const pages = c.props.pages || [];
   const name = c.name;
   const navVar = `${name}_Nav`;
@@ -704,27 +1020,33 @@ function wizardContentsNavCodegenLines(c) {
   const navVarNames = [];
 
   lines.push(`$${navVar} = New-Object System.Windows.Forms.Panel`);
-  if (cs === 'Horizontal') {
+  if (horizontal) {
     lines.push(`$${navVar}.Location = New-Object System.Drawing.Point(0, 0)`);
     lines.push(`$${navVar}.Size = New-Object System.Drawing.Size(${c.w}, ${WIZARD_HORIZONTAL_CONTENTS_HEIGHT})`);
   } else {
     lines.push(`$${navVar}.Location = New-Object System.Drawing.Point(0, 0)`);
     lines.push(`$${navVar}.Size = New-Object System.Drawing.Size(${WIZARD_VERTICAL_CONTENTS_WIDTH}, ${c.h})`);
   }
-  lines.push(`$${navVar}.BackColor = [System.Drawing.Color]::FromArgb(236,236,236)`);
+  // Flat leaves the strip's own background alone (plain window color) to
+  // match the classic installer's plain-text step list; the boxed variant
+  // keeps the light-grey strip background it always had.
+  if (!flat) lines.push(`$${navVar}.BackColor = [System.Drawing.Color]::FromArgb(236,236,236)`);
   lines.push(`$${c.name}.Controls.Add($${navVar})`);
 
   pages.forEach((page, i) => {
     const labelVar = `${navVar}_${page.id}`;
-    const itemW = cs === 'Horizontal' ? Math.round(c.w / Math.max(1, pages.length)) : WIZARD_VERTICAL_CONTENTS_WIDTH;
-    const itemH = cs === 'Horizontal' ? WIZARD_HORIZONTAL_CONTENTS_HEIGHT : 28;
-    const x = cs === 'Horizontal' ? i * itemW : 0;
-    const y = cs === 'Horizontal' ? 0 : i * itemH;
+    const itemW = horizontal ? Math.round(c.w / Math.max(1, pages.length)) : WIZARD_VERTICAL_CONTENTS_WIDTH;
+    const itemH = horizontal ? WIZARD_HORIZONTAL_CONTENTS_HEIGHT : 28;
+    const x = horizontal ? i * itemW : 0;
+    const y = horizontal ? 0 : i * itemH;
     lines.push(`$${labelVar} = New-Object System.Windows.Forms.Label`);
     lines.push(`$${labelVar}.Text = "${(page.label || '').replace(/"/g, '""')}"`);
     lines.push(`$${labelVar}.Location = New-Object System.Drawing.Point(${x}, ${y})`);
     lines.push(`$${labelVar}.Size = New-Object System.Drawing.Size(${itemW}, ${itemH})`);
     lines.push(`$${labelVar}.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter`);
+    // Boxed gives each item a visible border (like a tab/chip); flat
+    // leaves Label's default BorderStyle (None) for plain clickable text.
+    if (!flat) lines.push(`$${labelVar}.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle`);
     lines.push(`$${navVar}.Controls.Add($${labelVar})`);
     navVarNames.push(labelVar);
   });
@@ -761,11 +1083,26 @@ function wizardTestFunctionLines(c) {
   lines.push(`    switch ($Index) {`);
   pages.forEach((page, i) => {
     const reqChildren = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === page.id && ch.wizardRequired);
+    const detected = wizardDetectedRequirementsForPage(c, page);
     const extraReqs = (page.requirements || []).map(wizardRequirementExpr).filter(Boolean);
-    if (!reqChildren.length && !extraReqs.length) return; // nothing to check on this page - falls through to default $true
+    if (!reqChildren.length && !detected.length && !extraReqs.length) return; // nothing to check on this page - falls through to default $true
     anyClause = true;
     lines.push(`        ${i} {`);
-    reqChildren.forEach(ch => lines.push(`            if (-not (${wizardRequiredCheckExpr(ch)})) { return $false }`));
+    const seenIds = new Set();
+    reqChildren.forEach(ch => {
+      seenIds.add(ch.id);
+      lines.push(`            if (-not (${wizardRequiredCheckExpr(ch)})) { return $false }`);
+    });
+    // Detected requirements come from a control's own CheckedChanged
+    // handler (Enable/Disable Next while checked, via the ordinary Events
+    // UI) - skip one already counted above via the Required toggle so the
+    // same control isn't checked twice in the generated code.
+    detected.forEach(d => {
+      if (seenIds.has(d.ctrl.id)) return;
+      seenIds.add(d.ctrl.id);
+      const expr = d.checkedRequired ? `$${d.ctrl.name}.Checked` : `-not $${d.ctrl.name}.Checked`;
+      lines.push(`            if (-not (${expr})) { return $false }`);
+    });
     extraReqs.forEach(expr => lines.push(`            if (-not (${expr})) { return $false }`));
     lines.push(`        }`);
   });

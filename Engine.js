@@ -1,18 +1,17 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.32
+    Version 1.33
 
     Revision:
 
-    1. Removed state.form.borderlessResizable and its isResizable
-    carve-out - the generated mouse-drag substitute it enabled didn't
-    actually work reliably (no resize-cursor feedback at runtime), and
-    FormBorderStyle=None is genuinely meant to be non-resizable in real
-    WinForms, so the feature wasn't worth keeping rather than fixing.
+    1. Wired up the new #btnWizards toolbar button (openWizardPickerModal,
+    Wizard-Builder.js) and removed the now-dead Wizard-specific branches
+    from the toolbox's dblclick/drop handlers - Wizard isn't in the
+    toolbox anymore (Control-Data.js), so those paths could never fire.
 */
 
-const ENGINE_VERSION = '1.32';
+const ENGINE_VERSION = '1.33';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -808,20 +807,6 @@ function initToolbox() {
         e.dataTransfer.setData('text/plain', type);
       });
       item.addEventListener('dblclick', () => {
-        if (type === 'Wizard') {
-          // A wizard conventionally takes over its whole host rather than
-          // sitting as a small nested rectangle - if a container is
-          // currently selected, add the new wizard into it (matching what
-          // dragging onto that container would do); otherwise it lands on
-          // the Form, same as everything else. createWizardFromSetup sets
-          // Dock=Fill on it either way, so it fills whichever one it is.
-          const sel = state.selectedId ? getControl(state.selectedId) : null;
-          const isSelContainer = sel && CONTROL_DEFS[sel.type].isContainer;
-          const parentId = isSelContainer ? sel.id : null;
-          const tabPage = isSelContainer && (CONTROL_DEFS[sel.type].isTabControl || CONTROL_DEFS[sel.type].isWizard) ? sel.activeTabId : null;
-          openWizardSetupModal(20, 20, parentId, tabPage);
-          return;
-        }
         const c = createControl(type, 20, 20, null);
         selectControl(c.id);
       });
@@ -860,7 +845,6 @@ function initCanvasDrop() {
         if (CONTROL_DEFS[hostCtrl.type].isTabControl || CONTROL_DEFS[hostCtrl.type].isWizard) tabPage = hostCtrl.activeTabId;
       }
     }
-    if (type === 'Wizard') { openWizardSetupModal(x, y, parentId, tabPage); return; }
     const c = createControl(type, x, y, parentId, tabPage);
     selectControl(c.id);
   });
@@ -1058,6 +1042,7 @@ function initTopToolbar() {
   });
   document.getElementById('btnUndo').addEventListener('click', undo);
   document.getElementById('btnRedo').addEventListener('click', redo);
+  document.getElementById('btnWizards').addEventListener('click', openWizardPickerModal);
 
   document.addEventListener('click', () => {
     document.querySelectorAll('.icon-picker-popover.open').forEach(p => p.classList.remove('open'));

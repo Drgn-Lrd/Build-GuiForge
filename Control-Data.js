@@ -1,17 +1,24 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.6
+    Version 1.7
 
     Revision:
 
-    1. DEFAULT_WIZARD_PAGES now uses friendly page ids (PageWelcome,
-    PageOptions, PageSummary) instead of random suffixes, matching
-    Wizard-Builder.js's wizardGeneratePageId() - these ids show up
-    directly in generated variable names.
+    1. Removed Wizard from the toolbox (TOOLBOX_GROUPS) - it doesn't
+    behave like a draggable-to-a-spot control (it fills its host, opens a
+    setup modal, etc.), so it now has its own dedicated toolbar button
+    instead (Engine.js/Wizard-Builder.js). Added WIZARD_TYPES, the list
+    that button's picker modal reads from - just "Multipage Wizard" for
+    now, built to grow as more wizard types get added later.
+
+    2. Wizard's Contents property gained Horizontal Flat / Vertical Flat
+    options alongside the original two - plain clickable text with no
+    per-item border/background, closer to the classic Windows installer's
+    sidebar look, kept the boxed originals as-is rather than replacing them.
 */
 
-const CONTROL_DATA_VERSION = '1.6';
+const CONTROL_DATA_VERSION = '1.7';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -361,7 +368,7 @@ const CONTROL_DEFS = {
     label: 'Multipage Wizard', glyph: 'Wz', defaultW: 460, defaultH: 320,
     props: [
       ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
-      ['contentsStyle', 'Contents', 'select', 'None', { options: ['None', 'Horizontal', 'Vertical'] }],
+      ['contentsStyle', 'Contents', 'select', 'None', { options: ['None', 'Horizontal', 'Horizontal Flat', 'Vertical', 'Vertical Flat'] }],
     ],
     events: [],
     isContainer: true,
@@ -443,5 +450,11 @@ const TOOLBOX_GROUPS = [
   { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl', 'FlowLayoutPanel', 'TableLayoutPanel'] },
   { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
   { heading: 'Menus & Bars', types: ['MenuStrip', 'ToolStrip', 'StatusStrip'] },
-  { heading: 'Wizards', types: ['Wizard'] },
+];
+// Wizard is intentionally NOT in the toolbox above - it doesn't behave
+// like a draggable-to-a-spot control (it fills its host, opens a setup
+// modal, etc.), so it gets its own dedicated toolbar button + picker
+// modal instead (see the Wizards toolbar button, Wizard-Builder.js).
+const WIZARD_TYPES = [
+  { type: 'Wizard', label: 'Multipage Wizard', description: 'An installer-style wizard with a guided page setup, Back/Next/Cancel navigation, and per-page requirements.' },
 ];

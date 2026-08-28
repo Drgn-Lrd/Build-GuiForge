@@ -1,17 +1,17 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.3
+    Version 1.4
 
     Revision:
 
-    1. Removed the "Resizable (borderless)" toggle - the mouse-drag
-    resize it opted into didn't work reliably (no cursor feedback at
-    runtime), and FormBorderStyle=None is genuinely meant to be
-    non-resizable in real WinForms.
+    1. Added the "Disable another control while checked" event snippet
+    (mirrorUnchecked), mirroring the existing "Enable another control
+    while checked" one but inverted - Enabled = -not Checked instead of
+    = Checked.
 */
 
-const PROPERTIES_PANE_VERSION = '1.3';
+const PROPERTIES_PANE_VERSION = '1.4';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -46,6 +46,15 @@ const EVENT_SNIPPETS = [
     id: 'mirrorChecked', label: 'Enable another control while this one is checked',
     template: `{target}.Enabled = $ThisControl.Checked`,
     help: 'Bidirectional on purpose: enables the target while THIS checkbox is checked, and automatically disables it again the instant it\'s unchecked - no separate "undo" handler needed, since it just reads this checkbox\'s own current state every time it fires.',
+    onlyFor: ['CheckedChanged'],
+    params: [
+      { key: 'target', label: 'Target Control', type: 'control' },
+    ],
+  },
+  {
+    id: 'mirrorUnchecked', label: 'Disable another control while this one is checked',
+    template: `{target}.Enabled = -not $ThisControl.Checked`,
+    help: 'The inverse of "Enable another control while checked": disables the target while THIS checkbox is checked, and re-enables it the instant it\'s unchecked. Same bidirectional, no-separate-undo-needed design, just flipped - useful for something that should only be touched BEFORE a box is checked (e.g. lock a field once "I agree" is ticked).',
     onlyFor: ['CheckedChanged'],
     params: [
       { key: 'target', label: 'Target Control', type: 'control' },
