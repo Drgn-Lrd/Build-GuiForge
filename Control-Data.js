@@ -15,9 +15,14 @@
     2. Added the Wizard's Contents property (None/Horizontal/Vertical) -
     an optional step-list nav strip (tab-strip along the top, or a
     sidebar down the left) modeled on real installer wizards.
+
+    3. DEFAULT_WIZARD_PAGES now uses friendly page ids (PageWelcome,
+    PageOptions, PageSummary) instead of random suffixes, matching
+    Wizard-Builder.js's new wizardGeneratePageId() - these ids show up
+    directly in generated variable names.
 */
 
-const CONTROL_DATA_VERSION = '1.5';
+const CONTROL_DATA_VERSION = '1.6';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -162,9 +167,9 @@ const DEFAULT_TABS = [
 // in Wizard-Builder.js, which also populates each page's template content
 // and the Back/Next/Cancel footer buttons.
 const DEFAULT_WIZARD_PAGES = [
-  { id: 'page1', label: 'Welcome', template: 'welcome', validation: '' },
-  { id: 'page2', label: 'Options', template: 'options', validation: '' },
-  { id: 'page3', label: 'Summary', template: 'summary', validation: '' },
+  { id: 'PageWelcome', label: 'Welcome', template: 'welcome', requirements: [] },
+  { id: 'PageOptions', label: 'Options', template: 'options', requirements: [] },
+  { id: 'PageSummary', label: 'Summary', template: 'summary', requirements: [] },
 ];
 
 const CONTROL_DEFS = {
