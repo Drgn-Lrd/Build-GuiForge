@@ -1,24 +1,16 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.7
+    Version 1.8
 
     Revision:
 
-    1. Removed Wizard from the toolbox (TOOLBOX_GROUPS) - it doesn't
-    behave like a draggable-to-a-spot control (it fills its host, opens a
-    setup modal, etc.), so it now has its own dedicated toolbar button
-    instead (Engine.js/Wizard-Builder.js). Added WIZARD_TYPES, the list
-    that button's picker modal reads from - just "Multipage Wizard" for
-    now, built to grow as more wizard types get added later.
-
-    2. Wizard's Contents property gained Horizontal Flat / Vertical Flat
-    options alongside the original two - plain clickable text with no
-    per-item border/background, closer to the classic Windows installer's
-    sidebar look, kept the boxed originals as-is rather than replacing them.
+    1. Moved Contents above Pages in the Wizard's property order - it was
+    still at the bottom despite being flagged as a better fit at the top
+    (pick the nav style before managing individual pages).
 */
 
-const CONTROL_DATA_VERSION = '1.7';
+const CONTROL_DATA_VERSION = '1.8';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -367,8 +359,8 @@ const CONTROL_DEFS = {
   Wizard: {
     label: 'Multipage Wizard', glyph: 'Wz', defaultW: 460, defaultH: 320,
     props: [
-      ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
       ['contentsStyle', 'Contents', 'select', 'None', { options: ['None', 'Horizontal', 'Horizontal Flat', 'Vertical', 'Vertical Flat'] }],
+      ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
     ],
     events: [],
     isContainer: true,
