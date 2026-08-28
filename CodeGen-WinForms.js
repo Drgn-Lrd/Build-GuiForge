@@ -1,18 +1,24 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.7
+    Version 1.8
 
     Revision:
 
-    1. Label's TextAlign emission simplified to pass p.textAlign straight
-    through as the ContentAlignment name - it's now a real 9-point value
-    from the new contentAlignEditor picker (Control-Data.js/
-    Properties-Pane.js), not a Left/Center/Right string needing
-    translation into a hardcoded-Middle guess like the previous revision.
+    1. Fixed a real runtime bug: $ThisControl (used by several event
+    snippets - readValue, mirrorChecked, mirrorUnchecked) was never
+    actually assigned anywhere in the generated event handler, so it was
+    $null at runtime. $null.Checked reads as $null, and assigning $null
+    to a WinForms Boolean property (e.g. a mirrorChecked handler's
+    .Enabled = $ThisControl.Checked) silently coerces to $false - so a
+    "mirror Checked" handler always disabled its target and never
+    re-enabled it, regardless of the checkbox's actual state, since it
+    was writing the same wrong value every single time it fired. Now
+    every generated handler assigns $ThisControl = $sender as its first
+    line, which is exactly the control that raised the event.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.7';
+const CODEGEN_WINFORMS_VERSION = '1.8';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -295,7 +301,16 @@ function generateWinForms() {
         // for accessing an event's EventArgs (e.g. ItemCheck's $e.Index and
         // $e.NewValue) - always declared, harmless when a handler doesn't
         // use it, but means $e is always there for snippets that need it.
-        lines.push(`$${c.name}.Add_${realEvtName}({\n    param($sender, $e)\n    ${body}\n})`);
+        // $ThisControl = $sender: every snippet that references $ThisControl
+        // (readValue, mirrorChecked, mirrorUnchecked, ...) depends on this
+        // being the control that raised the event. Previously this was
+        // never assigned, so $ThisControl was $null at runtime -
+        // $null.Checked is $null, and assigning $null to a WinForms
+        // Boolean property (e.g. .Enabled) silently coerces to $false -
+        // which is exactly why a "mirror Checked" handler looked like it
+        // always disabled the target and never re-enabled it regardless of
+        // check state: it was assigning the same wrong value every time.
+        lines.push(`$${c.name}.Add_${realEvtName}({\n    param($sender, $e)\n    $ThisControl = $sender\n    ${body}\n})`);
       });
     }
 
