@@ -1,17 +1,16 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.5
 
     Revision:
 
-    1. Fixed the page-content wrapper's class picking to recognize the
-    new "Horizontal Flat"/"Vertical Flat" Contents values (Control-Data.js)
-    - it was deriving the CSS class from a lowercased exact match, which
-    broke once those values stopped being single words.
+    1. RichTextBox's canvas preview now reflects its new Read Only
+    property (Control-Data.js) the same way TextBox's already does -
+    a readonly attribute on the textarea when set.
 */
 
-const RENDER_VERSION = '1.4';
+const RENDER_VERSION = '1.5';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -352,7 +351,7 @@ function renderInner(c) {
       break;
     }
     case 'RichTextBox': {
-      wrap.innerHTML = `<textarea class="rc-richtext" style="${fontStyleFor(p)}background:${p.backColor || '#FFFFFF'};color:${p.foreColor};" ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</textarea>`;
+      wrap.innerHTML = `<textarea class="rc-richtext" style="${fontStyleFor(p)}background:${p.backColor || '#FFFFFF'};color:${p.foreColor};" ${p.readOnly ? 'readonly' : ''} ${c.interact ? '' : 'disabled'}>${escapeHtml(p.text)}</textarea>`;
       if (c.interact) wrap.querySelector('textarea').addEventListener('input', (e) => { p.text = e.target.value; });
       break;
     }
