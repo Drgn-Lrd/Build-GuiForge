@@ -1,22 +1,40 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.9
+    Version 1.10
 
     Revision:
 
-    1. Added All/Any combining logic for the manual Additional
-    Requirements list (page.requirementsMode, default 'all') - previously
-    every requirement was implicitly ANDed with no way to express "at
-    least one of these" (e.g. CheckBox1 OR CheckBox2, not both). The
-    selector only shows once there are 2+ manual requirements to combine.
-    Scoped to that list only - each control's own "Required before Next"
-    toggle and a detected event handler stay individually required
-    regardless of this setting, since those are deliberate independent
-    per-control settings rather than part of a group.
+    1. All/Any combining now applies to EVERY requirement on a page
+    together - a control's own "Required before Next" toggle and a
+    detected event handler included, not just the manual Additional
+    Requirements list alone (the previous revision's scoping was too
+    narrow). wizardAllRequirementExprsForPage() gathers and dedupes all
+    three sources; the mode selector's visibility now counts all of them
+    too. Fixed a real bug this surfaced: a control marked Required via
+    its toggle always generated a "must be Checked" check regardless of
+    which direction was actually requested, since the toggle-driven path
+    doesn't know Checked from Unchecked - only the detected-from-event
+    path does, so that one now takes priority per control instead of the
+    other way around.
+
+    2. "+ Add requirement" now opens the same "Select Control" picker as
+    everything else, instead of silently grabbing whichever control
+    happened to be first in the page's list - the old behavior gave no
+    way to choose which control, and for a boolean-kind one it also only
+    ever asked for "must be Checked". Picking a CheckBox now asks Checked
+    or Unchecked (a plain confirm dialog); RadioButton skips that prompt
+    since "must be Unchecked" isn't a sensible ask for one. This also
+    means requiring several independent RadioButtons (different groups)
+    at once now works - pick each one explicitly rather than only ever
+    landing on whichever was first.
+
+    3. wizardSyncBooleanGate's third argument now accepts 'checked'/
+    'unchecked' (or the original true/false, which still means Checked/
+    not-required, for compatibility) instead of only true/false.
 */
 
-const WIZARD_BUILDER_VERSION = '1.9';
+const WIZARD_BUILDER_VERSION = '1.10';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -539,9 +557,31 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   reqWrap.appendChild(reqHeading);
 
   const detected = wizardDetectedRequirementsForPage(ctrl, page);
+  if (!page.requirements) page.requirements = [];
+  const reqChildrenCount = state.controls.filter(ch => ch.parentId === ctrl.id && ch.tabPage === page.id && ch.wizardRequired).length;
+  const totalCount = detected.length + reqChildrenCount + page.requirements.length;
+
+  // Governs every requirement on this page together - a control's own
+  // "Required before Next" toggle, a detected event handler, AND the
+  // manual list below - not just the manual ones alone, since all three
+  // are really one combined set the wizard checks before allowing Next.
+  // Only meaningful with 2+ total requirements to combine.
+  if (totalCount > 1) {
+    const modeRow = document.createElement('div');
+    modeRow.className = 'wizard-requirements-mode-row';
+    modeRow.title = 'How every requirement on this page combines - a control\'s own "Required before Next" toggle and a detected event handler included, not just the manual list below. "All" (default): every one must hold. "Any": at least one of them must hold - e.g. "CheckBox1 OR CheckBox2 must be checked" instead of both. (This is flat All/Any across everything on the page - grouping some of them separately, like "(A and B) or C", isn\'t supported yet.)';
+    const mode = page.requirementsMode || 'all';
+    modeRow.innerHTML = `<label>Combine as</label>
+      <select>
+        <option value="all" ${mode === 'all' ? 'selected' : ''}>All of these must hold</option>
+        <option value="any" ${mode === 'any' ? 'selected' : ''}>Any one of these must hold</option>
+      </select>`;
+    modeRow.querySelector('select').addEventListener('change', (e) => { page.requirementsMode = e.target.value; render(); });
+    reqWrap.appendChild(modeRow);
+  }
+
   detected.forEach(d => reqWrap.appendChild(buildWizardDetectedRequirementRow(d)));
 
-  if (!page.requirements) page.requirements = [];
   const pageControls = state.controls.filter(ch => ch.parentId === ctrl.id && ch.tabPage === page.id && !ch.wizardFooter);
   if (!pageControls.length) {
     if (!detected.length) {
@@ -551,45 +591,35 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
       reqWrap.appendChild(hint);
     }
   } else {
-    // Only meaningful with 2+ manual requirements - a single one (or
-    // none) has nothing to combine. This governs ONLY the manual
-    // requirements below, not each control's own "Required before Next"
-    // toggle or a detected event handler - those stay individually
-    // required no matter what, since each one is its own deliberate,
-    // independent per-control setting rather than part of a group.
-    if (page.requirements.length > 1) {
-      const modeRow = document.createElement('div');
-      modeRow.className = 'wizard-requirements-mode-row';
-      modeRow.title = 'How the requirements below combine. "All" (default): every one must hold. "Any": at least one of them must hold - e.g. "CheckBox1 OR CheckBox2 must be checked" instead of both. Doesn\'t affect each control\'s own "Required before Next" toggle or a detected event handler above - those are always individually required.';
-      const mode = page.requirementsMode || 'all';
-      modeRow.innerHTML = `<label>Combine as</label>
-        <select>
-          <option value="all" ${mode === 'all' ? 'selected' : ''}>All of these must hold</option>
-          <option value="any" ${mode === 'any' ? 'selected' : ''}>Any one of these must hold</option>
-        </select>`;
-      modeRow.querySelector('select').addEventListener('change', (e) => { page.requirementsMode = e.target.value; render(); });
-      reqWrap.appendChild(modeRow);
-    }
-
     page.requirements.forEach((req, ri) => reqWrap.appendChild(buildWizardRequirementRow(ctrl, page, req, ri, pageControls)));
     const addReqBtn = document.createElement('button');
     addReqBtn.type = 'button';
     addReqBtn.className = 'btn btn-ghost tab-add-btn';
     addReqBtn.textContent = '+ Add requirement';
-    addReqBtn.title = 'For a checkbox-like control, use its own "Required before Next" toggle instead - it stays in sync with this list automatically. This button is for comparator-based requirements (numeric/text controls) that don\'t have an equivalent toggle.';
+    addReqBtn.title = 'Click, then click any control on this page (canvas) to require it - checkboxes/radio buttons ask whether Checked or Unchecked is required, everything else gets a comparator (>, <, =, ...) against a value.';
     addReqBtn.addEventListener('click', () => {
-      // A boolean-kind (Checked) target is better served by its own
-      // Required toggle - which keeps this list AND the event handler in
-      // sync automatically - so prefer a non-boolean target here and only
-      // fall back to syncing a boolean one directly if nothing else exists.
-      const nonBoolTarget = pageControls.find(c => resolveValueWidgetKind(c.type, wizardPrimaryGateProperty(c.type)) !== 'boolean');
-      if (nonBoolTarget) {
-        page.requirements.push({ targetId: nonBoolTarget.id, property: wizardPrimaryGateProperty(nonBoolTarget.type), comparator: 'eq', value: 0 });
-      } else {
-        const notYetRequired = pageControls.find(c => !c.wizardRequired);
-        if (notYetRequired) wizardSyncBooleanGate(ctrl, notYetRequired, true);
-      }
-      render();
+      startControlPick((picked) => {
+        if (!pageControls.some(c => c.id === picked.id)) {
+          alert(`${picked.name} isn't on this page, so it can't be a requirement for leaving it - pick a control that's actually placed on "${page.label}".`);
+          return;
+        }
+        const property = wizardPrimaryGateProperty(picked.type);
+        const kind = resolveValueWidgetKind(picked.type, property);
+        if (kind === 'boolean') {
+          // "Must be Unchecked" is a real (if less common) case for a
+          // CheckBox - RadioButtons don't have a sensible equivalent
+          // (there's nothing to frame as "not the selected one"), so only
+          // ask for those.
+          let mode = 'checked';
+          if (picked.type === 'CheckBox') {
+            mode = confirm(`Require "${picked.name}" to be Checked before Next?\n\nOK = must be Checked\nCancel = must be Unchecked`) ? 'checked' : 'unchecked';
+          }
+          wizardSyncBooleanGate(ctrl, picked, mode);
+        } else {
+          page.requirements.push({ targetId: picked.id, property, comparator: 'eq', value: kind === 'number' ? 0 : '' });
+        }
+        render();
+      });
     });
     reqWrap.appendChild(addReqBtn);
   }
@@ -799,8 +829,13 @@ function wizardDetectedRequirementsForPage(wizardCtrl, page) {
 // instead of being three independent paths to roughly the same effect.
 // Writing/removing the actual event action is what wizardDetectNextGate
 // picks back up on the next render, closing the loop.
-function wizardSyncBooleanGate(wizardCtrl, targetCtrl, required) {
-  targetCtrl.wizardRequired = required;
+// mode: true/'checked' -> must be Checked, 'unchecked' -> must be Unchecked,
+// false/null/undefined -> remove the requirement entirely. Accepts a plain
+// boolean too (from the simple Required toggle, which only ever means
+// "must be Checked") so existing callers don't need to change.
+function wizardSyncBooleanGate(wizardCtrl, targetCtrl, mode) {
+  const resolvedMode = mode === true ? 'checked' : (mode === false || mode == null) ? null : mode;
+  targetCtrl.wizardRequired = !!resolvedMode;
   const nextBtn = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.wizardFooter && ch.wizardRole === 'next');
   if (!nextBtn) return;
 
@@ -808,10 +843,11 @@ function wizardSyncBooleanGate(wizardCtrl, targetCtrl, required) {
   const actions = (existing && existing.actions) ? existing.actions.slice() : [];
   const idx = actions.findIndex(a => (a.snippetId === 'mirrorChecked' || a.snippetId === 'mirrorUnchecked') && a.params && a.params.target === nextBtn.name);
 
-  if (required) {
-    const snippet = EVENT_SNIPPETS.find(s => s.id === 'mirrorChecked');
+  if (resolvedMode) {
+    const snippetId = resolvedMode === 'unchecked' ? 'mirrorUnchecked' : 'mirrorChecked';
+    const snippet = EVENT_SNIPPETS.find(s => s.id === snippetId);
     const params = { target: nextBtn.name };
-    const action = { snippetId: 'mirrorChecked', params, code: computeSnippetCode(snippet, params) };
+    const action = { snippetId, params, code: computeSnippetCode(snippet, params) };
     if (idx >= 0) actions[idx] = action; else actions.push(action);
   } else if (idx >= 0) {
     actions.splice(idx, 1);
@@ -1086,6 +1122,42 @@ function wizardRequirementExpr(req) {
 // the Pages editor's control/property/comparator pickers, not raw text).
 // Always emits at least one clause (a bare `default { }` when no page has
 // anything to check) - an empty switch body errored out in testing.
+// Gathers every requirement expression for one page - a control's own
+// Required toggle, anything detected from an event handler, and the
+// manual Additional Requirements list - deduped by control (a control
+// counted via its toggle isn't counted again if it also happens to match
+// the event-handler detection). This combined set is what
+// page.requirementsMode (All/Any) actually governs, not just the manual
+// list alone - a toggle-driven and a detected requirement both belong to
+// the same "requirements for this page" set the user edits and combines.
+function wizardAllRequirementExprsForPage(wizardCtrl, page) {
+  const reqChildren = state.controls.filter(ch => ch.parentId === wizardCtrl.id && ch.tabPage === page.id && ch.wizardRequired);
+  const detected = wizardDetectedRequirementsForPage(wizardCtrl, page);
+  const seenIds = new Set();
+  const exprs = [];
+  // Detected first: it's the only path that actually knows whether
+  // Checked or Unchecked was requested (from the real event action).
+  // wizardRequiredCheckExpr always assumes "must be Checked" for a
+  // boolean control and has no way to know Unchecked was asked for - for
+  // anything wired through wizardSyncBooleanGate (the normal case now),
+  // both reqChildren and detected match the same control, so whichever
+  // is processed first wins the dedup; it has to be this one.
+  detected.forEach(d => {
+    seenIds.add(d.ctrl.id);
+    exprs.push(d.checkedRequired ? `$${d.ctrl.name}.Checked` : `-not $${d.ctrl.name}.Checked`);
+  });
+  reqChildren.forEach(ch => {
+    if (seenIds.has(ch.id)) return;
+    seenIds.add(ch.id);
+    exprs.push(wizardRequiredCheckExpr(ch));
+  });
+  (page.requirements || []).forEach(req => {
+    const expr = wizardRequirementExpr(req);
+    if (expr) exprs.push(expr);
+  });
+  return exprs;
+}
+
 function wizardTestFunctionLines(c) {
   const name = c.name;
   const pages = c.props.pages || [];
@@ -1095,35 +1167,21 @@ function wizardTestFunctionLines(c) {
   lines.push(`    param([int]$Index)`);
   lines.push(`    switch ($Index) {`);
   pages.forEach((page, i) => {
-    const reqChildren = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === page.id && ch.wizardRequired);
-    const detected = wizardDetectedRequirementsForPage(c, page);
-    const extraReqs = (page.requirements || []).map(wizardRequirementExpr).filter(Boolean);
-    if (!reqChildren.length && !detected.length && !extraReqs.length) return; // nothing to check on this page - falls through to default $true
+    const exprs = wizardAllRequirementExprsForPage(c, page);
+    if (!exprs.length) return; // nothing to check on this page - falls through to default $true
     anyClause = true;
     lines.push(`        ${i} {`);
-    const seenIds = new Set();
-    reqChildren.forEach(ch => {
-      seenIds.add(ch.id);
-      lines.push(`            if (-not (${wizardRequiredCheckExpr(ch)})) { return $false }`);
-    });
-    // Detected requirements come from a control's own CheckedChanged
-    // handler (Enable/Disable Next while checked, via the ordinary Events
-    // UI) - skip one already counted above via the Required toggle so the
-    // same control isn't checked twice in the generated code.
-    detected.forEach(d => {
-      if (seenIds.has(d.ctrl.id)) return;
-      seenIds.add(d.ctrl.id);
-      const expr = d.checkedRequired ? `$${d.ctrl.name}.Checked` : `-not $${d.ctrl.name}.Checked`;
-      lines.push(`            if (-not (${expr})) { return $false }`);
-    });
-    // "any" mode combines every manual requirement into a single -or-
-    // expression instead of checking each independently - "all" (the
-    // default) keeps the original one-check-per-requirement behavior,
-    // which is equivalent to ANDing them.
-    if (extraReqs.length > 1 && page.requirementsMode === 'any') {
-      lines.push(`            if (-not (${extraReqs.map(e => `(${e})`).join(' -or ')})) { return $false }`);
+    // "any" mode combines every requirement on the page into a single
+    // -or- expression instead of checking each independently - "all"
+    // (the default) keeps one check per requirement, equivalent to
+    // ANDing them. This applies uniformly across however the requirement
+    // got here (a control's own toggle, a detected event handler, or the
+    // manual list) - they're all one combined set now, not three
+    // separately-governed ones.
+    if (exprs.length > 1 && page.requirementsMode === 'any') {
+      lines.push(`            if (-not (${exprs.map(e => `(${e})`).join(' -or ')})) { return $false }`);
     } else {
-      extraReqs.forEach(expr => lines.push(`            if (-not (${expr})) { return $false }`));
+      exprs.forEach(expr => lines.push(`            if (-not (${expr})) { return $false }`));
     }
     lines.push(`        }`);
   });
