@@ -1,28 +1,41 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.14
+    Version 1.15
 
     Revision:
 
-    1. Welcome's body label (Label2) no longer stretches to fill the
-    page's content width by default - it was ending up almost full-page
-    width, which wasn't the intent. Replaced the fullWidth spec flag with
-    centerX: the box keeps a fixed width (350px, matching what it was
-    before all this) and populateWizardPageTemplate now just recomputes
-    its x so that fixed-width box sits centered within the page, instead
-    of stretching the box itself to fill the available space.
+    1. Welcome's body label (Label2) now also centers on Y, not just X -
+    "centered" meant both axes. populateWizardPageTemplate's centerX
+    logic gained a matching centerY, and both now account for the
+    footer's reserved WIZARD_FOOTER_HEIGHT (extracted from a magic 46
+    that createWizardFooterButtons already had) so a centered box is
+    centered in the actual usable page area, not the full page including
+    the space the footer buttons sit in.
 
-    2. Added findAncestorWizard and findWizardSummaryLogTarget - lets the
-    Events editor's new "+ Add log" button (Properties-Pane.js) find the
-    right Summary-page RichTextBox to target on its own, so adding a log
-    line no longer requires manually picking a Target Control.
+    2. Fixed a real regression from CodeGen-WinForms.js 1.8's $ThisControl
+    fix: "Required before Next" used to work (sort of) BECAUSE
+    $ThisControl was always null - once that bug was fixed, the
+    CheckedChanged handler it silently auto-wired (.Enabled = Checked)
+    started actually disabling the shared Next button, which (a) can
+    leak across pages since Enabled isn't page-scoped, and (b) meant a
+    disabled button never fires Click at all, so
+    Test-<Name>PageRequirements' friendly "please complete this page"
+    message could never run. wizardSyncBooleanGate no longer touches
+    Enabled or writes any event - it's pure metadata now (wizardRequired
+    + new wizardRequiredMode, which carries the Checked/Unchecked
+    distinction that used to only exist inside the auto-written event).
+    wizardRequiredCheckExpr reads wizardRequiredMode directly. Manually
+    wiring a mirrorChecked/mirrorUnchecked snippet through the ordinary
+    Events UI still works and is still detected (wizardDetectNextGate) -
+    this only changes what the Required toggle itself does.
 */
 
-const WIZARD_BUILDER_VERSION = '1.14';
+const WIZARD_BUILDER_VERSION = '1.15';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
+const WIZARD_FOOTER_HEIGHT = 46;
 
 // The area available to a wizard's PAGE content (not its always-visible
 // footer, which always spans the full control) - shrunk to make room for
@@ -56,11 +69,12 @@ const WIZARD_TEMPLATES = {
   ],
   welcome: [
     { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Welcome to Setup', ...WIZARD_TITLE_LABEL_PROPS } },
-    // centerX: resolved in populateWizardPageTemplate against the page's
-    // actual content width, so this fixed-width box stays horizontally
-    // centered even if the wizard gets resized or gains a Contents nav
-    // strip that eats into the available width.
-    { type: 'Label', x: 20, y: 69, w: 350, h: 80, centerX: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'MiddleCenter' } },
+    // centerX/centerY: resolved in populateWizardPageTemplate against the
+    // page's actual usable area (content width, and height above the
+    // footer), so this fixed-size box stays truly centered - both axes,
+    // not just horizontal - even if the wizard gets resized or gains a
+    // Contents nav strip.
+    { type: 'Label', x: 20, y: 69, w: 350, h: 80, centerX: true, centerY: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'MiddleCenter' } },
   ],
   options: [
     { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
@@ -91,14 +105,20 @@ const WIZARD_TEMPLATE_LABELS = { blank: 'Blank', welcome: 'Welcome', options: 'O
 function populateWizardPageTemplate(wizardCtrl, page) {
   const specs = WIZARD_TEMPLATES[page.template] || [];
   const bounds = wizardContentBounds(wizardCtrl);
+  // The footer (Back/Next/Cancel) always occupies the bottom
+  // WIZARD_FOOTER_HEIGHT px regardless of page, but wizardContentBounds
+  // doesn't account for it (it only shrinks for the Contents nav strip) -
+  // centerY needs the REAL usable vertical space above the footer, or a
+  // "centered" box would actually land too low, drifting toward/under it.
+  const usableH = Math.max(1, bounds.h - WIZARD_FOOTER_HEIGHT);
   specs.forEach(spec => {
-    // centerX: the spec keeps a fixed width, and its x is recomputed here
-    // so the box sits centered within the page's actual content width -
-    // NOT stretched to fill it (that made Label2 look almost full-page-
-    // width by default, which wasn't the goal - a fixed, smaller box that
-    // happens to be centered is).
+    // centerX/centerY: the spec keeps a fixed size, and its position is
+    // recomputed here so the box sits centered within the page's actual
+    // usable area - NOT stretched to fill it (that made Label2 look
+    // almost full-page-width by default, which wasn't the goal).
     const x = spec.centerX ? Math.round((bounds.w - spec.w) / 2) : spec.x;
-    const child = createControl(spec.type, x, spec.y, wizardCtrl.id, page.id);
+    const y = spec.centerY ? Math.round((usableH - spec.h) / 2) : spec.y;
+    const child = createControl(spec.type, x, y, wizardCtrl.id, page.id);
     child.w = spec.w;
     child.h = spec.h;
     Object.entries(spec.props || {}).forEach(([k, v]) => { child.props[k] = v; });
@@ -112,7 +132,7 @@ function populateWizardPageTemplate(wizardCtrl, page) {
    ========================================================================= */
 
 function createWizardFooterButtons(wizardCtrl) {
-  const y = wizardCtrl.h - 46;
+  const y = wizardCtrl.h - WIZARD_FOOTER_HEIGHT;
   const btnW = 80;
   // Back sits left-of-center, Next dead center, Cancel at the right edge -
   // each anchored so it tracks proportionally as the wizard resizes
@@ -957,11 +977,25 @@ function wizardDetectedRequirementsForPage(wizardCtrl, page) {
 // The single mutator for a boolean-kind (Checked-property) requirement -
 // the "Required before Next" toggle, the "+ Add requirement" button, and
 // a requirement row's own "Select Control" retarget all funnel through
-// this, so all three (toggle, Additional Requirements list, and the
-// control's own CheckedChanged handler) always agree with each other
-// instead of being three independent paths to roughly the same effect.
-// Writing/removing the actual event action is what wizardDetectNextGate
-// picks back up on the next render, closing the loop.
+// this, so all three always agree with each other. Purely metadata now
+// (wizardRequired + wizardRequiredMode) - it does NOT touch the Next
+// button's Enabled property or write any event handler. It used to (via
+// the mirrorChecked/mirrorUnchecked snippets), which seemed reasonable
+// but broke two ways in practice: (1) Enabled is one shared property
+// across every page, so a checkbox's handler on Page 1 could leave Next
+// permanently disabled (or enabled) on Page 2, which has nothing to do
+// with that checkbox; (2) a disabled button never fires Click at all, so
+// Test-<Name>PageRequirements' friendly "please complete this page"
+// message box could never run - the button just sat there disabled with
+// no explanation. wizardRequiredMode now carries the Checked/Unchecked
+// distinction directly (wizardRequiredCheckExpr reads it), so nothing is
+// lost - the soft, page-scoped Test-PageRequirements check (wired into
+// Next's own Click handler) is the sole gate again, same as every other
+// requirement type (TextBox non-empty, ComboBox selection, etc.) already
+// used. Deliberately hand-wiring a mirrorChecked/mirrorUnchecked snippet
+// through the ordinary Events UI is still detected separately
+// (wizardDetectNextGate) and still hard-toggles Enabled if someone
+// genuinely wants that - this only changes what the toggle itself does.
 // mode: true/'checked' -> must be Checked, 'unchecked' -> must be Unchecked,
 // false/null/undefined -> remove the requirement entirely. Accepts a plain
 // boolean too (from the simple Required toggle, which only ever means
@@ -986,34 +1020,7 @@ function wizardSyncBooleanGate(wizardCtrl, targetCtrl, mode) {
     }
   }
   targetCtrl.wizardRequired = !!resolvedMode;
-  const nextBtn = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.wizardFooter && ch.wizardRole === 'next');
-  if (!nextBtn) return;
-
-  const existing = targetCtrl.events && targetCtrl.events.CheckedChanged;
-  const actions = (existing && existing.actions) ? existing.actions.slice() : [];
-  const idx = actions.findIndex(a => (a.snippetId === 'mirrorChecked' || a.snippetId === 'mirrorUnchecked') && a.params && a.params.target === nextBtn.name);
-
-  if (resolvedMode) {
-    const snippetId = resolvedMode === 'unchecked' ? 'mirrorUnchecked' : 'mirrorChecked';
-    const snippet = EVENT_SNIPPETS.find(s => s.id === snippetId);
-    const params = { target: nextBtn.name };
-    const action = { snippetId, params, code: computeSnippetCode(snippet, params) };
-    if (idx >= 0) actions[idx] = action; else actions.push(action);
-  } else if (idx >= 0) {
-    actions.splice(idx, 1);
-  }
-
-  if (!targetCtrl.events) targetCtrl.events = {};
-  if (actions.length) {
-    targetCtrl.events.CheckedChanged = {
-      fn: (existing && existing.fn) || `${targetCtrl.name}_CheckedChanged`,
-      ps1: (existing && existing.ps1) || '',
-      code: actions.map(a => a.code).join('\n\n'),
-      actions,
-    };
-  } else if (existing) {
-    delete targetCtrl.events.CheckedChanged;
-  }
+  targetCtrl.wizardRequiredMode = resolvedMode || null;
 }
 
 function buildWizardChildRows(ctrl, parentCtrl) {
@@ -1064,7 +1071,7 @@ function buildWizardChildRows(ctrl, parentCtrl) {
     const reqRow = document.createElement('div');
     reqRow.className = 'toggle-row';
     reqRow.title = kind === 'boolean'
-      ? 'If on, the wizard won\'t let the user click Next off this page until this control is checked - also wires (or removes) a CheckedChanged handler that enables Next directly, so this toggle, the Additional Requirements list, and the Events section all stay in agreement.'
+      ? 'If on, the wizard won\'t let the user click Next off this page until this control is checked - validated when Next is clicked (shows a message if not met yet), same as every other requirement type. Doesn\'t disable Next directly.'
       : 'If on, the wizard won\'t let the user click Next off this page until this control is satisfied (non-empty or a real selection, depending on type).';
     reqRow.innerHTML = `<span class="toggle-label">Required before Next</span><label class="switch"><input type="checkbox" ${ctrl.wizardRequired ? 'checked' : ''}><span class="track"></span></label>`;
     reqRow.querySelector('input').addEventListener('change', (e) => {
@@ -1156,7 +1163,10 @@ function wizardRequiredCheckExpr(ctrl) {
   switch (ctrl.type) {
     case 'CheckBox':
     case 'RadioButton':
-      return `$${ctrl.name}.Checked`;
+      // wizardRequiredMode carries the Checked/Unchecked distinction set by
+      // the "Required before Next" toggle (wizardSyncBooleanGate) - absent
+      // (undefined/null) defaults to the original "must be Checked" behavior.
+      return ctrl.wizardRequiredMode === 'unchecked' ? `-not $${ctrl.name}.Checked` : `$${ctrl.name}.Checked`;
     case 'TextBox':
     case 'MaskedTextBox':
     case 'RichTextBox':
@@ -1293,13 +1303,11 @@ function wizardAllRequirementExprsForPage(wizardCtrl, page) {
   const detected = wizardDetectedRequirementsForPage(wizardCtrl, page);
   const seenIds = new Set();
   const exprs = [];
-  // Detected first: it's the only path that actually knows whether
-  // Checked or Unchecked was requested (from the real event action).
-  // wizardRequiredCheckExpr always assumes "must be Checked" for a
-  // boolean control and has no way to know Unchecked was asked for - for
-  // anything wired through wizardSyncBooleanGate (the normal case now),
-  // both reqChildren and detected match the same control, so whichever
-  // is processed first wins the dedup; it has to be this one.
+  // Detected first: it's still the only path for a requirement that was
+  // hand-wired through the ordinary Events UI rather than the Required
+  // toggle - the toggle itself now carries its own Checked/Unchecked mode
+  // directly (wizardRequiredMode), so it doesn't need to round-trip
+  // through event-handler detection to know which one was asked for.
   detected.forEach(d => {
     seenIds.add(d.ctrl.id);
     exprs.push(d.checkedRequired ? `$${d.ctrl.name}.Checked` : `-not $${d.ctrl.name}.Checked`);
