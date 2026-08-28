@@ -1,21 +1,20 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.7
+    Version 1.8
 
     Revision:
 
-    1. Added a "+ Add log" button next to "+ Add action" in the Events
-    editor - a shortcut that adds an action already bound to "Add to
-    Summary of Tasks log" with its Target Control pre-filled to the
-    wizard's Summary RichTextBox (findAncestorWizard/
-    findWizardSummaryLogTarget, Wizard-Builder.js), so logging something
-    no longer means manually finding and picking that control every time
-    - just write the message. Disabled (with an explanatory title) when
-    the control being edited isn't inside a wizard with a Summary page.
+    1. Added summaryLogToggle ("Add/remove from Summary of Tasks log") -
+    a CheckedChanged-only variant of the log snippet that removes its own
+    line when unchecked instead of unconditionally appending, so toggling
+    a checkbox back and forth doesn't pile up duplicate entries the way
+    plain summaryLogAdd would. The "+ Add log" button now picks whichever
+    variant fits the event it's on (toggle for CheckedChanged, plain
+    append everywhere else).
 */
 
-const PROPERTIES_PANE_VERSION = '1.7';
+const PROPERTIES_PANE_VERSION = '1.8';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -97,7 +96,17 @@ const EVENT_SNIPPETS = [
   {
     id: 'summaryLogAdd', label: 'Add to Summary of Tasks log',
     template: `{target}.AppendText("{message}" + [Environment]::NewLine)`,
-    help: 'Appends one line of text to a summary/log-style control - typically the read-only RichTextBox on a wizard\'s Summary page - building up a running list of what this wizard will do (or did) as the user interacts with earlier controls. Each firing adds another line; it doesn\'t clear or replace anything already there.',
+    help: 'Appends one line of text to a summary/log-style control - typically the read-only RichTextBox on a wizard\'s Summary page - building up a running list of what this wizard will do (or did) as the user interacts with earlier controls. Each firing adds another line; it doesn\'t clear or replace anything already there. For a CheckBox\'s CheckedChanged, use "Add/remove from Summary of Tasks log" instead - this one has no way to undo itself when unchecked.',
+    params: [
+      { key: 'target', label: 'Target Control', type: 'control' },
+      { key: 'message', label: 'Log Message', type: 'text', default: 'This will install the selected feature.' },
+    ],
+  },
+  {
+    id: 'summaryLogToggle', label: 'Add/remove from Summary of Tasks log',
+    template: `if ($ThisControl.Checked) {\n    {target}.AppendText("{message}" + [Environment]::NewLine)\n} else {\n    {target}.Text = {target}.Text.Replace("{message}" + [Environment]::NewLine, "")\n}`,
+    help: 'Adds the line while this checkbox is checked, and removes that exact line again the instant it\'s unchecked - so toggling it back and forth doesn\'t pile up duplicate entries the way plain "Add to Summary of Tasks log" would. Only makes sense on CheckedChanged, since it needs a checked/unchecked state to react to.',
+    onlyFor: ['CheckedChanged'],
     params: [
       { key: 'target', label: 'Target Control', type: 'control' },
       { key: 'message', label: 'Log Message', type: 'text', default: 'This will install the selected feature.' },
@@ -1776,25 +1785,31 @@ function buildActionsEditor(ctrl, evtName, data) {
   addBtn.addEventListener('click', () => { actions.push({ code: '', snippetId: null, params: {} }); sync(); render(); });
   wrap.appendChild(addBtn);
 
-  // "+ Add log" - a shortcut onto the same actions list, pre-bound to the
-  // "Add to Summary of Tasks log" snippet with its Target Control already
-  // set to this wizard's Summary RichTextBox (findWizardSummaryLogTarget,
+  // "+ Add log" - a shortcut onto the same actions list, pre-bound to a
+  // summary-log snippet with its Target Control already set to this
+  // wizard's Summary RichTextBox (findWizardSummaryLogTarget,
   // Wizard-Builder.js), so all that's left to fill in is the message text.
-  // Only appears (enabled) when ctrl is actually inside a wizard that has
-  // a Summary-template page with a RichTextBox on it to target.
+  // On CheckedChanged this binds the toggle variant (adds while checked,
+  // removes again when unchecked) rather than the plain always-append
+  // one, since a checkbox is a state a person can flip back - appending
+  // unconditionally on every fire would just pile up duplicate lines
+  // every time it's toggled. Only appears (enabled) when ctrl is actually
+  // inside a wizard that has a Summary-template page with a RichTextBox
+  // on it to target.
   const wizardCtrl = findAncestorWizard(ctrl);
   const logTarget = wizardCtrl ? findWizardSummaryLogTarget(wizardCtrl) : null;
+  const logSnippetId = evtName === 'CheckedChanged' ? 'summaryLogToggle' : 'summaryLogAdd';
   const logBtn = document.createElement('button');
   logBtn.type = 'button';
   logBtn.className = 'btn btn-ghost menu-add-btn';
   logBtn.textContent = '+ Add log';
   logBtn.disabled = !logTarget;
   logBtn.title = logTarget
-    ? `Add a line to ${logTarget.name} (the wizard's Summary of Tasks log) when this event fires - the target's already set, just write the message.`
+    ? `Add a line to ${logTarget.name} (the wizard's Summary of Tasks log) when this event fires - the target's already set, just write the message.${evtName === 'CheckedChanged' ? ' Removes the line again if unchecked, so toggling doesn\'t duplicate it.' : ''}`
     : 'This control isn\'t inside a wizard with a Summary page, so there\'s no log to add to yet.';
   logBtn.addEventListener('click', () => {
     if (!logTarget) return;
-    const snippet = EVENT_SNIPPETS.find(s => s.id === 'summaryLogAdd');
+    const snippet = EVENT_SNIPPETS.find(s => s.id === logSnippetId);
     const action = { code: '', snippetId: snippet.id, params: {} };
     snippet.params.forEach(p => { action.params[p.key] = p.default !== undefined ? p.default : ''; });
     action.params.target = logTarget.name;
