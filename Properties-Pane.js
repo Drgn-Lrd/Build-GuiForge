@@ -1,19 +1,21 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.6
+    Version 1.7
 
     Revision:
 
-    1. Added buildContentAlignEditorRow (contentAlignEditor prop type) -
-    a 3x3 grid picker for the full 9-point ContentAlignment
-    (Top/Middle/Bottom x Left/Center/Right), same spirit as the Anchor
-    editor but single-select instead of independent per-edge flags. Now
-    used by Label's Text Align (Control-Data.js), replacing its old
-    Left/Center/Right-only dropdown that silently assumed Top vertically.
+    1. Added a "+ Add log" button next to "+ Add action" in the Events
+    editor - a shortcut that adds an action already bound to "Add to
+    Summary of Tasks log" with its Target Control pre-filled to the
+    wizard's Summary RichTextBox (findAncestorWizard/
+    findWizardSummaryLogTarget, Wizard-Builder.js), so logging something
+    no longer means manually finding and picking that control every time
+    - just write the message. Disabled (with an explanatory title) when
+    the control being edited isn't inside a wizard with a Summary page.
 */
 
-const PROPERTIES_PANE_VERSION = '1.6';
+const PROPERTIES_PANE_VERSION = '1.7';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -1773,6 +1775,35 @@ function buildActionsEditor(ctrl, evtName, data) {
   addBtn.title = 'Add another, independent action to run when this event fires, alongside the ones above.';
   addBtn.addEventListener('click', () => { actions.push({ code: '', snippetId: null, params: {} }); sync(); render(); });
   wrap.appendChild(addBtn);
+
+  // "+ Add log" - a shortcut onto the same actions list, pre-bound to the
+  // "Add to Summary of Tasks log" snippet with its Target Control already
+  // set to this wizard's Summary RichTextBox (findWizardSummaryLogTarget,
+  // Wizard-Builder.js), so all that's left to fill in is the message text.
+  // Only appears (enabled) when ctrl is actually inside a wizard that has
+  // a Summary-template page with a RichTextBox on it to target.
+  const wizardCtrl = findAncestorWizard(ctrl);
+  const logTarget = wizardCtrl ? findWizardSummaryLogTarget(wizardCtrl) : null;
+  const logBtn = document.createElement('button');
+  logBtn.type = 'button';
+  logBtn.className = 'btn btn-ghost menu-add-btn';
+  logBtn.textContent = '+ Add log';
+  logBtn.disabled = !logTarget;
+  logBtn.title = logTarget
+    ? `Add a line to ${logTarget.name} (the wizard's Summary of Tasks log) when this event fires - the target's already set, just write the message.`
+    : 'This control isn\'t inside a wizard with a Summary page, so there\'s no log to add to yet.';
+  logBtn.addEventListener('click', () => {
+    if (!logTarget) return;
+    const snippet = EVENT_SNIPPETS.find(s => s.id === 'summaryLogAdd');
+    const action = { code: '', snippetId: snippet.id, params: {} };
+    snippet.params.forEach(p => { action.params[p.key] = p.default !== undefined ? p.default : ''; });
+    action.params.target = logTarget.name;
+    action.code = computeSnippetCode(snippet, action.params);
+    actions.push(action);
+    sync();
+    render();
+  });
+  wrap.appendChild(logBtn);
 
   return wrap;
 }
