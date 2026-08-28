@@ -1,34 +1,44 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.11
+    Version 1.12
 
     Revision:
 
-    1. Fixed a real logic bug: two RadioButtons sharing an immediate
-    parent (the same group - only one can ever be Checked at a time in
-    real WinForms) could both be marked Required, making the page
-    permanently uncompletable. wizardRadioGroupConflict() catches this in
-    wizardSyncBooleanGate() - the one function every path (toggle, Add
-    requirement, retargeting a row) already funnels through - and blocks
-    the second one with an explanation instead of silently accepting it.
+    1. All starter-template top-of-page labels (Welcome/Options/Summary,
+    plus the previously-empty Blank template, which now gets one too)
+    moved 15px lower (y:20 -> y:35 - the shared default "highest label
+    point" across every template) and given matching format props
+    (fontSize 14, fontBold true) so every page's title label looks the
+    same regardless of template. Welcome's body label (Label2) is now
+    full-width within the page's content area and center-aligned
+    (fullWidth flag on the template spec, resolved against
+    wizardContentBounds in populateWizardPageTemplate). Summary's
+    RichTextBox now defaults ReadOnly=true (it's meant to be an
+    auto-populated log, not hand-typed - new prop, Control-Data.js/
+    CodeGen-WinForms.js) and its instructional label no longer names a
+    specific button, since which button shows depends on whether a
+    Summary-of-Actions-Taken page follows it (see #2/#3). Added a new
+    summaryAfter template ("Summary of Actions Taken") - same shape as
+    Summary (title label + read-only RichTextBox) - as an unwired
+    placeholder second summary page for later configuration.
 
-    2. Replaced the Checked/Unchecked confirm() dialog (OK/Cancel standing
-    in for Checked/Unchecked, with no way to back out and create nothing)
-    with a real 3-button modal - Checked / Unchecked / Cancel, where
-    Cancel actually cancels rather than silently meaning Unchecked. Used
-    by both "+ Add requirement" and a requirement row's own "Select
-    Control" retarget when the newly-picked target is a CheckBox.
+    2. wizardShowFunctionLines now gives the Next button a "Run" label
+    (instead of "Next") on any Summary-template page that ISN'T the
+    wizard's last page - i.e. a Summary of Tasks page followed by a
+    Summary of Actions Taken page. A Summary page that IS the last page
+    still gets "Finish" like before (unchanged single-summary-page
+    behavior); everything else still gets "Next".
 
-    3. The detected-requirement row's static "from event handler" badge
-    (which never changed, so it wasn't telling the user anything after
-    the first glance) is now a working Remove button - clears that
-    control's Required toggle and its CheckedChanged handler directly
-    from the Pages editor, instead of requiring a trip to that control's
-    own properties just to undo it.
+    3. The Pages editor's "+ Add page" button now calls
+    populateWizardPageTemplate for the page it just created (it starts
+    on the Blank template, which now has real starter content), matching
+    what already happens for every page created via the initial setup
+    modal - previously a freshly-added page stayed empty until the
+    Template dropdown was changed away and back.
 */
 
-const WIZARD_BUILDER_VERSION = '1.11';
+const WIZARD_BUILDER_VERSION = '1.12';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -52,29 +62,61 @@ function wizardContentBounds(c) {
 // Each template is a list of lightweight control specs auto-created as
 // children of a new wizard page. Kept small on purpose - these are just a
 // running start, not a finished dialog.
+// Shared default format for every template's top-of-page title label -
+// y:35 is the one "highest label point" every template lines up to, and
+// fontSize/fontBold keep them all looking the same regardless of which
+// template placed them.
+const WIZARD_TITLE_LABEL_Y = 35;
+const WIZARD_TITLE_LABEL_PROPS = { fontSize: 14, fontBold: true };
+
 const WIZARD_TEMPLATES = {
-  blank: [],
+  blank: [
+    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Enter Page title here', ...WIZARD_TITLE_LABEL_PROPS } },
+  ],
   welcome: [
-    { type: 'Label', x: 20, y: 20, w: 380, h: 26, props: { text: 'Welcome to Setup', fontSize: 14, fontBold: true } },
-    { type: 'Label', x: 20, y: 54, w: 380, h: 80, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.' } },
+    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Welcome to Setup', ...WIZARD_TITLE_LABEL_PROPS } },
+    // fullWidth: resolved in populateWizardPageTemplate against the page's
+    // actual content width, so this stays centered-on-form even if the
+    // wizard gets resized or gains a Contents nav strip that eats into
+    // the available width.
+    { type: 'Label', x: 20, y: 69, w: 380, h: 80, fullWidth: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'Center' } },
   ],
   options: [
-    { type: 'CheckBox', x: 20, y: 20, w: 200, h: 22, props: { text: 'Option A' } },
-    { type: 'CheckBox', x: 20, y: 46, w: 200, h: 22, props: { text: 'Option B' } },
+    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
+    { type: 'CheckBox', x: 20, y: 71, w: 200, h: 22, props: { text: 'Option A' } },
+    { type: 'CheckBox', x: 20, y: 97, w: 200, h: 22, props: { text: 'Option B' } },
   ],
   summary: [
-    { type: 'Label', x: 20, y: 20, w: 380, h: 22, props: { text: 'Review your choices, then click Finish.' } },
-    { type: 'RichTextBox', x: 20, y: 48, w: 380, h: 140, props: { text: '' } },
+    // Text stays button-agnostic on purpose - whether Next reads "Run" or
+    // "Finish" at this page depends on whether a summaryAfter page follows
+    // it (see wizardShowFunctionLines), so the label can't safely name one.
+    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Review your choices before continuing.', ...WIZARD_TITLE_LABEL_PROPS } },
+    // ReadOnly: this box is meant to be filled by "Add to Summary of Tasks
+    // log" event actions on earlier-page controls, not typed into directly.
+    { type: 'RichTextBox', x: 20, y: 69, w: 380, h: 140, props: { text: '', readOnly: true } },
+  ],
+  // Unwired placeholder for now (per John: template it now, wire up actual
+  // PowerShell log capture / success-failure flags later) - same shape as
+  // summary, a read-only box meant to eventually show what the Run step
+  // actually did.
+  summaryAfter: [
+    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Here is what was done:', ...WIZARD_TITLE_LABEL_PROPS } },
+    { type: 'RichTextBox', x: 20, y: 69, w: 380, h: 140, props: { text: '', readOnly: true } },
   ],
 };
 
-const WIZARD_TEMPLATE_LABELS = { blank: 'Blank', welcome: 'Welcome', options: 'Options', summary: 'Summary' };
+const WIZARD_TEMPLATE_LABELS = { blank: 'Blank', welcome: 'Welcome', options: 'Options', summary: 'Summary of Tasks', summaryAfter: 'Summary of Actions Taken' };
 
 function populateWizardPageTemplate(wizardCtrl, page) {
   const specs = WIZARD_TEMPLATES[page.template] || [];
+  const bounds = wizardContentBounds(wizardCtrl);
   specs.forEach(spec => {
     const child = createControl(spec.type, spec.x, spec.y, wizardCtrl.id, page.id);
-    child.w = spec.w; child.h = spec.h;
+    // fullWidth specs keep their x as the left margin and stretch to fill
+    // the page's actual content width minus a matching right margin, so
+    // the block reads as centered regardless of the wizard's real size.
+    child.w = spec.fullWidth ? Math.max(40, bounds.w - spec.x * 2) : spec.w;
+    child.h = spec.h;
     Object.entries(spec.props || {}).forEach(([k, v]) => { child.props[k] = v; });
   });
 }
@@ -501,11 +543,13 @@ function buildWizardPagesEditorRow(ctrl, key, label) {
   addBtn.type = 'button';
   addBtn.className = 'btn btn-ghost tab-add-btn';
   addBtn.textContent = '+ Add page';
-  addBtn.title = 'Add a new blank wizard page - pick a starter template from the new page\'s own Template dropdown afterward, if you want one.';
+  addBtn.title = 'Add a new wizard page (starts on the Blank template) - switch its Template dropdown afterward for Welcome/Options/Summary starter content instead.';
   addBtn.addEventListener('click', () => {
     const label = 'Page' + (pages.length + 1);
     const id = wizardGeneratePageId(label, pages.map(p => p.id));
-    pages.push({ id, label, template: 'blank', requirements: [] });
+    const newPage = { id, label, template: 'blank', requirements: [] };
+    pages.push(newPage);
+    populateWizardPageTemplate(ctrl, newPage);
     render();
   });
   wrap.appendChild(addBtn);
@@ -1111,6 +1155,7 @@ function wizardRequiredCheckExpr(ctrl) {
 // bolds the active page's label in the Contents nav strip (if any).
 function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   const name = c.name;
+  const pages = c.props.pages || [];
   const footerBtns = state.controls.filter(ch => ch.parentId === c.id && ch.wizardFooter);
   const nextBtn = footerBtns.find(b => b.wizardRole === 'next');
   const backBtn = footerBtns.find(b => b.wizardRole === 'back');
@@ -1120,7 +1165,14 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   lines.push(`    $pages = @(${pageVarNames.map(v => '$' + v).join(', ')})`);
   lines.push(`    for ($i = 0; $i -lt $pages.Count; $i++) { $pages[$i].Visible = ($i -eq $Index) }`);
   lines.push(`    $script:${name}_CurrentPage = $Index`);
-  if (nextBtn) lines.push(`    $${nextBtn.name}.Text = if ($Index -eq ($pages.Count - 1)) { "Finish" } else { "Next" }`);
+  if (nextBtn) {
+    // "Run" on a Summary-of-Tasks page that ISN'T the last page (a
+    // Summary-of-Actions-Taken page follows it) - "Finish" on whichever
+    // page actually is last, same as before - plain "Next" everywhere else.
+    const nextLabels = pages.map(p => (p.template === 'summary' ? 'Run' : 'Next'));
+    lines.push(`    $${name}_NextLabels = @(${nextLabels.map(l => `"${l}"`).join(', ')})`);
+    lines.push(`    $${nextBtn.name}.Text = if ($Index -eq ($pages.Count - 1)) { "Finish" } else { $${name}_NextLabels[$Index] }`);
+  }
   if (backBtn) {
     lines.push(`    $${backBtn.name}.Visible = ($Index -gt 0)`);
     lines.push(`    $${backBtn.name}.Enabled = ($Index -gt 0)`);
