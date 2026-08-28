@@ -1,19 +1,25 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.13
+    Version 1.14
 
     Revision:
 
-    1. Welcome template's body label (Label2) updated for Control-Data.js
-    1.10's new 9-point Text Align value scheme - textAlign: 'Center' is
-    no longer a valid value now that Label.textAlign is a literal
-    ContentAlignment name, so it's now textAlign: 'MiddleCenter'. No
-    other template label sets textAlign, so every other page's title
-    label picks up the new MiddleLeft default untouched.
+    1. Welcome's body label (Label2) no longer stretches to fill the
+    page's content width by default - it was ending up almost full-page
+    width, which wasn't the intent. Replaced the fullWidth spec flag with
+    centerX: the box keeps a fixed width (350px, matching what it was
+    before all this) and populateWizardPageTemplate now just recomputes
+    its x so that fixed-width box sits centered within the page, instead
+    of stretching the box itself to fill the available space.
+
+    2. Added findAncestorWizard and findWizardSummaryLogTarget - lets the
+    Events editor's new "+ Add log" button (Properties-Pane.js) find the
+    right Summary-page RichTextBox to target on its own, so adding a log
+    line no longer requires manually picking a Target Control.
 */
 
-const WIZARD_BUILDER_VERSION = '1.13';
+const WIZARD_BUILDER_VERSION = '1.14';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -50,11 +56,11 @@ const WIZARD_TEMPLATES = {
   ],
   welcome: [
     { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Welcome to Setup', ...WIZARD_TITLE_LABEL_PROPS } },
-    // fullWidth: resolved in populateWizardPageTemplate against the page's
-    // actual content width, so this stays centered-on-form even if the
-    // wizard gets resized or gains a Contents nav strip that eats into
-    // the available width.
-    { type: 'Label', x: 20, y: 69, w: 380, h: 80, fullWidth: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'MiddleCenter' } },
+    // centerX: resolved in populateWizardPageTemplate against the page's
+    // actual content width, so this fixed-width box stays horizontally
+    // centered even if the wizard gets resized or gains a Contents nav
+    // strip that eats into the available width.
+    { type: 'Label', x: 20, y: 69, w: 350, h: 80, centerX: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'MiddleCenter' } },
   ],
   options: [
     { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
@@ -86,11 +92,14 @@ function populateWizardPageTemplate(wizardCtrl, page) {
   const specs = WIZARD_TEMPLATES[page.template] || [];
   const bounds = wizardContentBounds(wizardCtrl);
   specs.forEach(spec => {
-    const child = createControl(spec.type, spec.x, spec.y, wizardCtrl.id, page.id);
-    // fullWidth specs keep their x as the left margin and stretch to fill
-    // the page's actual content width minus a matching right margin, so
-    // the block reads as centered regardless of the wizard's real size.
-    child.w = spec.fullWidth ? Math.max(40, bounds.w - spec.x * 2) : spec.w;
+    // centerX: the spec keeps a fixed width, and its x is recomputed here
+    // so the box sits centered within the page's actual content width -
+    // NOT stretched to fill it (that made Label2 look almost full-page-
+    // width by default, which wasn't the goal - a fixed, smaller box that
+    // happens to be centered is).
+    const x = spec.centerX ? Math.round((bounds.w - spec.w) / 2) : spec.x;
+    const child = createControl(spec.type, x, spec.y, wizardCtrl.id, page.id);
+    child.w = spec.w;
     child.h = spec.h;
     Object.entries(spec.props || {}).forEach(([k, v]) => { child.props[k] = v; });
   });
@@ -327,6 +336,44 @@ function wizardAvailableTargets() {
     targets.push({ parentId: c.id, tabPage, label: c.name });
   });
   return targets;
+}
+
+/* =========================================================================
+   Summary log auto-targeting - lets the Events editor's "+ Add log" button
+   (Properties-Pane.js) bind the "Add to Summary of Tasks log" snippet to
+   the right RichTextBox on its own, without making the person pick a
+   Target Control every time.
+   ========================================================================= */
+
+// Walks up from any control to the nearest ancestor Wizard, or null if it
+// isn't inside one at all (e.g. a control sitting directly on the Form).
+function findAncestorWizard(ctrl) {
+  let cur = ctrl;
+  const seen = new Set();
+  while (cur && cur.parentId != null && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    const parent = getControl(cur.parentId);
+    if (!parent) return null;
+    if (CONTROL_DEFS[parent.type] && CONTROL_DEFS[parent.type].isWizard) return parent;
+    cur = parent;
+  }
+  return null;
+}
+
+// The read-only RichTextBox on a Summary-template page inside the given
+// Wizard - i.e. the box "Add to Summary of Tasks log" actions are meant to
+// target. Prefers a "summary" (before) page's box over a "summaryAfter"
+// (after) page's if a wizard somehow has both types of RichTextBox
+// candidates, since the "what will happen" log is the more common target.
+function findWizardSummaryLogTarget(wizardCtrl) {
+  if (!wizardCtrl) return null;
+  const pages = wizardCtrl.props.pages || [];
+  const ordered = pages.filter(pg => pg.template === 'summary').concat(pages.filter(pg => pg.template === 'summaryAfter'));
+  for (const pg of ordered) {
+    const box = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.tabPage === pg.id && ch.type === 'RichTextBox');
+    if (box) return box;
+  }
+  return null;
 }
 
 function getWizardSetupOverlay() {
