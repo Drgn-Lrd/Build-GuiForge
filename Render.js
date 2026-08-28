@@ -1,20 +1,19 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
     Revision:
 
-    1. Split out of engine.js: renderControl, renderInner, and the
-    format-skin CSS-class rendering logic (buildTabHeaderStrip,
-    fontStyleFor, borderStyleFor, the DateTimePicker .NET-style custom
-    format renderer, renderMenuStripPreview). Depends on CONTROL_DEFS
-    (Control-Data.js), state (Engine.js), and escapeHtml/onControlMouseDown/
-    selectControl (Engine.js) - load this file after Control-Data.js and
-    before Engine.js.
+    1. Added the Wizard container's canvas rendering: a plain body
+    background (no clickable header strip - page switching happens via
+    the Pages editor's Show/Active button, not on-canvas), a small
+    non-interactive page indicator overlay, and content filtering that
+    shows the active page's children plus any footer children (Back/Next/
+    Cancel etc.) regardless of which page is active.
 */
 
-const RENDER_VERSION = '1.0';
+const RENDER_VERSION = '1.1';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -47,6 +46,21 @@ function renderControl(c) {
     content.className = 'tabcontrol-content';
     state.controls
       .filter(ch => ch.parentId === c.id && ch.tabPage === c.activeTabId)
+      .forEach(ch => content.appendChild(renderControl(ch)));
+    el.appendChild(content);
+  } else if (def.isWizard) {
+    // No clickable tab strip here - a real wizard doesn't show page tabs
+    // to the end user, so the design surface doesn't imply one either.
+    // Only a plain background plus a non-interactive "Page X of Y" label.
+    const body = document.createElement('div');
+    body.className = 'wizard-body';
+    el.appendChild(body);
+    el.appendChild(buildWizardPageIndicator(c));
+
+    const content = document.createElement('div');
+    content.className = 'wizard-content';
+    state.controls
+      .filter(ch => ch.parentId === c.id && (ch.wizardFooter || ch.tabPage === c.activeTabId))
       .forEach(ch => content.appendChild(renderControl(ch)));
     el.appendChild(content);
   } else {

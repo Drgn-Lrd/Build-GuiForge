@@ -1,25 +1,21 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
     Revision:
 
-    1. Split out of engine.js: renderProps and every buildXRow/buildXSection
-    properties-pane builder, the event/action snippet editor (EVENT_SNIPPETS,
-    computeSnippetCode, buildSnippetParamRow, buildActionBlock,
-    buildActionsEditor, buildEventsSection), the MenuStrip/TabControl
-    editors, the option/tooltip/control-help reference data (TOOLTIPS,
-    OPTION_DEFINITIONS, EVENT_HELP, CONTROL_HELP) and info-modal helpers,
-    and the comment-based help block builder plus its generator functions
-    (generateHelpBlockLines, helpBlockAsPs1Comment, helpBlockAsHtmlComment)
-    used by CodeGen.js. Depends on CONTROL_DEFS/SETTABLE_PROPS_BY_TYPE/
-    resolveValueWidgetKind (Control-Data.js) and state/getControl/render/
-    snap/escapeHtml/reselectAfterRender (Engine.js) - load this file after
-    Control-Data.js and before Engine.js.
+    1. Added Wizard support: buildPropRows() routes the new
+    'wizardPagesEditor' prop type to Wizard-Builder.js's editor; a
+    "Wizard Page" section now appears in renderProps() for any control
+    whose parent is a Wizard (Wizard Role / footer visibility / Required
+    rows, built in Wizard-Builder.js); reparentControl() now assigns
+    tabPage when moving a control into a Wizard via the Parent dropdown,
+    same as it already does for TabControl; and CONTROL_HELP gained a
+    Wizard entry for the header info button.
 */
 
-const PROPERTIES_PANE_VERSION = '1.0';
+const PROPERTIES_PANE_VERSION = '1.1';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -286,6 +282,7 @@ const TOOLTIPS = {
   url: 'The web address this link opens when clicked.',
   menuItems: 'Configure this menu bar: check a top-level menu to include it, check individual entries to include them, edit labels, or add your own custom menus and items.',
   tabs: 'The tab pages on this control. Rename, add, or remove pages here; click "Show" on a page to switch the canvas to it before placing controls - each page keeps its own separate set of children.',
+  pages: 'The pages in this wizard. Add, rename, reorder, or remove pages here; click "Show" on a page to switch the canvas to it before placing controls. Each page can also have an optional custom validation expression checked before Next is allowed to proceed.',
 };
 
 function tt(key) { return TOOLTIPS[key] || ''; }
@@ -321,6 +318,7 @@ const CONTROL_HELP = {
   TableLayoutPanel: 'A container that arranges its children into a grid - set Columns and Rows to the grid size you want, then place children into specific cells. Example: a 2-column form layout with a Label in each left cell and its matching input in the right cell.',
   StatusStrip: 'A thin status bar, almost always docked to the bottom of the form. Text is the message shown - commonly updated from code as the app does things, e.g. $StatusStrip1.Text = "Saved.".',
   ToolStrip: 'A horizontal bar of quick-action buttons, almost always docked to the top. Add button labels in Items, one per line. Example: Items="New\\nOpen\\nSave" for a classic file toolbar.',
+  Wizard: 'A multi-page installer-style container. Dropping this from the toolbox opens a setup dialog to choose pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically as real, movable Button controls with built-in navigation. Use the Pages editor below to add/rename/reorder/remove pages afterward, and each page can require specific child controls (or a custom expression) be satisfied before Next proceeds. Example: a 3-page install wizard - Welcome, Options (with a Required checkbox), Summary - where Next becomes "Finish" on the last page.',
 };
 
 function buildUsageHintBlock(text) {
@@ -401,6 +399,12 @@ function renderProps() {
   pane.appendChild(section('Layout', buildLayoutRows(ctrl), true));
   pane.appendChild(section('Nudge', buildNudgeSection(ctrl), true));
   pane.appendChild(section('Behavior', buildPropRows(ctrl, COMMON_BEHAVIOR_PROPS), false));
+
+  const parentForWizard = ctrl.parentId ? getControl(ctrl.parentId) : null;
+  if (parentForWizard && CONTROL_DEFS[parentForWizard.type].isWizard) {
+    pane.appendChild(section('Wizard Page', buildWizardChildRows(ctrl, parentForWizard), true));
+  }
+
   pane.appendChild(section('Appearance', buildPropRows(ctrl, COMMON_APPEARANCE_PROPS), false));
 
   const def = CONTROL_DEFS[ctrl.type];
@@ -618,6 +622,12 @@ function reparentControl(ctrl, newParentId) {
   const abs = absolutePosition(ctrl);
   ctrl.parentId = newParentId || null;
   ctrl.tabPage = null;
+  // Wizard-only flags don't carry meaning under a different (or no)
+  // parent - reset them, same as tabPage above; they can be re-set from
+  // the Wizard Page section if the control ends up under a Wizard again.
+  delete ctrl.wizardFooter;
+  delete ctrl.wizardRole;
+  delete ctrl.wizardRequired;
 
   if (newParentId) {
     const newParent = getControl(newParentId);
@@ -631,6 +641,10 @@ function reparentControl(ctrl, newParentId) {
     if (CONTROL_DEFS[newParent.type].isTabControl) {
       ctrl.tabPage = newParent.activeTabId;
       offsetY += TAB_HEADER_HEIGHT;
+    } else if (CONTROL_DEFS[newParent.type].isWizard) {
+      // No header strip to offset for - a wizard page occupies the full
+      // control bounds, same as a plain container.
+      ctrl.tabPage = newParent.activeTabId;
     }
     ctrl.x = Math.max(0, snap(abs.x - offsetX));
     ctrl.y = Math.max(0, snap(abs.y - offsetY));
@@ -1002,6 +1016,10 @@ function buildPropRows(ctrl, propDefs) {
     }
     if (type === 'tabEditor') {
       frag.appendChild(buildTabEditorRow(ctrl, key, label));
+      return;
+    }
+    if (type === 'wizardPagesEditor') {
+      frag.appendChild(buildWizardPagesEditorRow(ctrl, key, label));
       return;
     }
     if (type === 'anchorEditor') {

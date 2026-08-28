@@ -1,22 +1,21 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.27
+    Version 1.28
 
     Revision:
 
-    1. Fixed the Objects modal (hamburger menu) never listing the Form
-    itself, which made it impossible to re-select the Form/Main Panel
-    once child controls fully covered the canvas (e.g. several Dock=Fill
-    controls left no empty canvas area to click). A "Main Panel" row now
-    always appears at the top of the Objects list; clicking it behaves
-    exactly like clicking empty canvas (selectedId set to null, Form
-    properties shown). It's excluded during "Select Control" pick mode
-    (e.g. wiring another control's property) since the Form isn't a
-    valid target for that flow.
+    1. Added Wizard control support: createControl() seeds activeTabId
+    for Wizard the same way it does for TabControl; recomputeAllDocking()
+    docks each wizard page's children separately from its always-visible
+    footer children; the toolbox (drag-drop and double-click) intercepts
+    the Wizard tool to open the guided setup modal (Wizard-Builder.js)
+    instead of creating the control immediately; and the Objects modal
+    tree now lists a Wizard's pages (and a Footer group) the same way it
+    already does for TabControl's tabs.
 */
 
-const ENGINE_VERSION = '1.27';
+const ENGINE_VERSION = '1.28';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -101,6 +100,11 @@ function createControl(type, x, y, parentId, tabPage) {
     // showing in the designer. Not a "prop" because it's not part of the
     // generated output, just which page you're looking at while building.
     ctrl.activeTabId = (props.tabs[0] && props.tabs[0].id) || null;
+  }
+  if (def.isWizard) {
+    // Same design-time-only role as TabControl's activeTabId above, just
+    // reusing the field name - which wizard page is currently showing.
+    ctrl.activeTabId = (props.pages[0] && props.pages[0].id) || null;
   }
 
   // Menu/tool/status bars conventionally dock themselves - no reason to
@@ -206,6 +210,17 @@ function recomputeAllDocking() {
         const kids = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === tab.id);
         applyDockStack(kids, { w: c.w, h: Math.max(1, c.h - TAB_HEADER_HEIGHT) });
       });
+    } else if (def.isWizard) {
+      // Each page's content docks within the full wizard bounds (no header
+      // strip to subtract, unlike TabControl); footer children (Back/Next/
+      // Cancel and anything else marked "always visible") dock separately
+      // since they're not scoped to any one page.
+      (c.props.pages || []).forEach(page => {
+        const kids = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === page.id && !ch.wizardFooter);
+        applyDockStack(kids, { w: c.w, h: c.h });
+      });
+      const footerKids = state.controls.filter(ch => ch.parentId === c.id && ch.wizardFooter);
+      applyDockStack(footerKids, { w: c.w, h: c.h });
     } else {
       const kids = state.controls.filter(ch => ch.parentId === c.id);
       applyDockStack(kids, { w: c.w, h: c.h });
@@ -765,6 +780,7 @@ function initToolbox() {
         e.dataTransfer.setData('text/plain', type);
       });
       item.addEventListener('dblclick', () => {
+        if (type === 'Wizard') { openWizardSetupModal(20, 20, null, null); return; }
         const c = createControl(type, 20, 20, null);
         selectControl(c.id);
       });
@@ -792,17 +808,18 @@ function initCanvasDrop() {
       const hostCtrl = getControl(hostEl.dataset.id);
       if (hostCtrl && CONTROL_DEFS[hostCtrl.type].isContainer) {
         parentId = hostCtrl.id;
-        // For a TabControl, coordinates are relative to the tab content
-        // area (below the header strip), not the whole control, and the
-        // new child belongs to whichever tab is currently active.
-        const contentEl = hostEl.querySelector(':scope > .tabcontrol-content');
+        // For a TabControl or Wizard, coordinates are relative to the
+        // content area (below the header strip, if any), not the whole
+        // control, and the new child belongs to whichever page is active.
+        const contentEl = hostEl.querySelector(':scope > .tabcontrol-content, :scope > .wizard-content');
         const refEl = contentEl || hostEl;
         const refRect = refEl.getBoundingClientRect();
         x = e.clientX - refRect.left;
         y = e.clientY - refRect.top;
-        if (CONTROL_DEFS[hostCtrl.type].isTabControl) tabPage = hostCtrl.activeTabId;
+        if (CONTROL_DEFS[hostCtrl.type].isTabControl || CONTROL_DEFS[hostCtrl.type].isWizard) tabPage = hostCtrl.activeTabId;
       }
     }
+    if (type === 'Wizard') { openWizardSetupModal(x, y, parentId, tabPage); return; }
     const c = createControl(type, x, y, parentId, tabPage);
     selectControl(c.id);
   });
@@ -973,6 +990,7 @@ function initAboutModal() {
   document.getElementById('btnAbout').addEventListener('click', () => {
     document.getElementById('aboutEngineVersion').textContent = ENGINE_VERSION;
     document.getElementById('aboutControlDataVersion').textContent = typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a';
+    document.getElementById('aboutWizardBuilderVersion').textContent = typeof WIZARD_BUILDER_VERSION !== 'undefined' ? WIZARD_BUILDER_VERSION : 'n/a';
     document.getElementById('aboutCodegenVersion').textContent = typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a';
     document.getElementById('aboutCodegenHtmlVersion').textContent = typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a';
     document.getElementById('aboutCodegenWinFormsVersion').textContent = typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a';
@@ -1073,6 +1091,21 @@ function buildObjectsList() {
           container.appendChild(tabHeader);
           renderLevel(c.id, tab.id, depth + 2);
         });
+      } else if (def.isWizard) {
+        (c.props.pages || []).forEach(page => {
+          const pageHeader = document.createElement('div');
+          pageHeader.className = 'objects-row objects-tab-header';
+          pageHeader.style.paddingLeft = (10 + (depth + 1) * 16) + 'px';
+          pageHeader.textContent = `[${page.label}]`;
+          container.appendChild(pageHeader);
+          renderLevel(c.id, page.id, depth + 2);
+        });
+        const footerHeader = document.createElement('div');
+        footerHeader.className = 'objects-row objects-tab-header';
+        footerHeader.style.paddingLeft = (10 + (depth + 1) * 16) + 'px';
+        footerHeader.textContent = '[Footer]';
+        container.appendChild(footerHeader);
+        renderLevel(c.id, null, depth + 2);
       } else if (def.isContainer) {
         renderLevel(c.id, null, depth + 1);
       }

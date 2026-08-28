@@ -1,18 +1,24 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
     Revision:
 
-    1. Split out of codegen.js: psColor and generateWinForms - the
-    WinForms-via-PowerShell output generator (the fully-implemented,
-    default format). Depends on orderedControls/menuItemCodeFor
-    (CodeGen.js) and helpBlockAsPs1Comment (Properties-Pane.js) -
-    load before CodeGen.js.
+    1. Added Wizard codegen: each page becomes a same-sized Panel inside
+    the wizard's own (generated-as-Panel) control, only the first one
+    Visible; a generated Show-<Name>Page / Test-<Name>PageRequirements
+    function pair per wizard handles page switching, Next-label swapping
+    (Finish on the last page), Back-button enabling, and Required/custom
+    validation gating; children route into their page's panel (or the
+    wizard itself, for footer children) the same way TabControl children
+    already route into their TabPage; and Back/Next/Cancel buttons get
+    their Click code generated fresh from wizardRole (Wizard-Builder.js),
+    overriding whatever is stored on the button itself - same convention
+    already used for MenuStrip's autoAbout items.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.0';
+const CODEGEN_WINFORMS_VERSION = '1.1';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -48,6 +54,8 @@ function generateWinForms() {
   lines.push('');
 
   const tabPageVarFor = {}; // `${tabControlId}::${tabId}` -> generated $variable name
+  const wizardPageVarFor = {}; // `${wizardId}::${pageId}` -> generated $variable name
+  const wizardInitCalls = []; // wizard names needing a final `Show-<Name>Page 0` once every control exists
 
   ctrls.forEach(c => {
     const p = c.props;
@@ -60,6 +68,7 @@ function generateWinForms() {
       CheckedListBox: 'CheckedListBox', MaskedTextBox: 'MaskedTextBox',
       FlowLayoutPanel: 'FlowLayoutPanel', TableLayoutPanel: 'TableLayoutPanel',
       StatusStrip: 'StatusStrip', ToolStrip: 'ToolStrip',
+      Wizard: 'Panel', // a Wizard is design-time only - it generates as a plain Panel holding one Panel per page
     }[c.type];
 
     lines.push(`# ${c.name} (${c.type})`);
@@ -210,34 +219,71 @@ function generateWinForms() {
         });
         break;
       }
+      case 'Wizard': {
+        const pages = p.pages || [];
+        const pageVarNames = [];
+        pages.forEach((page, i) => {
+          const pageVar = `${c.name}_${page.id}`;
+          lines.push(`$${pageVar} = New-Object System.Windows.Forms.Panel`);
+          lines.push(`$${pageVar}.Location = New-Object System.Drawing.Point(0, 0)`);
+          lines.push(`$${pageVar}.Size = New-Object System.Drawing.Size(${c.w}, ${c.h})`);
+          lines.push(`$${pageVar}.Visible = $${i === 0}`);
+          lines.push(`$${c.name}.Controls.Add($${pageVar})`);
+          wizardPageVarFor[`${c.id}::${page.id}`] = pageVar;
+          pageVarNames.push(pageVar);
+        });
+        // Show-<Name>Page and Test-<Name>PageRequirements only depend on
+        // the page list and each child's own wizardRequired/validation
+        // fields (all already known from state.controls at this point),
+        // not on when those children get emitted by the main loop below.
+        lines.push(...wizardShowFunctionLines(c, pageVarNames));
+        lines.push(...wizardTestFunctionLines(c));
+        lines.push(`$script:${c.name}_CurrentPage = 0`);
+        wizardInitCalls.push(c.name);
+        break;
+      }
     }
 
     // events
-    Object.entries(c.events).forEach(([evtName, data]) => {
-      if (!data) return;
-      const body = data.ps1
-        ? `. "${data.ps1}"; ${data.fn}`
-        : (data.code || '# TODO: handler body').split('\n').join('\n    ');
-      // ClickToClose is a designer-only convenience label, not a real
-      // .NET event - it wires up to the actual Click event underneath.
-      // PowerShell/.NET happily supports multiple Add_Click registrations
-      // on the same control, so this coexists fine with a separate,
-      // independent regular Click handler if one also exists.
-      const realEvtName = evtName === 'ClickToClose' ? 'Click' : evtName;
-      // param($sender, $e) is the standard PowerShell WinForms convention
-      // for accessing an event's EventArgs (e.g. ItemCheck's $e.Index and
-      // $e.NewValue) - always declared, harmless when a handler doesn't
-      // use it, but means $e is always there for snippets that need it.
-      lines.push(`$${c.name}.Add_${realEvtName}({\n    param($sender, $e)\n    ${body}\n})`);
-    });
+    const wizardParent = c.parentId ? getControl(c.parentId) : null;
+    const isWizardNavBtn = c.wizardRole && wizardParent && CONTROL_DEFS[wizardParent.type].isWizard;
+    if (isWizardNavBtn) {
+      // Back/Next/Cancel Click code is always generated fresh from the
+      // wizard's live page list/validation rules, overriding whatever is
+      // stored in events.Click.code - same convention as MenuStrip's
+      // autoAbout items regenerating rather than trusting stored text.
+      const body = wizardNavClickBody(c, wizardParent);
+      lines.push(`$${c.name}.Add_Click({\n    param($sender, $e)\n    ${body}\n})`);
+    } else {
+      Object.entries(c.events).forEach(([evtName, data]) => {
+        if (!data) return;
+        const body = data.ps1
+          ? `. "${data.ps1}"; ${data.fn}`
+          : (data.code || '# TODO: handler body').split('\n').join('\n    ');
+        // ClickToClose is a designer-only convenience label, not a real
+        // .NET event - it wires up to the actual Click event underneath.
+        // PowerShell/.NET happily supports multiple Add_Click registrations
+        // on the same control, so this coexists fine with a separate,
+        // independent regular Click handler if one also exists.
+        const realEvtName = evtName === 'ClickToClose' ? 'Click' : evtName;
+        // param($sender, $e) is the standard PowerShell WinForms convention
+        // for accessing an event's EventArgs (e.g. ItemCheck's $e.Index and
+        // $e.NewValue) - always declared, harmless when a handler doesn't
+        // use it, but means $e is always there for snippets that need it.
+        lines.push(`$${c.name}.Add_${realEvtName}({\n    param($sender, $e)\n    ${body}\n})`);
+      });
+    }
 
     // Route into the right container: a TabPage for TabControl children,
-    // the parent control for other nested children, or the Form.
+    // a page Panel (or the wizard itself, for footer children) for Wizard
+    // children, the parent control for other nested children, or the Form.
     let addTarget = 'Form';
     if (c.parentId) {
       const parentCtrl = getControl(c.parentId);
       if (parentCtrl && parentCtrl.type === 'TabControl' && c.tabPage) {
         addTarget = tabPageVarFor[`${parentCtrl.id}::${c.tabPage}`] || parentCtrl.name;
+      } else if (parentCtrl && parentCtrl.type === 'Wizard') {
+        addTarget = c.wizardFooter ? parentCtrl.name : (wizardPageVarFor[`${parentCtrl.id}::${c.tabPage}`] || parentCtrl.name);
       } else if (parentCtrl) {
         addTarget = parentCtrl.name;
       }
@@ -246,6 +292,11 @@ function generateWinForms() {
     if (c.type === 'MenuStrip') lines.push(`$Form.MainMenuStrip = $${c.name}`);
     lines.push('');
   });
+
+  // Set each wizard's initial page/labels only once every one of its
+  // controls (including footer buttons) has actually been created above.
+  wizardInitCalls.forEach(name => lines.push(`Show-${name}Page 0`));
+  if (wizardInitCalls.length) lines.push('');
 
   lines.push(`[void]$Form.ShowDialog()`);
 

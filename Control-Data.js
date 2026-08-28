@@ -1,17 +1,19 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.3
+    Version 1.4
 
     Revision:
 
-    1. DateTimePicker's default Custom Format changed from "ddMMMyyyy"
-    to "dd MMM yyyy" (with spaces, renders as "11 Aug 2026"), and its
-    Format dropdown reordered so Custom sits at index 0 - it's the
-    default now, so it belongs first.
+    1. Added the Wizard control type (Multipage Wizard) - a new container,
+    same tier as GroupBox/TabControl, listed under its own "Wizards"
+    toolbox heading. Ships with DEFAULT_WIZARD_PAGES as a fallback page
+    set; real instances are normally created via the guided setup modal
+    in Wizard-Builder.js, which overwrites the pages array with the
+    user's chosen pages/templates.
 */
 
-const CONTROL_DATA_VERSION = '1.3';
+const CONTROL_DATA_VERSION = '1.4';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -148,6 +150,17 @@ const PRESET_MENU_DEFAULT = [
 const DEFAULT_TABS = [
   { id: 'tab1', label: 'Tab1' },
   { id: 'tab2', label: 'Tab2' },
+];
+
+// Fallback page set for a Wizard control - only used if one is ever
+// created outside the guided setup modal (e.g. programmatically). Real
+// instances get their pages array overwritten by createWizardFromSetup()
+// in Wizard-Builder.js, which also populates each page's template content
+// and the Back/Next/Cancel footer buttons.
+const DEFAULT_WIZARD_PAGES = [
+  { id: 'page1', label: 'Welcome', template: 'welcome', validation: '' },
+  { id: 'page2', label: 'Options', template: 'options', validation: '' },
+  { id: 'page3', label: 'Summary', template: 'summary', validation: '' },
 ];
 
 const CONTROL_DEFS = {
@@ -346,6 +359,15 @@ const CONTROL_DEFS = {
     ],
     events: [],
   },
+  Wizard: {
+    label: 'Multipage Wizard', glyph: 'Wz', defaultW: 460, defaultH: 320,
+    props: [
+      ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
+    ],
+    events: [],
+    isContainer: true,
+    isWizard: true,
+  },
 };
 
 // Real vector icons for the toolbox, one per control type - replaces the
@@ -377,6 +399,7 @@ const TOOL_ICONS = {
   TableLayoutPanel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M8 1.5v13M1.5 8h13"/>`,
   StatusStrip: `<rect x="1.5" y="10.5" width="13" height="4" rx="0.7"/><path d="M4 12.5h4"/>`,
   ToolStrip: `<rect x="1.5" y="3.3" width="13" height="4.4" rx="0.7"/><rect x="3" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="6.2" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="9.4" y="4.3" width="2.2" height="2.4" rx="0.4"/>`,
+  Wizard: `<rect x="1.5" y="2" width="13" height="9" rx="1"/><path d="M4 5.7h5M4 8h3.3"/><path d="M2 13.5h12M9.8 11l2.2 2-2.2 2" transform="translate(0,-1.2)"/>`,
 };
 
 function toolIconSvg(type) {
@@ -412,6 +435,7 @@ const TOOL_DESCRIPTIONS = {
   StatusStrip: 'A thin bar (usually docked to the bottom) showing status text - "Ready", progress, or similar.',
   ToolStrip: 'A horizontal bar of buttons (usually docked to the top) for quick-access actions - New/Open/Save style toolbars.',
   TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
+  Wizard: 'A multi-page installer-style wizard. Dropping this opens a setup dialog to choose your pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically. Use the Pages editor to add/rename/reorder/remove pages afterward.',
 };
 
 const TOOLBOX_GROUPS = [
@@ -420,4 +444,5 @@ const TOOLBOX_GROUPS = [
   { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl', 'FlowLayoutPanel', 'TableLayoutPanel'] },
   { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
   { heading: 'Menus & Bars', types: ['MenuStrip', 'ToolStrip', 'StatusStrip'] },
+  { heading: 'Wizards', types: ['Wizard'] },
 ];
