@@ -1,16 +1,23 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.5
+    Version 1.6
 
     Revision:
 
-    1. RichTextBox's canvas preview now reflects its new Read Only
-    property (Control-Data.js) the same way TextBox's already does -
-    a readonly attribute on the textarea when set.
+    1. Fixed Label's canvas preview never actually reflecting Text Align:
+    it was passing p.textAlign.toLowerCase() straight through as a CSS
+    text-align value, which was fine for the old Left/Center/Right-only
+    scheme but produces invalid values like "middleleft" now that
+    textAlign is a full ContentAlignment name (Control-Data.js 1.10) -
+    invalid CSS values are silently ignored, so alignment changes never
+    showed up. New contentAlignParts() splits the value into text-align
+    (horizontal) plus a flex alignItems/justifyContent pair (vertical),
+    and .rc-label is now a flex container so "Middle"/"Top"/"Bottom"
+    actually have something to act on.
 */
 
-const RENDER_VERSION = '1.5';
+const RENDER_VERSION = '1.6';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -147,6 +154,19 @@ function borderStyleFor(p, type) {
   }
 }
 
+// Splits a ContentAlignment value like "MiddleCenter" into the CSS this
+// tool actually needs to render it: text-align for the horizontal axis
+// (also governs how wrapped lines sit) and a flex alignItems/justifyContent
+// pair for the vertical axis, since .rc-label is otherwise just a block
+// div with no notion of "vertical middle" on its own.
+function contentAlignParts(align) {
+  const a = align || 'MiddleLeft';
+  const alignItems = a.startsWith('Top') ? 'flex-start' : a.startsWith('Bottom') ? 'flex-end' : 'center';
+  const textAlign = a.endsWith('Left') ? 'left' : a.endsWith('Right') ? 'right' : 'center';
+  const justifyContent = textAlign === 'left' ? 'flex-start' : textAlign === 'right' ? 'flex-end' : 'center';
+  return { alignItems, textAlign, justifyContent };
+}
+
 function renderInner(c) {
   const p = c.props;
   const wrap = document.createElement('div');
@@ -158,7 +178,8 @@ function renderInner(c) {
       break;
     }
     case 'Label': {
-      wrap.innerHTML = `<div class="rc-label" style="${fontStyleFor(p)}color:${p.foreColor};text-align:${p.textAlign.toLowerCase()};">${escapeHtml(p.text)}</div>`;
+      const align = contentAlignParts(p.textAlign);
+      wrap.innerHTML = `<div class="rc-label" style="${fontStyleFor(p)}color:${p.foreColor};display:flex;align-items:${align.alignItems};justify-content:${align.justifyContent};text-align:${align.textAlign};width:100%;height:100%;box-sizing:border-box;">${escapeHtml(p.text)}</div>`;
       break;
     }
     case 'TextBox': {
