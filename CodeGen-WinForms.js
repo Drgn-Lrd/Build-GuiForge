@@ -1,24 +1,18 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.6
+    Version 1.7
 
     Revision:
 
-    1. RichTextBox now emits ReadOnly (new prop, Control-Data.js) the
-    same way TextBox already does - previously RichTextBox fell into the
-    shared TextBox/RichTextBox case but only TextBox's inner branch ever
-    wrote type-specific properties, so ReadOnly silently did nothing for
-    RichTextBox even once the property existed to set in the UI.
-
-    2. Label now emits TextAlign (existing prop, wasn't wired into
-    codegen yet) as a ContentAlignment - Left/Center/Right map to
-    MiddleLeft/MiddleCenter/MiddleRight respectively, always vertically
-    centered rather than WinForms' TopLeft default, since that reads
-    better for the multi-line case (e.g. a wizard page's body label).
+    1. Label's TextAlign emission simplified to pass p.textAlign straight
+    through as the ContentAlignment name - it's now a real 9-point value
+    from the new contentAlignEditor picker (Control-Data.js/
+    Properties-Pane.js), not a Left/Center/Right string needing
+    translation into a hardcoded-Middle guess like the previous revision.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.6';
+const CODEGEN_WINFORMS_VERSION = '1.7';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -107,9 +101,11 @@ function generateWinForms() {
     switch (c.type) {
       case 'Button': case 'Label': case 'LinkLabel':
         lines.push(`$${c.name}.Text = "${(p.text || '').replace(/"/g, '""')}"`);
+        // p.textAlign is already a literal ContentAlignment name (e.g.
+        // "MiddleLeft") straight out of the 9-point picker
+        // (contentAlignEditor, Properties-Pane.js) - no translation needed.
         if (c.type === 'Label' && p.textAlign) {
-          const align = p.textAlign === 'Center' ? 'MiddleCenter' : p.textAlign === 'Right' ? 'MiddleRight' : 'MiddleLeft';
-          lines.push(`$${c.name}.TextAlign = [System.Drawing.ContentAlignment]::${align}`);
+          lines.push(`$${c.name}.TextAlign = [System.Drawing.ContentAlignment]::${p.textAlign}`);
         }
         break;
       case 'TextBox': case 'RichTextBox':
