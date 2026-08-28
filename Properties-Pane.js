@@ -1,20 +1,19 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.5
+    Version 1.6
 
     Revision:
 
-    1. Added the "Add to Summary of Tasks log" event snippet
-    (summaryLogAdd) - appends one line of text to a target control
-    (typically the read-only RichTextBox on a wizard's Summary page,
-    Wizard-Builder.js/Control-Data.js) via AppendText, so checking a box
-    or clicking a button can build up a running "what this will do" list.
-    Not restricted to a specific event - useful from CheckedChanged,
-    Click, or anything else.
+    1. Added buildContentAlignEditorRow (contentAlignEditor prop type) -
+    a 3x3 grid picker for the full 9-point ContentAlignment
+    (Top/Middle/Bottom x Left/Center/Right), same spirit as the Anchor
+    editor but single-select instead of independent per-edge flags. Now
+    used by Label's Text Align (Control-Data.js), replacing its old
+    Left/Center/Right-only dropdown that silently assumed Top vertically.
 */
 
-const PROPERTIES_PANE_VERSION = '1.5';
+const PROPERTIES_PANE_VERSION = '1.6';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -895,6 +894,45 @@ function buildAnchorEditorRow(ctrl, key, label) {
   return wrap;
 }
 
+// The 9 ContentAlignment points, in reading order (top row left-to-right,
+// then middle, then bottom) - drives both the picker grid below and the
+// literal enum name CodeGen-WinForms.js emits for Label.TextAlign.
+const CONTENT_ALIGN_POINTS = [
+  'TopLeft', 'TopCenter', 'TopRight',
+  'MiddleLeft', 'MiddleCenter', 'MiddleRight',
+  'BottomLeft', 'BottomCenter', 'BottomRight',
+];
+
+function buildContentAlignEditorRow(ctrl, key, label) {
+  const wrap = document.createElement('div');
+  wrap.className = 'prop-row content-align-editor-row';
+
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  labelEl.title = tt(key);
+
+  const grid = document.createElement('div');
+  grid.className = 'content-align-editor-grid';
+
+  const current = ctrl.props[key] || 'MiddleLeft';
+  // Nine discrete points (Top/Middle/Bottom x Left/Center/Right), laid out
+  // in reading order to match their real on-screen position - unlike
+  // Anchor's independent per-edge flags, only one of these can be active
+  // at a time.
+  CONTENT_ALIGN_POINTS.forEach(point => {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'content-align-editor-cell' + (point === current ? ' active' : '');
+    cell.title = point.replace(/([A-Z])/g, ' $1').trim();
+    cell.addEventListener('click', () => { ctrl.props[key] = point; render(); });
+    grid.appendChild(cell);
+  });
+
+  wrap.appendChild(labelEl);
+  wrap.appendChild(grid);
+  return wrap;
+}
+
 function buildItemsListEditorRow(ctrl, key, label) {
   const wrap = document.createElement('div');
   wrap.className = 'items-list-editor';
@@ -1042,6 +1080,10 @@ function buildPropRows(ctrl, propDefs) {
     }
     if (type === 'anchorEditor') {
       frag.appendChild(buildAnchorEditorRow(ctrl, key, label));
+      return;
+    }
+    if (type === 'contentAlignEditor') {
+      frag.appendChild(buildContentAlignEditorRow(ctrl, key, label));
       return;
     }
     if (type === 'itemsListEditor') {
