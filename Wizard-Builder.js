@@ -1,29 +1,22 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.8
+    Version 1.9
 
     Revision:
 
-    1. Made the Required/Additional-Requirements/Events-handler
-    relationship for boolean-kind (Checked) controls genuinely
-    bidirectional instead of the one-way (event -> detected requirement)
-    version from the previous revision. New single mutator
-    wizardSyncBooleanGate(wizardCtrl, targetCtrl, required) is now what
-    the "Required before Next" toggle and "+ Add requirement" (when only
-    boolean-kind controls exist on the page) both call - it sets
-    wizardRequired AND writes/removes the actual CheckedChanged event
-    action (mirrorChecked targeting Next), so flipping either one updates
-    the other two, since the Pages editor's detected-requirements scan
-    picks up whatever the event action says on every render regardless
-    of which path wrote it. Retargeting a comparator-based requirement
-    row to a boolean-kind control now converts it into a synced gate
-    instead of leaving two separate representations of the same thing.
-    Removed the "Also detected from..." note - the toggle itself is the
-    truth now, so there's nothing left to separately explain.
+    1. Added All/Any combining logic for the manual Additional
+    Requirements list (page.requirementsMode, default 'all') - previously
+    every requirement was implicitly ANDed with no way to express "at
+    least one of these" (e.g. CheckBox1 OR CheckBox2, not both). The
+    selector only shows once there are 2+ manual requirements to combine.
+    Scoped to that list only - each control's own "Required before Next"
+    toggle and a detected event handler stay individually required
+    regardless of this setting, since those are deliberate independent
+    per-control settings rather than part of a group.
 */
 
-const WIZARD_BUILDER_VERSION = '1.8';
+const WIZARD_BUILDER_VERSION = '1.9';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -558,6 +551,26 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
       reqWrap.appendChild(hint);
     }
   } else {
+    // Only meaningful with 2+ manual requirements - a single one (or
+    // none) has nothing to combine. This governs ONLY the manual
+    // requirements below, not each control's own "Required before Next"
+    // toggle or a detected event handler - those stay individually
+    // required no matter what, since each one is its own deliberate,
+    // independent per-control setting rather than part of a group.
+    if (page.requirements.length > 1) {
+      const modeRow = document.createElement('div');
+      modeRow.className = 'wizard-requirements-mode-row';
+      modeRow.title = 'How the requirements below combine. "All" (default): every one must hold. "Any": at least one of them must hold - e.g. "CheckBox1 OR CheckBox2 must be checked" instead of both. Doesn\'t affect each control\'s own "Required before Next" toggle or a detected event handler above - those are always individually required.';
+      const mode = page.requirementsMode || 'all';
+      modeRow.innerHTML = `<label>Combine as</label>
+        <select>
+          <option value="all" ${mode === 'all' ? 'selected' : ''}>All of these must hold</option>
+          <option value="any" ${mode === 'any' ? 'selected' : ''}>Any one of these must hold</option>
+        </select>`;
+      modeRow.querySelector('select').addEventListener('change', (e) => { page.requirementsMode = e.target.value; render(); });
+      reqWrap.appendChild(modeRow);
+    }
+
     page.requirements.forEach((req, ri) => reqWrap.appendChild(buildWizardRequirementRow(ctrl, page, req, ri, pageControls)));
     const addReqBtn = document.createElement('button');
     addReqBtn.type = 'button';
@@ -1103,7 +1116,15 @@ function wizardTestFunctionLines(c) {
       const expr = d.checkedRequired ? `$${d.ctrl.name}.Checked` : `-not $${d.ctrl.name}.Checked`;
       lines.push(`            if (-not (${expr})) { return $false }`);
     });
-    extraReqs.forEach(expr => lines.push(`            if (-not (${expr})) { return $false }`));
+    // "any" mode combines every manual requirement into a single -or-
+    // expression instead of checking each independently - "all" (the
+    // default) keeps the original one-check-per-requirement behavior,
+    // which is equivalent to ANDing them.
+    if (extraReqs.length > 1 && page.requirementsMode === 'any') {
+      lines.push(`            if (-not (${extraReqs.map(e => `(${e})`).join(' -or ')})) { return $false }`);
+    } else {
+      extraReqs.forEach(expr => lines.push(`            if (-not (${expr})) { return $false }`));
+    }
     lines.push(`        }`);
   });
   if (!anyClause) lines.push(`        default { }`);
