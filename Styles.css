@@ -1,12 +1,14 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.28
+    Version 1.29
 
     Revision:
 
-    1. Added .wizard-nav-item.drag-over (dashed outline) for the Contents
-    nav strip's new on-canvas page-reorder drag-and-drop.
+    1. Generalized the drag-over/dragging state styles to .tab-editor-item
+    too (previously only .wizard-page-editor-item), since the wizard
+    setup modal's page list reuses .tab-editor-item directly for its new
+    drag-and-drop reorder rows.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -340,8 +342,8 @@
   font-size: 11.5px;
 }
 .wizard-page-editor-item { flex-direction: column; align-items: stretch; gap: 6px; }
-.wizard-page-editor-item.drag-over { border-color: var(--bp-accent-2); border-style: dashed; }
-.wizard-page-editor-item.dragging { opacity: 0.4; }
+.wizard-page-editor-item.drag-over, .tab-editor-item.drag-over { border-color: var(--bp-accent-2); border-style: dashed; }
+.wizard-page-editor-item.dragging, .tab-editor-item.dragging { opacity: 0.4; }
 .wizard-page-editor-toprow { display: flex; align-items: center; gap: 6px; }
 .wizard-page-grip {
   flex-shrink: 0;
@@ -429,7 +431,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.28';
+  --stylesheet-version: '1.29';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
