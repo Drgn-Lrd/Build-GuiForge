@@ -1,7 +1,7 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.25
+    Version 1.26
 
     Revision:
 
@@ -14,6 +14,10 @@
     strip's own styles (.wizard-nav-horizontal/-vertical/-item), and
     added .wizard-footer-content (full-bounds layer for Back/Next/Cancel
     etc., spanning under the nav strip like a real installer's button bar).
+
+    3. Replaced the per-page validation textarea styles with the new
+    structured requirement row (.wizard-requirement-row and friends) -
+    a grid of small selects/inputs instead of a free-text box.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -336,14 +340,22 @@
 .wizard-page-editor-toprow { display: flex; align-items: center; gap: 6px; }
 .wizard-page-reorder { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
 .wizard-page-reorder button { font-size: 9px; line-height: 1; padding: 1px 5px; }
-.wizard-page-validation-row { display: flex; flex-direction: column; gap: 3px; padding-left: 2px; }
-.wizard-page-validation-row label { font-size: 10px; color: var(--bp-text-faint); }
-.wizard-page-validation-row textarea {
-  min-height: 32px;
-  font-family: var(--bp-font-mono, monospace);
-  font-size: 11px;
-  resize: vertical;
+.wizard-requirements-wrap { display: flex; flex-direction: column; gap: 5px; padding-left: 2px; }
+.wizard-requirements-heading { font-size: 10px; color: var(--bp-text-faint); }
+.wizard-requirement-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 0.8fr auto;
+  gap: 4px;
+  align-items: center;
 }
+.wizard-requirement-row select,
+.wizard-requirement-row .wizard-requirement-value {
+  width: 100%;
+  min-width: 0;
+  font-size: 10.5px;
+  padding: 3px 4px;
+}
+.wizard-requirement-row .menu-del-btn { padding: 3px 6px; }
 .menu-editor-heading { font-size: 11.5px; color: var(--bp-text-muted); margin-bottom: 6px; }
 .menu-editor-item {
   border: 1px solid var(--bp-border-soft);
@@ -402,7 +414,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.25';
+  --stylesheet-version: '1.26';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
