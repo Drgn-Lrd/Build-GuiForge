@@ -1,19 +1,29 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.5
+    Version 1.6
 
     Revision:
 
-    1. Added the actual thing that was asked for: drag handles (plus
-    Up/Down buttons) in the guided SETUP MODAL's page list, so pages can
-    be reordered before the wizard is ever created - e.g. add a 4th page,
-    drag it to 3rd, then hit Create Wizard. The Contents-nav and Pages-
-    editor reordering added earlier were both AFTER-creation tools; this
-    is the before-creation one that was actually meant.
+    1. Removed drag-and-drop from the setup modal and canvas Contents nav,
+    keeping only Up/Down arrows everywhere pages can be reordered
+    (setup modal, Pages editor, canvas) - redundant with the arrows in
+    the same spot, not genuinely useful extra places to work.
+
+    2. Each page's Template is now an editable dropdown (was a static
+    badge) on its own line in both the setup modal and the Pages editor,
+    applying that template's starter controls immediately when changed
+    (adds to the page, doesn't clear it first). Removed the separate
+    template selector next to "+ Add page" in both places, since there's
+    now one place to set it instead of two - add a page, then pick its
+    template from its own row.
+
+    3. Split the Pages editor's row onto two lines (reorder/name/Show/
+    Delete, then Template) instead of cramming everything - it doesn't
+    truncate the page name anymore.
 */
 
-const WIZARD_BUILDER_VERSION = '1.5';
+const WIZARD_BUILDER_VERSION = '1.6';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -165,15 +175,7 @@ function getWizardSetupOverlay() {
       <div class="modal-body">
         <div class="items-hint" style="margin-bottom:8px;">Choose the pages for this wizard. You can add, rename, reorder, or remove pages later from the Pages editor.</div>
         <div id="wizardSetupPagesList"></div>
-        <div class="wizard-setup-add-row">
-          <select id="wizardSetupAddTemplate">
-            <option value="blank">Blank</option>
-            <option value="welcome">Welcome</option>
-            <option value="options">Options</option>
-            <option value="summary">Summary</option>
-          </select>
-          <button type="button" class="btn btn-ghost" id="wizardSetupAddBtn">+ Add page</button>
-        </div>
+        <button type="button" class="btn btn-ghost tab-add-btn" id="wizardSetupAddBtn">+ Add page</button>
       </div>
       <div class="modal-footer">
         <button class="btn" id="wizardSetupCancel">Cancel</button>
@@ -187,8 +189,9 @@ function getWizardSetupOverlay() {
   document.getElementById('wizardSetupClose').addEventListener('click', closeWizardSetupModal);
   document.getElementById('wizardSetupCancel').addEventListener('click', closeWizardSetupModal);
   document.getElementById('wizardSetupAddBtn').addEventListener('click', () => {
-    const tpl = document.getElementById('wizardSetupAddTemplate').value;
-    wizardSetupDraftPages.push({ label: WIZARD_TEMPLATE_LABELS[tpl] || 'Page', template: tpl });
+    // Template is chosen per-row (the dropdown built in renderWizardSetupList)
+    // rather than here - one editable place for it instead of two.
+    wizardSetupDraftPages.push({ label: 'Page' + (wizardSetupDraftPages.length + 1), template: 'blank' });
     renderWizardSetupList();
   });
   document.getElementById('wizardSetupCreate').addEventListener('click', () => {
@@ -209,37 +212,10 @@ function renderWizardSetupList() {
   list.innerHTML = '';
   wizardSetupDraftPages.forEach((page, i) => {
     const row = document.createElement('div');
-    row.className = 'tab-editor-item';
+    row.className = 'tab-editor-item wizard-page-editor-item';
 
-    // Drag-and-drop reorder - this is the actual point of the setup
-    // modal: pick your page count/templates BEFORE creating anything,
-    // reordering a page you just added (e.g. it landed 4th, drag it to
-    // 3rd) without having to fix it up afterward in the Pages editor.
-    row.addEventListener('dragover', (e) => {
-      if (e.dataTransfer.types.includes('text/wizard-setup-page-index')) { e.preventDefault(); row.classList.add('drag-over'); }
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
-    row.addEventListener('drop', (e) => {
-      if (!e.dataTransfer.types.includes('text/wizard-setup-page-index')) return;
-      e.preventDefault();
-      row.classList.remove('drag-over');
-      const fromIdx = Number(e.dataTransfer.getData('text/wizard-setup-page-index'));
-      if (Number.isNaN(fromIdx) || fromIdx === i) return;
-      wizardSetupDraftPages.splice(i, 0, wizardSetupDraftPages.splice(fromIdx, 1)[0]);
-      renderWizardSetupList();
-    });
-
-    const grip = document.createElement('div');
-    grip.className = 'wizard-page-grip';
-    grip.draggable = true;
-    grip.textContent = '\u2630';
-    grip.title = 'Drag to reorder this page.';
-    grip.addEventListener('dragstart', (e) => {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/wizard-setup-page-index', String(i));
-      row.classList.add('dragging');
-    });
-    grip.addEventListener('dragend', () => row.classList.remove('dragging'));
+    const topRow = document.createElement('div');
+    topRow.className = 'wizard-page-editor-toprow';
 
     const reorder = document.createElement('div');
     reorder.className = 'wizard-page-reorder';
@@ -262,10 +238,6 @@ function renderWizardSetupList() {
     nameInput.value = page.label;
     nameInput.addEventListener('change', (e) => { page.label = e.target.value.trim() || page.label; });
 
-    const tplBadge = document.createElement('span');
-    tplBadge.className = 'menu-editor-tag';
-    tplBadge.textContent = WIZARD_TEMPLATE_LABELS[page.template] || page.template;
-
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
@@ -277,11 +249,26 @@ function renderWizardSetupList() {
       renderWizardSetupList();
     });
 
-    row.appendChild(grip);
-    row.appendChild(reorder);
-    row.appendChild(nameInput);
-    row.appendChild(tplBadge);
-    row.appendChild(delBtn);
+    topRow.appendChild(reorder);
+    topRow.appendChild(nameInput);
+    topRow.appendChild(delBtn);
+    row.appendChild(topRow);
+
+    // Template on its own line - editable here, not a separate selector
+    // next to the Add button, so there's one place to set it instead of two.
+    const tplRow = document.createElement('div');
+    tplRow.className = 'wizard-page-template-row';
+    const tplSelect = document.createElement('select');
+    Object.keys(WIZARD_TEMPLATE_LABELS).forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k; opt.textContent = WIZARD_TEMPLATE_LABELS[k];
+      if (k === page.template) opt.selected = true;
+      tplSelect.appendChild(opt);
+    });
+    tplSelect.addEventListener('change', (e) => { page.template = e.target.value; });
+    tplRow.appendChild(tplSelect);
+    row.appendChild(tplRow);
+
     list.appendChild(row);
   });
 }
@@ -324,31 +311,18 @@ function buildWizardPagesEditorRow(ctrl, key, label) {
     wrap.appendChild(buildWizardPageEditorItem(ctrl, pages, page, pi));
   });
 
-  const addRow = document.createElement('div');
-  addRow.className = 'wizard-setup-add-row';
-  const tplSelect = document.createElement('select');
-  Object.keys(WIZARD_TEMPLATE_LABELS).forEach(k => {
-    const opt = document.createElement('option');
-    opt.value = k; opt.textContent = WIZARD_TEMPLATE_LABELS[k];
-    tplSelect.appendChild(opt);
-  });
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'btn btn-ghost tab-add-btn';
   addBtn.textContent = '+ Add page';
-  addBtn.title = 'Add a new wizard page, optionally pre-filled from a starter template.';
+  addBtn.title = 'Add a new blank wizard page - pick a starter template from the new page\'s own Template dropdown afterward, if you want one.';
   addBtn.addEventListener('click', () => {
-    const tpl = tplSelect.value;
-    const label = tpl === 'blank' ? ('Page' + (pages.length + 1)) : (WIZARD_TEMPLATE_LABELS[tpl] || 'Page');
+    const label = 'Page' + (pages.length + 1);
     const id = wizardGeneratePageId(label, pages.map(p => p.id));
-    const newPage = { id, label, template: tpl, requirements: [] };
-    pages.push(newPage);
-    populateWizardPageTemplate(ctrl, newPage);
+    pages.push({ id, label, template: 'blank', requirements: [] });
     render();
   });
-  addRow.appendChild(tplSelect);
-  addRow.appendChild(addBtn);
-  wrap.appendChild(addRow);
+  wrap.appendChild(addBtn);
 
   return wrap;
 }
@@ -357,37 +331,8 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   const outer = document.createElement('div');
   outer.className = 'tab-editor-item wizard-page-editor-item' + (page.id === ctrl.activeTabId ? ' active' : '');
 
-  // Drag-and-drop reorder (on top of the Up/Down buttons below, not
-  // instead of them - only the grip handle itself is draggable, so
-  // dragging doesn't fight with clicking/typing in the row's inputs).
-  outer.addEventListener('dragover', (e) => {
-    if (e.dataTransfer.types.includes('text/wizard-page-index')) { e.preventDefault(); outer.classList.add('drag-over'); }
-  });
-  outer.addEventListener('dragleave', () => outer.classList.remove('drag-over'));
-  outer.addEventListener('drop', (e) => {
-    if (!e.dataTransfer.types.includes('text/wizard-page-index')) return;
-    e.preventDefault();
-    outer.classList.remove('drag-over');
-    const fromIdx = Number(e.dataTransfer.getData('text/wizard-page-index'));
-    if (Number.isNaN(fromIdx) || fromIdx === pi) return;
-    pages.splice(pi, 0, pages.splice(fromIdx, 1)[0]);
-    render();
-  });
-
   const topRow = document.createElement('div');
   topRow.className = 'wizard-page-editor-toprow';
-
-  const grip = document.createElement('div');
-  grip.className = 'wizard-page-grip';
-  grip.draggable = true;
-  grip.textContent = '\u2630';
-  grip.title = 'Drag to reorder this page.';
-  grip.addEventListener('dragstart', (e) => {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/wizard-page-index', String(pi));
-    outer.classList.add('dragging');
-  });
-  grip.addEventListener('dragend', () => outer.classList.remove('dragging'));
 
   const reorder = document.createElement('div');
   reorder.className = 'wizard-page-reorder';
@@ -410,11 +355,6 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   nameInput.value = page.label;
   nameInput.addEventListener('change', (e) => { page.label = e.target.value.trim() || page.label; render(); });
 
-  const tplBadge = document.createElement('span');
-  tplBadge.className = 'menu-editor-tag';
-  tplBadge.title = 'The starter template this page was created from - informational only, does not change existing content.';
-  tplBadge.textContent = WIZARD_TEMPLATE_LABELS[page.template] || page.template;
-
   const selectBtn = document.createElement('button');
   selectBtn.type = 'button';
   selectBtn.className = 'btn btn-ghost tab-select-btn';
@@ -435,13 +375,37 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
     render();
   });
 
-  topRow.appendChild(grip);
   topRow.appendChild(reorder);
   topRow.appendChild(nameInput);
-  topRow.appendChild(tplBadge);
   topRow.appendChild(selectBtn);
   topRow.appendChild(delBtn);
   outer.appendChild(topRow);
+
+  // Template gets its own line - editable now (it used to be an
+  // informational-only badge), and applying one adds that template's
+  // starter controls to the page immediately (it doesn't remove anything
+  // already there, so switching templates layers content rather than
+  // replacing it - safest default given there's no undo prompt here).
+  const tplRow = document.createElement('div');
+  tplRow.className = 'wizard-page-template-row';
+  const tplLabel = document.createElement('label');
+  tplLabel.textContent = 'Template';
+  tplLabel.title = 'Applying a template adds its starter controls to this page - it doesn\'t remove anything already there.';
+  const tplSelect = document.createElement('select');
+  Object.keys(WIZARD_TEMPLATE_LABELS).forEach(k => {
+    const opt = document.createElement('option');
+    opt.value = k; opt.textContent = WIZARD_TEMPLATE_LABELS[k];
+    if (k === page.template) opt.selected = true;
+    tplSelect.appendChild(opt);
+  });
+  tplSelect.addEventListener('change', (e) => {
+    page.template = e.target.value;
+    populateWizardPageTemplate(ctrl, page);
+    render();
+  });
+  tplRow.appendChild(tplLabel);
+  tplRow.appendChild(tplSelect);
+  outer.appendChild(tplRow);
 
   const reqWrap = document.createElement('div');
   reqWrap.className = 'wizard-requirements-wrap';
@@ -640,46 +604,17 @@ function buildWizardContentsNav(c) {
   const pages = c.props.pages || [];
   const nav = document.createElement('div');
   nav.className = cs === 'Horizontal' ? 'wizard-nav-horizontal' : 'wizard-nav-vertical';
-  pages.forEach((page, pi) => {
+  pages.forEach(page => {
     const item = document.createElement('div');
     item.className = 'wizard-nav-item' + (page.id === c.activeTabId ? ' active' : '');
     item.textContent = page.label;
-    item.title = 'Click to switch to this page, or drag to reorder it, while designing.';
-    item.draggable = true;
-
-    // mousedown still needs to stop the wizard's own select/move gesture
-    // from also firing, but NOT preventDefault - that would block the
-    // browser from ever starting the native drag below.
-    item.addEventListener('mousedown', (e) => { e.stopPropagation(); });
-    item.addEventListener('click', (e) => {
+    item.title = 'Click to switch to this page while designing.';
+    item.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      e.preventDefault();
       c.activeTabId = page.id;
       selectControl(c.id);
     });
-
-    // Drag-and-drop page reorder, directly on the wizard's own Contents
-    // nav strip - the on-canvas equivalent of the Pages editor's grip
-    // handle, for reordering without leaving the wizard itself.
-    item.addEventListener('dragstart', (e) => {
-      e.stopPropagation();
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/wizard-page-index', String(pi));
-    });
-    item.addEventListener('dragover', (e) => {
-      if (e.dataTransfer.types.includes('text/wizard-page-index')) { e.preventDefault(); item.classList.add('drag-over'); }
-    });
-    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
-    item.addEventListener('drop', (e) => {
-      if (!e.dataTransfer.types.includes('text/wizard-page-index')) return;
-      e.preventDefault();
-      e.stopPropagation();
-      item.classList.remove('drag-over');
-      const fromIdx = Number(e.dataTransfer.getData('text/wizard-page-index'));
-      if (Number.isNaN(fromIdx) || fromIdx === pi) return;
-      pages.splice(pi, 0, pages.splice(fromIdx, 1)[0]);
-      render();
-    });
-
     nav.appendChild(item);
   });
   return nav;

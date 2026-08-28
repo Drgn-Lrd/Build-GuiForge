@@ -1,17 +1,17 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
     Revision:
 
-    1. Added a "Resizable (borderless)" toggle to the Form's Title Bar
-    section, shown only when Form Border Style is None - opts into
-    generated mouse-drag edge-resize code (CodeGen-WinForms.js) since a
-    real None-bordered WinForms window has no OS resize grips at all.
+    1. Removed the "Resizable (borderless)" toggle - the mouse-drag
+    resize it opted into didn't work reliably (no cursor feedback at
+    runtime), and FormBorderStyle=None is genuinely meant to be
+    non-resizable in real WinForms.
 */
 
-const PROPERTIES_PANE_VERSION = '1.2';
+const PROPERTIES_PANE_VERSION = '1.3';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -1848,18 +1848,6 @@ function buildFormChromeRows() {
   fbsRow.querySelector('select').addEventListener('change', (e) => { state.form.formBorderStyle = e.target.value; render(); });
   fbsRow.querySelector('label').appendChild(buildOptionInfoButton('formBorderStyle', 'Form Border Style', fbsOpts));
   frag.appendChild(fbsRow);
-
-  // Real WinForms has no OS resize grips once the title bar/border is
-  // gone (FormBorderStyle=None) - this only shows up once None is picked,
-  // and opts into generated mouse-drag edge-resize code as a substitute.
-  if (state.form.formBorderStyle === 'None') {
-    const resizeRow = document.createElement('div');
-    resizeRow.className = 'toggle-row';
-    resizeRow.title = 'None removes the title bar AND the OS resize border, so a real WinForms window normally can\'t be resized at all once you pick it. Turning this on generates mouse-drag edge-resize code (no title bar needed) as a substitute.';
-    resizeRow.innerHTML = `<span class="toggle-label">Resizable (borderless)</span><label class="switch"><input type="checkbox" ${state.form.borderlessResizable ? 'checked' : ''}><span class="track"></span></label>`;
-    resizeRow.querySelector('input').addEventListener('change', (e) => { state.form.borderlessResizable = e.target.checked; render(); });
-    frag.appendChild(resizeRow);
-  }
 
   const startRow = document.createElement('div');
   startRow.className = 'prop-row';

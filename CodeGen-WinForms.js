@@ -1,24 +1,18 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.5
 
     Revision:
 
-    1. Fixed a real bug: $Form.Size sets the OUTER window bounds
-    (title bar/border included), so with a title bar present the actual
-    client area ended up shorter than state.form.height by however tall
-    that title bar is - every child control's Y coordinate assumes a
-    client area of exactly that height, so content anchored near the
-    bottom (a wizard's footer buttons, for instance) was clipped until
-    the window was manually resized larger at runtime. Looked fine in
-    the designer (which already grows the outer preview box by the
-    title bar height on top of the client size) but not the generated
-    app. Switched to $Form.ClientSize, which guarantees the client area
-    itself - not the outer window - is exactly the configured size.
+    1. Removed the borderless-resize mouse-drag codegen - it didn't
+    actually give resize-cursor feedback at runtime, and a real
+    FormBorderStyle=None window is genuinely meant to be non-resizable,
+    so the feature was more trouble than it was worth rather than
+    something to keep fixing.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.4';
+const CODEGEN_WINFORMS_VERSION = '1.5';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -63,47 +57,6 @@ function generateWinForms() {
   lines.push(`$Form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::${f.formBorderStyle}`);
   lines.push(`$Form.TopMost = $${f.topMost}`);
   lines.push('');
-
-  if (f.formBorderStyle === 'None' && f.borderlessResizable) {
-    // FormBorderStyle=None has no OS resize grips at all, so this adds a
-    // manual mouse-drag substitute: mousedown near any edge starts a
-    // resize, mousemove while resizing adjusts Bounds directly, mouseup
-    // ends it. Kept to plain WinForms events (no P/Invoke/WM_NCHITTEST)
-    // so it's easy to read/adjust, at the cost of being a little less
-    // snappy than a native OS-level resize border.
-    lines.push(`# Borderless resize support - FormBorderStyle=None has no OS resize`);
-    lines.push(`# grips, so drag within BorderlessResizeMargin pixels of any edge to resize.`);
-    lines.push(`$script:BorderlessResizeMargin = 6`);
-    lines.push(`$script:BorderlessResizing = $false`);
-    lines.push(`$script:BorderlessResizeMode = ''`);
-    lines.push(`$Form.Add_MouseDown({`);
-    lines.push(`    param($sender, $e)`);
-    lines.push(`    $m = $script:BorderlessResizeMargin`);
-    lines.push(`    $onRight = ($sender.ClientSize.Width - $e.X) -le $m`);
-    lines.push(`    $onBottom = ($sender.ClientSize.Height - $e.Y) -le $m`);
-    lines.push(`    $onLeft = $e.X -le $m`);
-    lines.push(`    $onTop = $e.Y -le $m`);
-    lines.push(`    if ($onRight -or $onBottom -or $onLeft -or $onTop) {`);
-    lines.push(`        $script:BorderlessResizing = $true`);
-    lines.push(`        $mode = ''`);
-    lines.push(`        if ($onTop) { $mode += 'T' } elseif ($onBottom) { $mode += 'B' }`);
-    lines.push(`        if ($onLeft) { $mode += 'L' } elseif ($onRight) { $mode += 'R' }`);
-    lines.push(`        $script:BorderlessResizeMode = $mode`);
-    lines.push(`    }`);
-    lines.push(`})`);
-    lines.push(`$Form.Add_MouseMove({`);
-    lines.push(`    param($sender, $e)`);
-    lines.push(`    if (-not $script:BorderlessResizing) { return }`);
-    lines.push(`    $b = $sender.Bounds`);
-    lines.push(`    if ($script:BorderlessResizeMode -match 'R') { $b.Width = [Math]::Max(200, $e.X) }`);
-    lines.push(`    if ($script:BorderlessResizeMode -match 'B') { $b.Height = [Math]::Max(150, $e.Y) }`);
-    lines.push(`    if ($script:BorderlessResizeMode -match 'L') { $dx = $e.X; $b.X += $dx; $b.Width -= $dx }`);
-    lines.push(`    if ($script:BorderlessResizeMode -match 'T') { $dy = $e.Y; $b.Y += $dy; $b.Height -= $dy }`);
-    lines.push(`    $sender.Bounds = $b`);
-    lines.push(`})`);
-    lines.push(`$Form.Add_MouseUp({ $script:BorderlessResizing = $false })`);
-    lines.push('');
-  }
 
   const tabPageVarFor = {}; // `${tabControlId}::${tabId}` -> generated $variable name
   const wizardPageVarFor = {}; // `${wizardId}::${pageId}` -> generated $variable name

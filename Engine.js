@@ -1,23 +1,18 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.31
+    Version 1.32
 
     Revision:
 
-    1. WinForms is now the default format (currentFormat) instead of
-    WPF - WPF isn't currently testable for the in-progress Wizard
-    feature, so defaulting to it made every fresh load start on a format
-    that can't be exercised yet.
-
-    2. Double-clicking the Wizard tool now adds it into whichever
-    container is currently selected (matching what dragging onto that
-    container would do) instead of always going to the Form - a wizard
-    conventionally takes over its whole host, so it should default into
-    wherever you're already working, not always the top level.
+    1. Removed state.form.borderlessResizable and its isResizable
+    carve-out - the generated mouse-drag substitute it enabled didn't
+    actually work reliably (no resize-cursor feedback at runtime), and
+    FormBorderStyle=None is genuinely meant to be non-resizable in real
+    WinForms, so the feature wasn't worth keeping rather than fixing.
 */
 
-const ENGINE_VERSION = '1.31';
+const ENGINE_VERSION = '1.32';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -51,7 +46,6 @@ const state = {
     maximizeBox: true,
     closeBox: true,
     formBorderStyle: 'Sizable', // real WinForms enum - replaces a plain true/false "resizable" toggle
-    borderlessResizable: false, // only meaningful when formBorderStyle is 'None' - adds mouse-drag edge resizing since None has no OS resize grips
     startPosition: 'CenterScreen',
     topMost: true,
     events: { Load: { fn: 'Form_Load', code: '', ps1: '' } },
@@ -390,7 +384,7 @@ function renderFormChrome() {
   const fbs = state.form.formBorderStyle || 'Sizable';
   const noTitlebar = isHtml || fbs === 'None';
   const isToolWindow = fbs === 'FixedToolWindow' || fbs === 'SizableToolWindow';
-  const isResizable = fbs === 'Sizable' || fbs === 'SizableToolWindow' || (fbs === 'None' && state.form.borderlessResizable);
+  const isResizable = fbs === 'Sizable' || fbs === 'SizableToolWindow';
   const titlebarHeight = noTitlebar ? 0 : (isToolWindow ? 20 : 26);
 
   formEl.style.width = state.form.width + 'px';
