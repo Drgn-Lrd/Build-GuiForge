@@ -1,18 +1,24 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.5
+    Version 1.6
 
     Revision:
 
-    1. Removed the borderless-resize mouse-drag codegen - it didn't
-    actually give resize-cursor feedback at runtime, and a real
-    FormBorderStyle=None window is genuinely meant to be non-resizable,
-    so the feature was more trouble than it was worth rather than
-    something to keep fixing.
+    1. RichTextBox now emits ReadOnly (new prop, Control-Data.js) the
+    same way TextBox already does - previously RichTextBox fell into the
+    shared TextBox/RichTextBox case but only TextBox's inner branch ever
+    wrote type-specific properties, so ReadOnly silently did nothing for
+    RichTextBox even once the property existed to set in the UI.
+
+    2. Label now emits TextAlign (existing prop, wasn't wired into
+    codegen yet) as a ContentAlignment - Left/Center/Right map to
+    MiddleLeft/MiddleCenter/MiddleRight respectively, always vertically
+    centered rather than WinForms' TopLeft default, since that reads
+    better for the multi-line case (e.g. a wizard page's body label).
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.5';
+const CODEGEN_WINFORMS_VERSION = '1.6';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -100,7 +106,12 @@ function generateWinForms() {
     // type-specific
     switch (c.type) {
       case 'Button': case 'Label': case 'LinkLabel':
-        lines.push(`$${c.name}.Text = "${(p.text || '').replace(/"/g, '""')}"`); break;
+        lines.push(`$${c.name}.Text = "${(p.text || '').replace(/"/g, '""')}"`);
+        if (c.type === 'Label' && p.textAlign) {
+          const align = p.textAlign === 'Center' ? 'MiddleCenter' : p.textAlign === 'Right' ? 'MiddleRight' : 'MiddleLeft';
+          lines.push(`$${c.name}.TextAlign = [System.Drawing.ContentAlignment]::${align}`);
+        }
+        break;
       case 'TextBox': case 'RichTextBox':
         lines.push(`$${c.name}.Text = "${(p.text || '').replace(/"/g, '""')}"`);
         if (c.type === 'TextBox') {
@@ -108,6 +119,8 @@ function generateWinForms() {
           lines.push(`$${c.name}.ReadOnly = $${p.readOnly}`);
           if (p.passwordChar) lines.push(`$${c.name}.PasswordChar = '${p.passwordChar}'`);
           if (p.maxLength) lines.push(`$${c.name}.MaxLength = ${p.maxLength}`);
+        } else if (c.type === 'RichTextBox') {
+          lines.push(`$${c.name}.ReadOnly = $${p.readOnly}`);
         }
         break;
       case 'CheckBox': case 'RadioButton':
