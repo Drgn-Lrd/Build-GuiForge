@@ -1,16 +1,19 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.8
+    Version 1.9
 
     Revision:
 
-    1. Moved Contents above Pages in the Wizard's property order - it was
-    still at the bottom despite being flagged as a better fit at the top
-    (pick the nav style before managing individual pages).
+    1. RichTextBox gained a Read Only property (matches TextBox's), off
+    by default - needed so a RichTextBox used as an auto-populated log
+    (e.g. a wizard Summary page, Wizard-Builder.js) can be locked against
+    hand-typing. Wired into CodeGen-WinForms.js. Also added to
+    SETTABLE_PROPS_BY_TYPE.RichTextBox so the "Set another control's
+    property" event snippet can toggle it too.
 */
 
-const CONTROL_DATA_VERSION = '1.8';
+const CONTROL_DATA_VERSION = '1.9';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -34,7 +37,7 @@ const SETTABLE_PROPS_BY_TYPE = {
   TrackBar: ['Value', 'Enabled', 'Visible'],
   NumericUpDown: ['Value', 'Enabled', 'Visible'],
   DateTimePicker: ['Value', 'Enabled', 'Visible'],
-  RichTextBox: ['Text', 'Enabled', 'Visible'],
+  RichTextBox: ['Text', 'Enabled', 'Visible', 'ReadOnly'],
   LinkLabel: ['Text', 'Enabled', 'Visible'],
 };
 const DEFAULT_SETTABLE_PROPS = ['Enabled', 'Visible'];
@@ -288,7 +291,10 @@ const CONTROL_DEFS = {
   },
   RichTextBox: {
     label: 'RichTextBox', glyph: 'Rt', defaultW: 180, defaultH: 100,
-    props: [['text', 'Text', 'textarea', '']],
+    props: [
+      ['text', 'Text', 'textarea', ''],
+      ['readOnly', 'Read Only', 'checkbox', false],
+    ],
     events: ['TextChanged'],
   },
   LinkLabel: {
