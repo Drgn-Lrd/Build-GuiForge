@@ -21,9 +21,25 @@
     math) supporting the new Horizontal/Vertical step-list styles, plus
     matching WinForms codegen (wizardContentsNavCodegenLines) that
     generates a real nav Panel of Labels, bolded by Show-<Name>Page.
+
+    4. Page ids are now friendly and stable (wizardGeneratePageId:
+    PageWelcome, PageOptions, Page4, ...) instead of a random suffix -
+    they show up directly in generated variable names, e.g.
+    $Wizard1_PageOptions instead of $Wizard1_page7zjny1. Generated once
+    at creation, never touched by a later rename (same as TabControl's
+    tab.id).
+
+    5. Replaced the per-page "Custom validation" raw-text field with a
+    structured requirement picker (target control / property / comparator
+    / value), reusing the same getSettableProps()/resolveValueWidgetKind()
+    helpers the "Set another control's property" event snippet already
+    uses, instead of a free-text island that didn't match the rest of the
+    app. Still only ever feeds Test-<Name>PageRequirements for that one
+    page's switch clause - it never touches the shared Next button's
+    Enabled property directly, so it can't leak onto other pages.
 */
 
-const WIZARD_BUILDER_VERSION = '1.1';
+const WIZARD_BUILDER_VERSION = '1.2';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -110,14 +126,29 @@ function createWizardFooterButtons(wizardCtrl) {
    Create a Wizard control from the setup modal's chosen page list
    ========================================================================= */
 
+// Friendly, stable page ids (PageWelcome, PageOptions, Page4, ...) instead
+// of a random suffix - these show up directly in generated variable names
+// (e.g. $Wizard1_PageOptions), so they need to actually mean something.
+// Generated once at creation and never touched by a later rename, same as
+// TabControl's tab.id.
+function wizardGeneratePageId(label, existingIds) {
+  let sanitized = String(label || '').replace(/[^a-zA-Z0-9]/g, '');
+  sanitized = sanitized.replace(/^page/i, ''); // avoid a doubled "Page" prefix when the label itself already starts with one (e.g. the default "Page4")
+  let base = 'Page' + sanitized;
+  if (base === 'Page') base = 'Page' + (existingIds.length + 1);
+  let id = base, n = 2;
+  while (existingIds.includes(id)) { id = base + n; n++; }
+  return id;
+}
+
 function createWizardFromSetup(pageConfigs, x, y, parentId, tabPage) {
   const ctrl = createControl('Wizard', x, y, parentId, tabPage);
-  ctrl.props.pages = pageConfigs.map(pc => ({
-    id: 'page' + Math.random().toString(36).slice(2, 8),
-    label: pc.label || 'Page',
-    template: pc.template || 'blank',
-    validation: '',
-  }));
+  const ids = [];
+  ctrl.props.pages = pageConfigs.map(pc => {
+    const id = wizardGeneratePageId(pc.label, ids);
+    ids.push(id);
+    return { id, label: pc.label || 'Page', template: pc.template || 'blank', requirements: [] };
+  });
   ctrl.activeTabId = ctrl.props.pages[0].id;
   ctrl.props.pages.forEach(page => populateWizardPageTemplate(ctrl, page));
   createWizardFooterButtons(ctrl);
@@ -272,7 +303,10 @@ function buildWizardPagesEditorRow(ctrl, key, label) {
   addBtn.textContent = '+ Add page';
   addBtn.title = 'Add a new wizard page, optionally pre-filled from a starter template.';
   addBtn.addEventListener('click', () => {
-    const newPage = { id: 'page' + Math.random().toString(36).slice(2, 8), label: 'Page' + (pages.length + 1), template: tplSelect.value, validation: '' };
+    const tpl = tplSelect.value;
+    const label = tpl === 'blank' ? ('Page' + (pages.length + 1)) : (WIZARD_TEMPLATE_LABELS[tpl] || 'Page');
+    const id = wizardGeneratePageId(label, pages.map(p => p.id));
+    const newPage = { id, label, template: tpl, requirements: [] };
     pages.push(newPage);
     populateWizardPageTemplate(ctrl, newPage);
     render();
@@ -344,13 +378,135 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   topRow.appendChild(delBtn);
   outer.appendChild(topRow);
 
-  const valRow = document.createElement('div');
-  valRow.className = 'wizard-page-validation-row';
-  valRow.innerHTML = `<label title="Optional PowerShell boolean expression checked (in addition to any Required controls on this page) before Next is allowed to proceed. Must evaluate to $true. Example: $NumericUpDown1.Value -gt 0">Custom validation (optional)</label><textarea placeholder="e.g. $TextBox1.Text.Length -gt 3">${escapeHtml(page.validation || '')}</textarea>`;
-  valRow.querySelector('textarea').addEventListener('change', (e) => { page.validation = e.target.value; });
-  outer.appendChild(valRow);
+  const reqWrap = document.createElement('div');
+  reqWrap.className = 'wizard-requirements-wrap';
+  const reqHeading = document.createElement('div');
+  reqHeading.className = 'wizard-requirements-heading';
+  reqHeading.title = 'Extra conditions - beyond any controls checked "Required before Next" on the control itself - that must hold before Next can leave THIS page. Built with the same control/property pickers used everywhere else in the app, not raw code. Gates only this page\'s turn at the shared Next button, never the button\'s Enabled property directly, so it can\'t leak onto other pages.';
+  reqHeading.textContent = 'Additional requirements (optional)';
+  reqWrap.appendChild(reqHeading);
+
+  if (!page.requirements) page.requirements = [];
+  const pageControls = state.controls.filter(ch => ch.parentId === ctrl.id && ch.tabPage === page.id && !ch.wizardFooter);
+  if (!pageControls.length) {
+    const hint = document.createElement('div');
+    hint.className = 'items-hint';
+    hint.textContent = 'Add a control to this page first to set up a requirement.';
+    reqWrap.appendChild(hint);
+  } else {
+    page.requirements.forEach((req, ri) => reqWrap.appendChild(buildWizardRequirementRow(ctrl, page, req, ri, pageControls)));
+    const addReqBtn = document.createElement('button');
+    addReqBtn.type = 'button';
+    addReqBtn.className = 'btn btn-ghost tab-add-btn';
+    addReqBtn.textContent = '+ Add requirement';
+    addReqBtn.addEventListener('click', () => {
+      const t = pageControls[0];
+      page.requirements.push({ targetId: t.id, property: getSettableProps(t.type)[0], comparator: 'eq', value: true });
+      render();
+    });
+    reqWrap.appendChild(addReqBtn);
+  }
+  outer.appendChild(reqWrap);
 
   return outer;
+}
+
+// Comparator options for a page requirement - PS operator on the right.
+const WIZARD_COMPARATORS = [
+  { id: 'eq', label: 'Equals', ps: '-eq' },
+  { id: 'ne', label: 'Not Equals', ps: '-ne' },
+  { id: 'gt', label: 'Greater Than', ps: '-gt' },
+  { id: 'ge', label: 'Greater Or Equal', ps: '-ge' },
+  { id: 'lt', label: 'Less Than', ps: '-lt' },
+  { id: 'le', label: 'Less Or Equal', ps: '-le' },
+];
+
+// One requirement row: [target control] [its property] [comparator] [value] -
+// reuses getSettableProps() and resolveValueWidgetKind() (Control-Data.js),
+// the exact same helpers the "Set another control's property" event snippet
+// already uses, so this feels like the rest of the app instead of a raw
+// textarea island.
+function buildWizardRequirementRow(ctrl, page, req, ri, pageControls) {
+  const row = document.createElement('div');
+  row.className = 'wizard-requirement-row';
+
+  if (!req.targetId || !pageControls.some(c => c.id === req.targetId)) req.targetId = pageControls[0].id;
+  const target = getControl(req.targetId);
+
+  const targetSelect = document.createElement('select');
+  pageControls.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id; opt.textContent = `${c.name} (${c.type})`;
+    if (c.id === req.targetId) opt.selected = true;
+    targetSelect.appendChild(opt);
+  });
+  targetSelect.addEventListener('change', (e) => {
+    req.targetId = e.target.value;
+    req.property = getSettableProps(getControl(req.targetId).type)[0];
+    render();
+  });
+
+  const propSelect = document.createElement('select');
+  const props = getSettableProps(target.type);
+  if (!props.includes(req.property)) req.property = props[0];
+  props.forEach(pr => {
+    const opt = document.createElement('option');
+    opt.value = pr; opt.textContent = pr;
+    if (pr === req.property) opt.selected = true;
+    propSelect.appendChild(opt);
+  });
+  propSelect.addEventListener('change', (e) => { req.property = e.target.value; render(); });
+
+  const compSelect = document.createElement('select');
+  WIZARD_COMPARATORS.forEach(cmp => {
+    const opt = document.createElement('option');
+    opt.value = cmp.id; opt.textContent = cmp.label;
+    if (cmp.id === req.comparator) opt.selected = true;
+    compSelect.appendChild(opt);
+  });
+  compSelect.addEventListener('change', (e) => { req.comparator = e.target.value; });
+
+  const kind = resolveValueWidgetKind(target.type, req.property);
+  let valueInput;
+  if (kind === 'boolean') {
+    valueInput = document.createElement('select');
+    ['true', 'false'].forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      if (String(!!req.value) === v) opt.selected = true;
+      valueInput.appendChild(opt);
+    });
+    valueInput.addEventListener('change', (e) => { req.value = e.target.value === 'true'; });
+  } else if (kind === 'number') {
+    valueInput = document.createElement('input');
+    valueInput.type = 'number';
+    valueInput.value = typeof req.value === 'number' ? req.value : 0;
+    valueInput.addEventListener('change', (e) => { req.value = Number(e.target.value) || 0; });
+  } else {
+    // targetItemIndex/date/text all fall back to a plain text field here -
+    // good enough for the comparator-based cases this covers (a control's
+    // own Required checkbox already handles the common non-comparator
+    // "must be filled in/checked/selected" case).
+    valueInput = document.createElement('input');
+    valueInput.type = 'text';
+    valueInput.value = req.value != null ? req.value : '';
+    valueInput.addEventListener('change', (e) => { req.value = e.target.value; });
+  }
+  valueInput.className = 'wizard-requirement-value';
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+  delBtn.textContent = '\u2715';
+  delBtn.title = 'Remove this requirement.';
+  delBtn.addEventListener('click', () => { page.requirements.splice(ri, 1); render(); });
+
+  row.appendChild(targetSelect);
+  row.appendChild(propSelect);
+  row.appendChild(compSelect);
+  row.appendChild(valueInput);
+  row.appendChild(delBtn);
+  return row;
 }
 
 /* =========================================================================
@@ -544,8 +700,23 @@ function wizardContentsNavCodegenLines(c) {
   return { lines, navVarNames };
 }
 
+// Turns one structured page requirement into a PS boolean expression -
+// the picker-built equivalent of what used to be typed as raw text.
+function wizardRequirementExpr(req) {
+  const target = getControl(req.targetId);
+  if (!target) return null;
+  const cmp = WIZARD_COMPARATORS.find(c => c.id === req.comparator) || WIZARD_COMPARATORS[0];
+  const kind = resolveValueWidgetKind(target.type, req.property);
+  let valLiteral;
+  if (kind === 'boolean') valLiteral = req.value ? '$true' : '$false';
+  else if (kind === 'number') valLiteral = Number(req.value) || 0;
+  else valLiteral = `"${String(req.value != null ? req.value : '').replace(/"/g, '""')}"`;
+  return `$${target.name}.${req.property} ${cmp.ps} ${valLiteral}`;
+}
+
 // Generates Test-<Name>PageRequirements: per page, checks every Required
-// child control plus that page's optional custom validation expression.
+// child control plus that page's structured requirement rows (built via
+// the Pages editor's control/property/comparator pickers, not raw text).
 // Always emits at least one clause (a bare `default { }` when no page has
 // anything to check) - an empty switch body errored out in testing.
 function wizardTestFunctionLines(c) {
@@ -558,12 +729,12 @@ function wizardTestFunctionLines(c) {
   lines.push(`    switch ($Index) {`);
   pages.forEach((page, i) => {
     const reqChildren = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === page.id && ch.wizardRequired);
-    const customExpr = (page.validation || '').trim();
-    if (!reqChildren.length && !customExpr) return; // nothing to check on this page - falls through to default $true
+    const extraReqs = (page.requirements || []).map(wizardRequirementExpr).filter(Boolean);
+    if (!reqChildren.length && !extraReqs.length) return; // nothing to check on this page - falls through to default $true
     anyClause = true;
     lines.push(`        ${i} {`);
     reqChildren.forEach(ch => lines.push(`            if (-not (${wizardRequiredCheckExpr(ch)})) { return $false }`));
-    if (customExpr) lines.push(`            if (-not (${customExpr})) { return $false }`);
+    extraReqs.forEach(expr => lines.push(`            if (-not (${expr})) { return $false }`));
     lines.push(`        }`);
   });
   if (!anyClause) lines.push(`        default { }`);
