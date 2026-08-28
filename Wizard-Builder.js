@@ -1,40 +1,34 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.10
+    Version 1.11
 
     Revision:
 
-    1. All/Any combining now applies to EVERY requirement on a page
-    together - a control's own "Required before Next" toggle and a
-    detected event handler included, not just the manual Additional
-    Requirements list alone (the previous revision's scoping was too
-    narrow). wizardAllRequirementExprsForPage() gathers and dedupes all
-    three sources; the mode selector's visibility now counts all of them
-    too. Fixed a real bug this surfaced: a control marked Required via
-    its toggle always generated a "must be Checked" check regardless of
-    which direction was actually requested, since the toggle-driven path
-    doesn't know Checked from Unchecked - only the detected-from-event
-    path does, so that one now takes priority per control instead of the
-    other way around.
+    1. Fixed a real logic bug: two RadioButtons sharing an immediate
+    parent (the same group - only one can ever be Checked at a time in
+    real WinForms) could both be marked Required, making the page
+    permanently uncompletable. wizardRadioGroupConflict() catches this in
+    wizardSyncBooleanGate() - the one function every path (toggle, Add
+    requirement, retargeting a row) already funnels through - and blocks
+    the second one with an explanation instead of silently accepting it.
 
-    2. "+ Add requirement" now opens the same "Select Control" picker as
-    everything else, instead of silently grabbing whichever control
-    happened to be first in the page's list - the old behavior gave no
-    way to choose which control, and for a boolean-kind one it also only
-    ever asked for "must be Checked". Picking a CheckBox now asks Checked
-    or Unchecked (a plain confirm dialog); RadioButton skips that prompt
-    since "must be Unchecked" isn't a sensible ask for one. This also
-    means requiring several independent RadioButtons (different groups)
-    at once now works - pick each one explicitly rather than only ever
-    landing on whichever was first.
+    2. Replaced the Checked/Unchecked confirm() dialog (OK/Cancel standing
+    in for Checked/Unchecked, with no way to back out and create nothing)
+    with a real 3-button modal - Checked / Unchecked / Cancel, where
+    Cancel actually cancels rather than silently meaning Unchecked. Used
+    by both "+ Add requirement" and a requirement row's own "Select
+    Control" retarget when the newly-picked target is a CheckBox.
 
-    3. wizardSyncBooleanGate's third argument now accepts 'checked'/
-    'unchecked' (or the original true/false, which still means Checked/
-    not-required, for compatibility) instead of only true/false.
+    3. The detected-requirement row's static "from event handler" badge
+    (which never changed, so it wasn't telling the user anything after
+    the first glance) is now a working Remove button - clears that
+    control's Required toggle and its CheckedChanged handler directly
+    from the Pages editor, instead of requiring a trip to that control's
+    own properties just to undo it.
 */
 
-const WIZARD_BUILDER_VERSION = '1.10';
+const WIZARD_BUILDER_VERSION = '1.11';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -177,6 +171,57 @@ let wizardSetupPending = null; // { x, y, parentId, tabPage } for the drop curre
    that scales to more wizard TYPES later (WIZARD_TYPES, Control-Data.js)
    without needing a redesign.
    ========================================================================= */
+
+/* =========================================================================
+   Checked/Unchecked/Cancel picker - used wherever a boolean requirement
+   needs a real direction chosen rather than assumed, with an actual way
+   to back out and create nothing (unlike a plain confirm()'s OK/Cancel,
+   which has no way to represent "do nothing" separately from "Unchecked").
+   ========================================================================= */
+
+function getWizardCheckedModalOverlay() {
+  let overlay = document.getElementById('wizardCheckedModalOverlay');
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'wizardCheckedModalOverlay';
+  overlay.innerHTML = `
+    <div class="modal" style="width:340px;">
+      <div class="modal-header">
+        <h2>Require Checked or Unchecked?</h2>
+      </div>
+      <div class="modal-body">
+        <div class="items-hint" id="wizardCheckedModalText"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="wizardCheckedModalCancel">Cancel</button>
+        <button class="btn" id="wizardCheckedModalUnchecked">Unchecked</button>
+        <button class="btn btn-accent" id="wizardCheckedModalChecked">Checked</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+  return overlay;
+}
+
+// onChoice receives 'checked', 'unchecked', or null (Cancel - do nothing,
+// as opposed to Cancel silently meaning Unchecked).
+function openWizardCheckedModal(controlName, onChoice) {
+  const overlay = getWizardCheckedModalOverlay();
+  document.getElementById('wizardCheckedModalText').textContent = `Require "${controlName}" to be:`;
+  const close = () => overlay.classList.remove('open');
+  // Clone-and-replace each button to drop any listener from a previous
+  // open rather than stacking a new one on top every time.
+  ['wizardCheckedModalCancel', 'wizardCheckedModalUnchecked', 'wizardCheckedModalChecked'].forEach((id, i) => {
+    const old = document.getElementById(id);
+    const fresh = old.cloneNode(true);
+    old.replaceWith(fresh);
+    const choice = [null, 'unchecked', 'checked'][i];
+    fresh.addEventListener('click', () => { close(); onChoice(choice); });
+  });
+  overlay.classList.add('open');
+}
 
 function getWizardPickerOverlay() {
   let overlay = document.getElementById('wizardPickerModalOverlay');
@@ -580,7 +625,7 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
     reqWrap.appendChild(modeRow);
   }
 
-  detected.forEach(d => reqWrap.appendChild(buildWizardDetectedRequirementRow(d)));
+  detected.forEach(d => reqWrap.appendChild(buildWizardDetectedRequirementRow(d, ctrl)));
 
   const pageControls = state.controls.filter(ch => ch.parentId === ctrl.id && ch.tabPage === page.id && !ch.wizardFooter);
   if (!pageControls.length) {
@@ -609,16 +654,23 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
           // "Must be Unchecked" is a real (if less common) case for a
           // CheckBox - RadioButtons don't have a sensible equivalent
           // (there's nothing to frame as "not the selected one"), so only
-          // ask for those.
-          let mode = 'checked';
+          // ask for those. A real Cancel option here (not just OK/Cancel
+          // standing in for Checked/Unchecked) means backing out actually
+          // creates nothing.
           if (picked.type === 'CheckBox') {
-            mode = confirm(`Require "${picked.name}" to be Checked before Next?\n\nOK = must be Checked\nCancel = must be Unchecked`) ? 'checked' : 'unchecked';
+            openWizardCheckedModal(picked.name, (choice) => {
+              if (!choice) return; // Cancel - do nothing
+              wizardSyncBooleanGate(ctrl, picked, choice);
+              render();
+            });
+          } else {
+            wizardSyncBooleanGate(ctrl, picked, 'checked');
+            render();
           }
-          wizardSyncBooleanGate(ctrl, picked, mode);
         } else {
           page.requirements.push({ targetId: picked.id, property, comparator: 'eq', value: kind === 'number' ? 0 : '' });
+          render();
         }
-        render();
       });
     });
     reqWrap.appendChild(addReqBtn);
@@ -691,8 +743,17 @@ function buildWizardRequirementRow(ctrl, page, req, ri, pageControls) {
         // Boolean-kind targets live in the toggle+event sync, not this
         // comparator list - convert instead of leaving two representations
         // of the same thing lying around.
+        if (picked.type === 'CheckBox') {
+          openWizardCheckedModal(picked.name, (choice) => {
+            if (!choice) return; // Cancel - leave this row as it was
+            page.requirements.splice(ri, 1);
+            wizardSyncBooleanGate(ctrl, picked, choice);
+            render();
+          });
+          return;
+        }
         page.requirements.splice(ri, 1);
-        wizardSyncBooleanGate(ctrl, picked, true);
+        wizardSyncBooleanGate(ctrl, picked, 'checked');
       } else {
         req.targetId = picked.id;
         req.property = wizardPrimaryGateProperty(picked.type);
@@ -764,18 +825,24 @@ function buildWizardRequirementRow(ctrl, page, req, ri, pageControls) {
 // (see wizardDetectedRequirementsForPage) - shown alongside the editable
 // ones above, but not deletable here since there's nothing to delete: it
 // goes away on its own if the handler that created it does.
-function buildWizardDetectedRequirementRow(detected) {
+function buildWizardDetectedRequirementRow(detected, wizardCtrl) {
   const row = document.createElement('div');
   row.className = 'wizard-requirement-row wizard-requirement-row-detected';
   const text = document.createElement('div');
   text.className = 'wizard-requirement-detected-text';
   text.textContent = `${detected.ctrl.name} must be ${detected.checkedRequired ? 'Checked' : 'Unchecked'}`;
-  text.title = `Detected from ${detected.ctrl.name}'s own CheckedChanged handler (it already enables/disables the wizard's Next button directly) - not something to configure here separately.`;
-  const badge = document.createElement('span');
-  badge.className = 'menu-editor-tag';
-  badge.textContent = 'from event handler';
+  text.title = `From ${detected.ctrl.name}'s own CheckedChanged handler, which already enables/disables the wizard's Next button directly.`;
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+  delBtn.textContent = '\u2715';
+  delBtn.title = `Remove this requirement - clears ${detected.ctrl.name}'s Required toggle and its CheckedChanged handler, without needing to go select that control directly.`;
+  delBtn.addEventListener('click', () => {
+    wizardSyncBooleanGate(wizardCtrl, detected.ctrl, null);
+    render();
+  });
   row.appendChild(text);
-  row.appendChild(badge);
+  row.appendChild(delBtn);
   return row;
 }
 
@@ -833,8 +900,25 @@ function wizardDetectedRequirementsForPage(wizardCtrl, page) {
 // false/null/undefined -> remove the requirement entirely. Accepts a plain
 // boolean too (from the simple Required toggle, which only ever means
 // "must be Checked") so existing callers don't need to change.
+// RadioButtons sharing an immediate parent form one mutually-exclusive
+// group in real WinForms - only one can ever be Checked at a time, so
+// requiring two of them Checked simultaneously would make the page
+// permanently impossible to complete. Returns the conflicting control, or
+// null if there isn't one.
+function wizardRadioGroupConflict(targetCtrl) {
+  if (targetCtrl.type !== 'RadioButton') return null;
+  return state.controls.find(c => c.id !== targetCtrl.id && c.type === 'RadioButton' && c.parentId === targetCtrl.parentId && c.wizardRequired) || null;
+}
+
 function wizardSyncBooleanGate(wizardCtrl, targetCtrl, mode) {
   const resolvedMode = mode === true ? 'checked' : (mode === false || mode == null) ? null : mode;
+  if (resolvedMode === 'checked') {
+    const conflict = wizardRadioGroupConflict(targetCtrl);
+    if (conflict) {
+      alert(`"${targetCtrl.name}" can't be Required at the same time as "${conflict.name}" - they're radio buttons in the same group, so only one of them can ever be checked. Remove ${conflict.name}'s requirement first if you want to switch which one is required.`);
+      return;
+    }
+  }
   targetCtrl.wizardRequired = !!resolvedMode;
   const nextBtn = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.wizardFooter && ch.wizardRole === 'next');
   if (!nextBtn) return;
