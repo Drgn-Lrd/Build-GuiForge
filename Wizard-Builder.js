@@ -1,28 +1,25 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.31
+    Version 1.33
 
     Revision:
 
-    1. Custom Requirement Logic builder: new NOT operator/chip, e.g.
-    "(A AND B AND NOT C) OR (J AND NOT B) OR C". NOT is a prefix - it
-    occupies an "operand expected" slot without resolving it, so it can
-    precede an item or "(" but can't follow one directly (write
-    "AND NOT X", not a bare "NOT" after an item/")"). Wired into
-    wizardCustomExprValidity, wizardCustomExprToPs (-> "-not"), and
-    wizardCustomExprToHumanText (-> "not") alongside AND/OR.
+    1. Custom Requirement Logic builder: clicking NOT right after an item
+    or ")" now folds into a single 'andnot' chip/token (still real
+    "-and -not" underneath) instead of two separate chips - takes less
+    space, reads as one unit, and can't come apart via drag-reorder the
+    way two adjacent chips could. A standalone 'not' token still exists
+    for the (much rarer) "OR NOT" case, reachable by clicking OR then NOT.
 
-    2. Get-<n>UnmetRequirementMessage's custom-mode header: "must be
-    satisfied" -> "must be selected", matching the All/Any header wording.
-
-    3. wizardAutoWireValueLog's two parallel per-type lookup tables
-    (event, expression) collapsed into one WIZARD_LOG_VALUE_BY_TYPE map -
-    adding another control type later is now one line instead of two
-    tables to keep in sync.
+    2. wizardCustomExprToHumanText renders the folded 'andnot' as "but
+    not" (e.g. "Option A but not Option C") for the friendly requirements
+    popup, clearer to an end user than "and not" - a standalone 'not'
+    still reads as plain "not" since it isn't a contrast with what came
+    before it.
 */
 
-const WIZARD_BUILDER_VERSION = '1.31';
+const WIZARD_BUILDER_VERSION = '1.33';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -1009,7 +1006,7 @@ function getWizardCustomExprOverlay() {
         <button class="btn icon-btn btn-ghost" id="wizardCustomExprClose">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="items-hint" style="margin-bottom:8px;">Click items and operators below to build a boolean expression, e.g. (A AND B AND NOT C) OR (J AND NOT B) OR C. Drag a chip by its handle to reorder; use the &times; on a chip to remove it.</div>
+        <div class="items-hint" style="margin-bottom:8px;">Click items and operators below to build a boolean expression, e.g. (A AND B AND NOT C) OR (J AND NOT B) OR C - click NOT right after an item and it folds "AND NOT" into a single chip for you. Drag a chip by its handle to reorder; use the &times; on a chip to remove it.</div>
         <div class="wizard-custom-expr-chips" id="wizardCustomExprChips"></div>
         <div class="wizard-custom-expr-error" id="wizardCustomExprError"></div>
         <div class="wizard-custom-expr-palette-heading">Operators</div>
@@ -1071,7 +1068,7 @@ function openWizardCustomExprModal(wizardCtrl, page) {
 function wizardCustomExprTokenLabel(token, items) {
   if (token.type === 'and') return 'AND';
   if (token.type === 'or') return 'OR';
-  if (token.type === 'not') return 'NOT';
+  if (token.type === 'not' || token.type === 'andnot') return 'NOT';
   if (token.type === 'lparen') return '(';
   if (token.type === 'rparen') return ')';
   const item = items.find(it => it.key === token.key);
@@ -1140,7 +1137,26 @@ function renderWizardCustomExprModal() {
     btn.type = 'button';
     btn.className = 'btn btn-ghost wizard-expr-palette-btn';
     btn.textContent = label;
-    btn.addEventListener('click', () => { tokens.push({ type }); renderWizardCustomExprModal(); });
+    if (type === 'not') btn.title = 'Negates whatever comes right after it - a single "NOT" chip. Clicking this right after an item or ")" folds an implied AND into that same chip ("but not" in the friendly message); click OR yourself first if you specifically want "OR NOT" instead.';
+    btn.addEventListener('click', () => {
+      if (type === 'not') {
+        // A bare NOT can't directly follow an item or ")" (see
+        // wizardCustomExprValidity) - in practice that's almost always
+        // "...AND NOT this one" anyway, so rather than a separate AND
+        // chip plus a NOT chip, that case folds into ONE 'andnot' token:
+        // still real AND-NOT underneath (wizardCustomExprToPs), just one
+        // chip instead of two - and it can't come apart via drag-reorder
+        // the way two separate chips could. "OR NOT" is still reachable
+        // by clicking OR yourself first, then NOT (a plain standalone
+        // 'not' token, since it's already in an operand-expected spot).
+        const last = tokens[tokens.length - 1];
+        const expectingOperand = !last || last.type === 'and' || last.type === 'or' || last.type === 'andnot' || last.type === 'lparen' || last.type === 'not';
+        tokens.push({ type: expectingOperand ? 'not' : 'andnot' });
+      } else {
+        tokens.push({ type });
+      }
+      renderWizardCustomExprModal();
+    });
     opPalette.appendChild(btn);
   });
 
@@ -1174,13 +1190,17 @@ function renderWizardCustomExprModal() {
 
 // Stack-based structural check: balanced parentheses, no two operands or
 // two operators back to back, doesn't start/end on AND/OR/NOT, no empty
-// parentheses. NOT is a prefix - it consumes an "operand expected" slot
-// without resolving it, so it can be chained before "(" or an item (e.g.
-// "AND NOT CheckBox3") but never right after an item or ")" (write
-// "AND NOT" there, not a floating "NOT" with nothing before it). A
-// missing-item token (its control got deleted since the expression was
-// built) isn't flagged here - wizardCustomExprToPs below substitutes
-// $true for it rather than breaking codegen outright.
+// parentheses. 'andnot' (the single-chip "AND NOT" fold - see the NOT
+// button's click handler) sits in the operator family: it requires an
+// operand before it and resolves back to expecting one after, exactly
+// like AND/OR. A standalone 'not' is the prefix form instead - it
+// consumes an "operand expected" slot without resolving it, so it can be
+// chained before "(" or an item (e.g. after OR, for "OR NOT") but never
+// right after an item or ")" directly (that combination becomes a single
+// 'andnot' chip instead, not two adjacent tokens). A missing-item token
+// (its control got deleted since the expression was built) isn't flagged
+// here - wizardCustomExprToPs below substitutes $true for it rather than
+// breaking codegen outright.
 function wizardCustomExprValidity(tokens) {
   if (!tokens.length) return { valid: false, message: 'Add at least one item.' };
   let depth = 0;
@@ -1193,8 +1213,8 @@ function wizardCustomExprValidity(tokens) {
       if (expectOperand) return { valid: false, message: 'A ")" can\'t follow an operator, "(", or "NOT".' };
       depth--;
       if (depth < 0) return { valid: false, message: 'Unmatched ")".' };
-    } else if (t.type === 'and' || t.type === 'or') {
-      if (expectOperand) return { valid: false, message: 'AND/OR can\'t follow another operator, "(", or "NOT".' };
+    } else if (t.type === 'and' || t.type === 'or' || t.type === 'andnot') {
+      if (expectOperand) return { valid: false, message: 'AND/OR/NOT can\'t follow another operator, "(", or "NOT".' };
       expectOperand = true;
     } else if (t.type === 'not') {
       if (!expectOperand) return { valid: false, message: 'NOT needs an AND/OR before it - it can\'t follow an item or ")" directly.' };
@@ -1222,6 +1242,7 @@ function wizardCustomExprToPs(tokens, items) {
     if (t.type === 'and') return '-and';
     if (t.type === 'or') return '-or';
     if (t.type === 'not') return '-not';
+    if (t.type === 'andnot') return '-and -not';
     if (t.type === 'lparen') return '(';
     if (t.type === 'rparen') return ')';
     return '';
@@ -1242,6 +1263,11 @@ function wizardCustomExprToHumanText(tokens, items) {
     if (t.type === 'and') return 'and';
     if (t.type === 'or') return 'or';
     if (t.type === 'not') return 'not';
+    // The folded "AND NOT" chip reads as "but not" - clearer to an end
+    // user than "and not" for a contrastive exclusion ("Option A but not
+    // Option C"), while a standalone NOT (after OR, or opening a group)
+    // stays a plain "not" - it isn't a contrast with what came before.
+    if (t.type === 'andnot') return 'but not';
     if (t.type === 'lparen') return '(';
     if (t.type === 'rparen') return ')';
     return '';
