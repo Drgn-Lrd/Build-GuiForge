@@ -1,14 +1,12 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.41
+    Version 1.42
 
     Revision:
 
-    1. File Versions modal: removed .about-grid (replaced by a
-    subtitle block) and added .file-versions-icon / .file-versions-
-    subtitle / .file-versions-app-name / .file-versions-author to style
-    the new header glyph and the app-name/author lines above the table.
+    1. File Versions modal: removed the now-unused .file-versions-app-
+    name rule (that line was folded into the header title instead).
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -570,7 +568,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.41';
+  --stylesheet-version: '1.42';
   --stylesheet-last-updated: '29Aug2026 @ 12:00:00';
 
   /* Blueprint theme tokens */
@@ -1623,8 +1621,7 @@ body.picking-mode .ctrl { cursor: crosshair !important; }
 .file-versions-icon { display: inline-block; margin-right: 4px; }
 
 .file-versions-subtitle { margin-bottom: 14px; }
-.file-versions-app-name { font-size: 14px; font-weight: 600; color: var(--bp-text); }
-.file-versions-author { font-size: 12px; color: var(--bp-text-faint); margin-top: 2px; }
+.file-versions-author { font-size: 12px; color: var(--bp-text-faint); }
 
 .file-versions-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .file-versions-table th {
