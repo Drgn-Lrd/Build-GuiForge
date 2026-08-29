@@ -1,14 +1,14 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.20
+    Version 1.21
 
     Revision:
 
-    1. File Versions modal: replaced the Application/Author dt/dl grid
-    with a subtitle block (app name, then Author on its own line below
-    it) between the header and the table, and added a package-glyph
-    icon next to the "File Versions" heading.
+    1. File Versions modal: header title changed from "File Versions"
+    to "GUI Designer" (app name), the now-redundant app-name subtitle
+    line removed, and the remaining line reworded from "Johnathon
+    Largent" to "Author: Johnathon Largent".
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -18,7 +18,7 @@
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
 <script>
-  window.PAGE_VERSION = '1.20';
+  window.PAGE_VERSION = '1.21';
   window.PAGE_LAST_UPDATED = '29Aug2026 @ 12:00:00';
 </script>
 </head>
@@ -145,13 +145,12 @@
 <div class="modal-overlay" id="aboutModalOverlay">
   <div class="modal" style="width:520px;">
     <div class="modal-header">
-      <h2><span class="file-versions-icon" aria-hidden="true">&#128230;</span> File Versions</h2>
+      <h2><span class="file-versions-icon" aria-hidden="true">&#128230;</span> GUI Designer</h2>
       <button class="btn icon-btn btn-ghost" id="aboutModalClose">&times;</button>
     </div>
     <div class="modal-body">
       <div class="file-versions-subtitle">
-        <div class="file-versions-app-name">GUI Designer</div>
-        <div class="file-versions-author">Johnathon Largent</div>
+        <div class="file-versions-author">Author: Johnathon Largent</div>
       </div>
       <table class="file-versions-table">
         <thead>
