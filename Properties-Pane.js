@@ -1,20 +1,28 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.8
+    Version 1.9
 
     Revision:
 
-    1. Added summaryLogToggle ("Add/remove from Summary of Tasks log") -
-    a CheckedChanged-only variant of the log snippet that removes its own
-    line when unchecked instead of unconditionally appending, so toggling
-    a checkbox back and forth doesn't pile up duplicate entries the way
-    plain summaryLogAdd would. The "+ Add log" button now picks whichever
-    variant fits the event it's on (toggle for CheckedChanged, plain
-    append everywhere else).
+    1. summaryLogAdd/summaryLogToggle rewritten from direct
+    AppendText/Text.Replace calls into the state-based rebuild
+    architecture (Wizard-Builder.js/CodeGen-WinForms.js): they now just
+    set or delete this control's own key in $script:<WizardName>_LogEntries
+    - the RichTextBox itself is never touched here. The Target Control
+    param is gone entirely (a wizard has exactly one Summary log, so
+    there's nothing left to pick); computeSnippetCode takes a new ctrl
+    argument (every call site updated) purely to resolve the template's
+    {ownerName}/{wizardName} placeholders automatically - not a
+    user-editable param. "+ Add log" no longer pre-sets a target param.
+
+    Note: any "+ Add log" actions placed before this change keep their
+    OLD AppendText-based code as a snapshot until touched again (e.g.
+    re-editing the Log Message) - .code is computed once, not derived
+    live on load.
 */
 
-const PROPERTIES_PANE_VERSION = '1.8';
+const PROPERTIES_PANE_VERSION = '1.9';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -95,20 +103,18 @@ const EVENT_SNIPPETS = [
   },
   {
     id: 'summaryLogAdd', label: 'Add to Summary of Tasks log',
-    template: `{target}.AppendText("{message}" + [Environment]::NewLine)`,
-    help: 'Appends one line of text to a summary/log-style control - typically the read-only RichTextBox on a wizard\'s Summary page - building up a running list of what this wizard will do (or did) as the user interacts with earlier controls. Each firing adds another line; it doesn\'t clear or replace anything already there. For a CheckBox\'s CheckedChanged, use "Add/remove from Summary of Tasks log" instead - this one has no way to undo itself when unchecked.',
+    template: `$script:{wizardName}_LogEntries['{ownerName}'] = "{message}"`,
+    help: 'Sets this control\'s own line in the wizard\'s Summary of Tasks log. Firing this again just replaces the same line - it can\'t pile up duplicates. The RichTextBox itself isn\'t touched here at all: the whole log is rebuilt fresh, in a fixed page-order sequence, the moment the person actually reaches the Summary page. For a CheckBox\'s CheckedChanged, use "Add/remove from Summary of Tasks log" instead, which also removes the line when unchecked.',
     params: [
-      { key: 'target', label: 'Target Control', type: 'control' },
       { key: 'message', label: 'Log Message', type: 'text', default: 'This will install the selected feature.' },
     ],
   },
   {
     id: 'summaryLogToggle', label: 'Add/remove from Summary of Tasks log',
-    template: `if ($ThisControl.Checked) {\n    {target}.AppendText("{message}" + [Environment]::NewLine)\n} else {\n    {target}.Text = {target}.Text.Replace("{message}" + [Environment]::NewLine, "")\n}`,
-    help: 'Adds the line while this checkbox is checked, and removes that exact line again the instant it\'s unchecked - so toggling it back and forth doesn\'t pile up duplicate entries the way plain "Add to Summary of Tasks log" would. Only makes sense on CheckedChanged, since it needs a checked/unchecked state to react to.',
+    template: `if ($ThisControl.Checked) {\n    $script:{wizardName}_LogEntries['{ownerName}'] = "{message}"\n} else {\n    $script:{wizardName}_LogEntries.Remove('{ownerName}')\n}`,
+    help: 'Sets this control\'s own line in the wizard\'s Summary of Tasks log while checked, and removes it the instant it\'s unchecked - toggling back and forth just flips one entry on and off, so it can never pile up duplicates. The RichTextBox itself isn\'t touched here: the whole log is rebuilt fresh, in a fixed page-order sequence, only when the person actually reaches the Summary page. Only makes sense on CheckedChanged, since it needs a checked/unchecked state to react to.',
     onlyFor: ['CheckedChanged'],
     params: [
-      { key: 'target', label: 'Target Control', type: 'control' },
       { key: 'message', label: 'Log Message', type: 'text', default: 'This will install the selected feature.' },
     ],
   },
@@ -120,7 +126,7 @@ const EVENT_SNIPPETS = [
 // target control's real type (see resolveValueWidgetKind in
 // Control-Data.js), 'itemIndex'/'select' insert their raw value, 'text'
 // is inserted as-is (the template itself supplies any quotes).
-function computeSnippetCode(snippet, params) {
+function computeSnippetCode(snippet, params, ctrl) {
   let code = snippet.template;
   const targetCtrl = params.target ? getControlByName(params.target) : null;
   const targetType = targetCtrl ? targetCtrl.type : null;
@@ -140,6 +146,19 @@ function computeSnippetCode(snippet, params) {
     else sub = val != null ? String(val) : '';
     code = code.split('{' + p.key + '}').join(sub);
   });
+  // {ownerName}/{wizardName}: used only by the summary-log snippets
+  // (summaryLogAdd/summaryLogToggle) - never a user-editable param, since
+  // there's nothing to pick: a wizard has exactly one Summary log, and the
+  // "owner" is always whichever control's event this action lives on.
+  // Filled in automatically from ctrl (the control whose event is being
+  // edited), which every call site already has in scope.
+  if (ctrl) {
+    code = code.split('{ownerName}').join(ctrl.name);
+    if (code.includes('{wizardName}')) {
+      const wiz = findAncestorWizard(ctrl);
+      code = code.split('{wizardName}').join(wiz ? wiz.name : 'Wizard');
+    }
+  }
   return code;
 }
 
@@ -1433,7 +1452,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
           delete action.params.property;
           delete action.params.value;
         }
-        action.code = computeSnippetCode(snippet, action.params);
+        action.code = computeSnippetCode(snippet, action.params, ctrl);
         sync();
         render();
       });
@@ -1447,7 +1466,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
     sw.innerHTML = `<input type="checkbox" ${action.params[param.key] ? 'checked' : ''}><span class="track"></span>`;
     sw.querySelector('input').addEventListener('change', (e) => {
       action.params[param.key] = e.target.checked;
-      action.code = computeSnippetCode(snippet, action.params);
+      action.code = computeSnippetCode(snippet, action.params, ctrl);
       sync();
       render();
     });
@@ -1463,7 +1482,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
     });
     sel.addEventListener('change', (e) => {
       action.params[param.key] = e.target.value;
-      action.code = computeSnippetCode(snippet, action.params);
+      action.code = computeSnippetCode(snippet, action.params, ctrl);
       sync();
       render();
     });
@@ -1487,7 +1506,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
     });
     sel.addEventListener('change', (e) => {
       action.params[param.key] = e.target.value;
-      action.code = computeSnippetCode(snippet, action.params);
+      action.code = computeSnippetCode(snippet, action.params, ctrl);
       sync();
       render();
     });
@@ -1514,7 +1533,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
       sel.addEventListener('change', (e) => {
         action.params[param.key] = e.target.value;
         delete action.params.value; // widget kind for Value depends on Property
-        action.code = computeSnippetCode(snippet, action.params);
+        action.code = computeSnippetCode(snippet, action.params, ctrl);
         sync();
         render();
       });
@@ -1534,7 +1553,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
       sw.innerHTML = `<input type="checkbox" ${action.params[param.key] ? 'checked' : ''}><span class="track"></span>`;
       sw.querySelector('input').addEventListener('change', (e) => {
         action.params[param.key] = e.target.checked;
-        action.code = computeSnippetCode(snippet, action.params);
+        action.code = computeSnippetCode(snippet, action.params, ctrl);
         sync();
         render();
       });
@@ -1545,7 +1564,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
       input.value = action.params[param.key] || '';
       input.addEventListener('change', (e) => {
         action.params[param.key] = e.target.value;
-        action.code = computeSnippetCode(snippet, action.params);
+        action.code = computeSnippetCode(snippet, action.params, ctrl);
         sync();
         render();
       });
@@ -1556,7 +1575,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
       input.value = action.params[param.key] != null ? action.params[param.key] : '';
       input.addEventListener('change', (e) => {
         action.params[param.key] = e.target.value;
-        action.code = computeSnippetCode(snippet, action.params);
+        action.code = computeSnippetCode(snippet, action.params, ctrl);
         sync();
         render();
       });
@@ -1580,7 +1599,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
       });
       sel.addEventListener('change', (e) => {
         action.params[param.key] = e.target.value;
-        action.code = computeSnippetCode(snippet, action.params);
+        action.code = computeSnippetCode(snippet, action.params, ctrl);
         sync();
         render();
       });
@@ -1591,7 +1610,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
       input.value = action.params[param.key] != null ? action.params[param.key] : '';
       input.addEventListener('change', (e) => {
         action.params[param.key] = e.target.value;
-        action.code = computeSnippetCode(snippet, action.params);
+        action.code = computeSnippetCode(snippet, action.params, ctrl);
         sync();
         render();
       });
@@ -1603,7 +1622,7 @@ function buildSnippetParamRow(ctrl, snippet, action, param, sync) {
     input.value = action.params[param.key] != null ? action.params[param.key] : '';
     input.addEventListener('change', (e) => {
       action.params[param.key] = e.target.value;
-      action.code = computeSnippetCode(snippet, action.params);
+      action.code = computeSnippetCode(snippet, action.params, ctrl);
       sync();
       render();
     });
@@ -1742,7 +1761,7 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
     action.snippetId = snippet.id;
     action.params = {};
     snippet.params.forEach(p => { action.params[p.key] = p.default !== undefined ? p.default : (p.type === 'boolean' ? false : ''); });
-    action.code = computeSnippetCode(snippet, action.params);
+    action.code = computeSnippetCode(snippet, action.params, ctrl);
     sync();
     render();
   });
@@ -1786,14 +1805,15 @@ function buildActionsEditor(ctrl, evtName, data) {
   wrap.appendChild(addBtn);
 
   // "+ Add log" - a shortcut onto the same actions list, pre-bound to a
-  // summary-log snippet with its Target Control already set to this
-  // wizard's Summary RichTextBox (findWizardSummaryLogTarget,
-  // Wizard-Builder.js), so all that's left to fill in is the message text.
-  // On CheckedChanged this binds the toggle variant (adds while checked,
-  // removes again when unchecked) rather than the plain always-append
-  // one, since a checkbox is a state a person can flip back - appending
-  // unconditionally on every fire would just pile up duplicate lines
-  // every time it's toggled. Only appears (enabled) when ctrl is actually
+  // summary-log snippet (summaryLogAdd/summaryLogToggle) so all that's
+  // left to fill in is the message text - there's no Target Control to
+  // pick anymore, since a wizard has exactly one Summary log and the
+  // snippet resolves it automatically (via {wizardName} in the template,
+  // computeSnippetCode) from whichever wizard this control lives inside
+  // (findAncestorWizard, Wizard-Builder.js). On CheckedChanged this binds
+  // the toggle variant (adds while checked, removes again when unchecked)
+  // rather than the plain always-set one, since a checkbox is a state a
+  // person can flip back. Only appears (enabled) when ctrl is actually
   // inside a wizard that has a Summary-template page with a RichTextBox
   // on it to target.
   const wizardCtrl = findAncestorWizard(ctrl);
@@ -1805,15 +1825,14 @@ function buildActionsEditor(ctrl, evtName, data) {
   logBtn.textContent = '+ Add log';
   logBtn.disabled = !logTarget;
   logBtn.title = logTarget
-    ? `Add a line to ${logTarget.name} (the wizard's Summary of Tasks log) when this event fires - the target's already set, just write the message.${evtName === 'CheckedChanged' ? ' Removes the line again if unchecked, so toggling doesn\'t duplicate it.' : ''}`
+    ? `Add a line to ${logTarget.name} (the wizard's Summary of Tasks log) when this event fires - just write the message.${evtName === 'CheckedChanged' ? ' Removes the line again if unchecked, so toggling doesn\'t duplicate it.' : ''}`
     : 'This control isn\'t inside a wizard with a Summary page, so there\'s no log to add to yet.';
   logBtn.addEventListener('click', () => {
     if (!logTarget) return;
     const snippet = EVENT_SNIPPETS.find(s => s.id === logSnippetId);
     const action = { code: '', snippetId: snippet.id, params: {} };
     snippet.params.forEach(p => { action.params[p.key] = p.default !== undefined ? p.default : ''; });
-    action.params.target = logTarget.name;
-    action.code = computeSnippetCode(snippet, action.params);
+    action.code = computeSnippetCode(snippet, action.params, ctrl);
     actions.push(action);
     sync();
     render();
