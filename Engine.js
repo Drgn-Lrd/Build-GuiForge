@@ -1,21 +1,21 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.41
+    Version 1.43
 
     Revision:
 
-    1. File Versions modal: Last Updated column now tries a live
-    Last-Modified HTTP header check (HEAD request) per file when the
-    modal opens, via new formatHttpDateForFileVersions() and
-    fetchLastModifiedForFileVersions() helpers. Each cell shows its
-    hardcoded LAST_UPDATED constant immediately, then gets overwritten
-    if/when that file's fetch succeeds - so it degrades gracefully on
-    file:// (where fetch to local files fails) or if a host doesn't
-    return the header.
+    1. File Versions modal: filled in GITHUB_REPO_OWNER (Drgn-Lrd) and
+    GITHUB_REPO_NAME (Build-GuiForge) so the commit-date lookup is
+    live. Swapped the in-memory commit-date cache for a localStorage-
+    backed one (FILE_VERSIONS_CACHE_KEY/_TTL_MS, readFileVersionsCache/
+    writeFileVersionsCache) with a 90-minute TTL, so repeated page
+    reloads during testing don't re-spend the 60/hour unauthenticated
+    API rate limit the way an in-memory cache (which resets on reload)
+    would have.
 */
 
-const ENGINE_VERSION = '1.41';
+const ENGINE_VERSION = '1.43';
 const ENGINE_LAST_UPDATED = '29Aug2026 @ 12:00:00';
 
 /* =========================================================================
@@ -1019,30 +1019,84 @@ function switchCodeTab(tab) {
   document.getElementById('codeOutput').textContent = GENERATORS[tab]();
 }
 
-// Formats a Last-Modified HTTP-date header into the project's
-// "DDMonYYYY @ HH:MM:SS" display style (local time).
-function formatHttpDateForFileVersions(httpDateStr) {
-  const d = new Date(httpDateStr);
+// Fill these in to match your GitHub Pages repo so the File Versions
+// modal's Last Updated column can look up each file's real last-commit
+// date via the GitHub REST API, instead of the CDN's Last-Modified
+// header (which turned out to reflect deploy time, not per-file commit
+// time). Leave GITHUB_REPO_OWNER blank to disable the lookup entirely -
+// every row then just keeps showing its hardcoded LAST_UPDATED
+// constant.
+const GITHUB_REPO_OWNER = 'Drgn-Lrd';
+const GITHUB_REPO_NAME = 'Build-GuiForge';
+const GITHUB_REPO_BRANCH = 'main';
+
+// localStorage-backed cache (rather than in-memory) so re-opening the
+// modal AND reloading the page during testing don't re-spend API
+// calls - unauthenticated GitHub API requests are capped at 60/hour
+// per IP, and this modal alone can have 14 files to look up per open.
+// Each cached entry is refreshed at most once per FILE_VERSIONS_CACHE_
+// TTL_MS.
+const FILE_VERSIONS_CACHE_KEY = 'fileVersionsCommitDateCache';
+const FILE_VERSIONS_CACHE_TTL_MS = 90 * 60 * 1000; // 1.5 hours
+
+function readFileVersionsCache() {
+  try {
+    const raw = localStorage.getItem(FILE_VERSIONS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function writeFileVersionsCache(cache) {
+  try {
+    localStorage.setItem(FILE_VERSIONS_CACHE_KEY, JSON.stringify(cache));
+  } catch (err) { /* localStorage unavailable - private browsing, quota, etc. */ }
+}
+
+// Formats an HTTP-date or ISO-8601 date string into the project's
+// "DDMonYYYY @ HH:MM:SS" display style (local time). Date() parses
+// both formats, so this is shared by anything feeding it a raw date
+// string from an API/header.
+function formatDateForFileVersions(dateStr) {
+  const d = new Date(dateStr);
   if (isNaN(d.getTime())) return null;
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const pad2 = (n) => String(n).padStart(2, '0');
   return `${pad2(d.getDate())}${months[d.getMonth()]}${d.getFullYear()} @ ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
-// Attempts to read the server's Last-Modified header for a file via a
-// HEAD request (works when served over HTTP, e.g. GitHub Pages; fails
-// silently on file:// or if the header is missing/blocked, in which
-// case the caller's hardcoded LAST_UPDATED fallback stays on screen).
-async function fetchLastModifiedForFileVersions(fileName) {
-  try {
-    const res = await fetch(fileName, { method: 'HEAD', cache: 'no-store' });
-    if (!res.ok) return null;
-    const lastModified = res.headers.get('Last-Modified');
-    if (!lastModified) return null;
-    return formatHttpDateForFileVersions(lastModified);
-  } catch (err) {
-    return null;
+// Looks up the most recent commit that touched fileName via the GitHub
+// REST API and returns its committer date, formatted for display.
+// Returns null (leaving the hardcoded fallback on screen) if the repo
+// constants above aren't filled in, the request fails, or no commit
+// history is returned - e.g. when testing from file:// rather than the
+// deployed GitHub Pages site. Successful and failed lookups are both
+// cached for FILE_VERSIONS_CACHE_TTL_MS so a dead endpoint or a rate
+// limit doesn't get hammered on every page load.
+async function fetchLastCommitDateForFileVersions(fileName) {
+  if (!GITHUB_REPO_OWNER || !GITHUB_REPO_NAME) return null;
+
+  const cache = readFileVersionsCache();
+  const cached = cache[fileName];
+  if (cached && (Date.now() - cached.fetchedAt) < FILE_VERSIONS_CACHE_TTL_MS) {
+    return cached.value;
   }
+
+  let result = null;
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/commits?path=${encodeURIComponent(fileName)}&sha=${encodeURIComponent(GITHUB_REPO_BRANCH)}&per_page=1`;
+    const res = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+    if (res.ok) {
+      const data = await res.json();
+      const commitDate = data && data[0] && data[0].commit && data[0].commit.committer && data[0].commit.committer.date;
+      result = commitDate ? formatDateForFileVersions(commitDate) : null;
+    }
+  } catch (err) { /* network error, CORS, offline, etc. - falls back to hardcoded value */ }
+
+  cache[fileName] = { value: result, fetchedAt: Date.now() };
+  writeFileVersionsCache(cache);
+  return result;
 }
 
 function initAboutModal() {
@@ -1075,7 +1129,7 @@ function initAboutModal() {
     rows.forEach(([fileName, verId, updId, verVal, fallbackUpdVal]) => {
       document.getElementById(verId).textContent = verVal;
       document.getElementById(updId).textContent = fallbackUpdVal;
-      fetchLastModifiedForFileVersions(fileName).then((headerVal) => {
+      fetchLastCommitDateForFileVersions(fileName).then((headerVal) => {
         if (headerVal) document.getElementById(updId).textContent = headerVal;
       });
     });
