@@ -1,37 +1,36 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.15
+    Version 1.16
 
     Revision:
 
-    1. Welcome's body label (Label2) now also centers on Y, not just X -
-    "centered" meant both axes. populateWizardPageTemplate's centerX
-    logic gained a matching centerY, and both now account for the
-    footer's reserved WIZARD_FOOTER_HEIGHT (extracted from a magic 46
-    that createWizardFooterButtons already had) so a centered box is
-    centered in the actual usable page area, not the full page including
-    the space the footer buttons sit in.
+    1. Rebuilt the "Add to Summary of Tasks log" feature as a state-based
+    rebuild instead of the old AppendText/Text.Replace approach (which
+    silently failed to remove a CheckBox-driven line on uncheck, since
+    RichTextBox.Text doesn't reliably round-trip the exact string
+    AppendText wrote). Every log-contributing control now just sets or
+    deletes its own key in $script:<Name>_LogEntries (end-state only,
+    see summaryLogAdd/summaryLogToggle in Properties-Pane.js) - the
+    RichTextBox's Text is never touched directly by a control's own
+    event anymore. New Update-<Name>SummaryLog (wizardSummaryLogFunctionLines)
+    is the one place that rebuilds it, called from Show-<Name>Page only
+    when navigating TO the Summary page, in a fixed order baked in at
+    build time as $script:<Name>_LogOrder (wizardLogTargetOrderedControlNames -
+    wizard page order, then top-left-to-bottom-right placement within a
+    page, NOT click order). Whatever text the person authored directly on
+    the RichTextBox (e.g. "Options Chosen:") is preserved as a base/header
+    and a line break is guaranteed before the first log entry only if the
+    base text doesn't already end in one, so a header no longer runs
+    inline with the first entry.
 
-    2. Fixed a real regression from CodeGen-WinForms.js 1.8's $ThisControl
-    fix: "Required before Next" used to work (sort of) BECAUSE
-    $ThisControl was always null - once that bug was fixed, the
-    CheckedChanged handler it silently auto-wired (.Enabled = Checked)
-    started actually disabling the shared Next button, which (a) can
-    leak across pages since Enabled isn't page-scoped, and (b) meant a
-    disabled button never fires Click at all, so
-    Test-<Name>PageRequirements' friendly "please complete this page"
-    message could never run. wizardSyncBooleanGate no longer touches
-    Enabled or writes any event - it's pure metadata now (wizardRequired
-    + new wizardRequiredMode, which carries the Checked/Unchecked
-    distinction that used to only exist inside the auto-written event).
-    wizardRequiredCheckExpr reads wizardRequiredMode directly. Manually
-    wiring a mirrorChecked/mirrorUnchecked snippet through the ordinary
-    Events UI still works and is still detected (wizardDetectNextGate) -
-    this only changes what the Required toggle itself does.
+    2. findWizardSummaryLogTarget no longer falls back to a "summaryAfter"
+    page's RichTextBox - summaryAfter is going to be a separate
+    console/log-file style feature entirely, unrelated to this dictionary
+    rebuild system, so it's no longer a valid target for it.
 */
 
-const WIZARD_BUILDER_VERSION = '1.15';
+const WIZARD_BUILDER_VERSION = '1.16';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -382,18 +381,93 @@ function findAncestorWizard(ctrl) {
 
 // The read-only RichTextBox on a Summary-template page inside the given
 // Wizard - i.e. the box "Add to Summary of Tasks log" actions are meant to
-// target. Prefers a "summary" (before) page's box over a "summaryAfter"
-// (after) page's if a wizard somehow has both types of RichTextBox
-// candidates, since the "what will happen" log is the more common target.
+// target. Only "summary" (before) pages are considered - "summaryAfter"
+// (after) pages are a separate, unwired future feature (a console/log-file
+// style display, not this dictionary-driven running-list system), so a
+// summaryAfter box is never treated as a fallback target here.
 function findWizardSummaryLogTarget(wizardCtrl) {
   if (!wizardCtrl) return null;
-  const pages = wizardCtrl.props.pages || [];
-  const ordered = pages.filter(pg => pg.template === 'summary').concat(pages.filter(pg => pg.template === 'summaryAfter'));
-  for (const pg of ordered) {
+  const pages = (wizardCtrl.props.pages || []).filter(pg => pg.template === 'summary');
+  for (const pg of pages) {
     const box = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.tabPage === pg.id && ch.type === 'RichTextBox');
     if (box) return box;
   }
   return null;
+}
+
+// Escapes a JS string (which may contain real newlines - a RichTextBox's
+// Text property is edited as a multi-line textarea) for embedding as a
+// single-line PowerShell double-quoted string literal: quotes doubled,
+// matching this file's existing text-escaping convention elsewhere, and
+// CRLF/LF converted to a backtick-escaped `r`n so the emitted source stays
+// on one line rather than a literal line break splitting the statement.
+function wizardEscapePsText(text) {
+  return String(text || '')
+    .replace(/"/g, '""')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n/g, '`r`n');
+}
+
+// True if this control has a "summary log" action (summaryLogAdd or
+// summaryLogToggle, EVENT_SNIPPETS in Properties-Pane.js) bound anywhere in
+// its events - i.e. it's a contributor to the wizard's Summary of Tasks log
+// and belongs in the rebuild order below.
+function wizardControlHasLogAction(ctrl) {
+  if (!ctrl.events) return false;
+  return Object.values(ctrl.events).some(data => {
+    if (!data || !data.actions) return false;
+    return data.actions.some(a => a.snippetId === 'summaryLogAdd' || a.snippetId === 'summaryLogToggle');
+  });
+}
+
+// Ordered list of every log-contributing control's own Name inside this
+// wizard, in the order the rebuilt log should read: wizard page order
+// first, then top-left-to-bottom-right placement within a page (Y then X) -
+// NOT click/interaction order, and NOT dictionary insertion order (a
+// PowerShell hashtable has no reliable enumeration order of its own),
+// which is exactly why this fixed order is baked into the generated code
+// once at build time as $script:<Name>_LogOrder rather than computed live.
+function wizardLogTargetOrderedControlNames(wizardCtrl) {
+  const pages = wizardCtrl.props.pages || [];
+  const names = [];
+  pages.forEach(page => {
+    const pageControls = state.controls.filter(ch => ch.parentId === wizardCtrl.id && ch.tabPage === page.id && !ch.wizardFooter);
+    pageControls.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    pageControls.forEach(ch => { if (wizardControlHasLogAction(ch)) names.push(ch.name); });
+  });
+  return names;
+}
+
+// Generates Update-<Name>SummaryLog: the ONE place the Summary RichTextBox's
+// Text is ever written. Rebuilds it end-to-end from $script:<Name>_LogEntries
+// (set/cleared per-control by the summaryLogAdd/summaryLogToggle snippets -
+// never appended/replaced-in-place) every time it's called, in the fixed
+// $script:<Name>_LogOrder sequence, on top of whatever base text the person
+// authored directly on the RichTextBox (preserved verbatim, with a guaranteed
+// line break inserted before the first log entry only if the base text
+// doesn't already end in one - so "Options Chosen:" followed by entries
+// lands as a real header line instead of running the first entry onto it).
+function wizardSummaryLogFunctionLines(c, logTarget) {
+  const name = c.name;
+  const lines = [];
+  lines.push(`function Update-${name}SummaryLog {`);
+  lines.push(`    $entryLines = @()`);
+  lines.push(`    foreach ($key in $script:${name}_LogOrder) {`);
+  lines.push(`        if ($script:${name}_LogEntries.ContainsKey($key)) { $entryLines += $script:${name}_LogEntries[$key] }`);
+  lines.push(`    }`);
+  lines.push(`    $entryText = $entryLines -join [Environment]::NewLine`);
+  lines.push(`    $baseText = $script:${name}_LogBaseText`);
+  lines.push(`    if ([string]::IsNullOrEmpty($baseText)) {`);
+  lines.push(`        $${logTarget.name}.Text = $entryText`);
+  lines.push(`    } elseif ([string]::IsNullOrEmpty($entryText)) {`);
+  lines.push(`        $${logTarget.name}.Text = $baseText`);
+  lines.push(`    } else {`);
+  lines.push('        $needsBreak = -not ($baseText.EndsWith("`r`n") -or $baseText.EndsWith("`n"))');
+  lines.push(`        $sep = if ($needsBreak) { [Environment]::NewLine } else { '' }`);
+  lines.push(`        $${logTarget.name}.Text = $baseText + $sep + $entryText`);
+  lines.push(`    }`);
+  lines.push(`}`);
+  return lines;
 }
 
 function getWizardSetupOverlay() {
@@ -1197,6 +1271,16 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   lines.push(`    $pages = @(${pageVarNames.map(v => '$' + v).join(', ')})`);
   lines.push(`    for ($i = 0; $i -lt $pages.Count; $i++) { $pages[$i].Visible = ($i -eq $Index) }`);
   lines.push(`    $script:${name}_CurrentPage = $Index`);
+  // Rebuild the Summary of Tasks log the moment the person actually lands
+  // on the Summary page - not on each contributing control's own event
+  // (wizardSummaryLogFunctionLines above) - so it always reflects the
+  // live end-state of $script:<Name>_LogEntries at the moment it's seen,
+  // regardless of what order pages were visited or revisited in.
+  const logTarget = findWizardSummaryLogTarget(c);
+  const summaryPageIndex = pages.findIndex(p => p.template === 'summary');
+  if (logTarget && summaryPageIndex !== -1) {
+    lines.push(`    if ($Index -eq ${summaryPageIndex}) { Update-${name}SummaryLog }`);
+  }
   if (nextBtn) {
     // "Run" on a Summary-of-Tasks page that ISN'T the last page (a
     // Summary-of-Actions-Taken page follows it) - "Finish" on whichever
