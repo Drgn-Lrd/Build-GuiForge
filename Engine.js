@@ -1,17 +1,40 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.34
+    Version 1.35
 
     Revision:
 
-    1. About modal's copy handler (aboutCopyVersions) now copies all
-    file versions to the clipboard as "<Filename> version - <#>" lines,
-    one per file, ordered alphabetically by filename to match the
-    reordered About modal rows in index.html.
+    1. New Copy feature (toolbar's #btnCopy, startCopySelected):
+    - Selecting a plain control (leaf or a Panel/GroupBox/etc container)
+    and pressing Copy deep-clones it - containers bring their children
+    along, events always come back blank (never copied verbatim), and
+    it's placed via calcCopyPosition: 25px below the lowest control in
+    the same x-column, wrapping to a new column 25px right of the
+    widest control once the container's usable height runs out
+    (accounts for a Wizard's footer, which containerClientRect doesn't
+    shrink for on its own). Docked controls keep their Dock and append
+    to the end of the dock order; a Dock=Fill copy resets to None
+    instead, since a second Fill sibling would just sit on top of the
+    first.
+    - Selecting a TabControl or a Wizard copies the currently ACTIVE
+    tab/page instead of the whole container (matches clicking a tab
+    header or a Wizard Contents-nav item, which both just switch
+    activeTabId on the existing selection) - inserted immediately after
+    the source in the tabs/pages array, its own controls deep-cloned
+    into the new tab/page id, a Wizard's per-page requirements
+    remapped to the new ids, and activeTabId left on the ORIGINAL
+    tab/page (selection never jumps to the copy).
+    - If nothing's selected (Main Panel), opens the same Select Control
+    picker used elsewhere; picking selects and copies in one step, so
+    repeated presses keep duplicating that same source without asking
+    again.
+    - The whole operation (however many controls get cloned) is one
+    undo/redo step, since it's a single state mutation followed by one
+    render() call.
 */
 
-const ENGINE_VERSION = '1.34';
+const ENGINE_VERSION = '1.35';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -784,6 +807,267 @@ function deleteSelected() {
 }
 
 /* =========================================================================
+   Copy control (toolbar Copy button)
+   ========================================================================= */
+
+// Deep-clones a single control: fresh random id, freshly auto-named via
+// nextName() (same as dragging a brand-new one off the toolbox), and
+// events come back all-null - same shape createControl gives a new
+// control - rather than copying the original's wired-up code/ps1, since
+// that almost certainly references the old control's name and would be
+// silently wrong on the copy. If it's a TabControl or Wizard, its own
+// tabs/pages get fresh ids too (returned as pageMap, old id -> new id)
+// so the caller can remap each child's tabPage and - for a Wizard - each
+// page's `requirements[].targetId` once the whole tree has been cloned.
+function cloneControlDeep(oldCtrl, newParentId, newTabPage) {
+  const def = CONTROL_DEFS[oldCtrl.type];
+  const cloned = JSON.parse(JSON.stringify(oldCtrl));
+  cloned.id = 'c' + Math.random().toString(36).slice(2, 10);
+  cloned.name = nextName(oldCtrl.type);
+  cloned.parentId = newParentId;
+  cloned.tabPage = newTabPage;
+  cloned.events = {};
+  def.events.forEach(evt => { cloned.events[evt] = null; });
+
+  let pageMap = null;
+  if (def.isTabControl) {
+    pageMap = {};
+    cloned.props.tabs = (cloned.props.tabs || []).map(t => {
+      const newId = 'tab' + Math.random().toString(36).slice(2, 8);
+      pageMap[t.id] = newId;
+      return { ...t, id: newId };
+    });
+    cloned.activeTabId = pageMap[oldCtrl.activeTabId] || (cloned.props.tabs[0] && cloned.props.tabs[0].id) || null;
+  } else if (def.isWizard) {
+    pageMap = {};
+    const newIds = [];
+    cloned.props.pages = (cloned.props.pages || []).map(p => {
+      const newId = wizardGeneratePageId(p.label, newIds);
+      newIds.push(newId);
+      pageMap[p.id] = newId;
+      return { ...p, id: newId, requirements: (p.requirements || []).map(r => ({ ...r })) };
+    });
+    cloned.activeTabId = pageMap[oldCtrl.activeTabId] || (cloned.props.pages[0] && cloned.props.pages[0].id) || null;
+  }
+
+  return { ctrl: cloned, pageMap };
+}
+
+// Clones every direct child of oldParentId (any tabPage) into newParentId,
+// recursively - used both for "copy this whole container" (root already
+// cloned by the caller) and for "copy just this one tab/page's content"
+// (the loop below over a single tab/page's children). pageMap remaps a
+// cloned TabControl/Wizard child's own tabPage assignments for ITS
+// children in the next recursion step; plain containers pass null, which
+// correctly forces their grandchildren's tabPage to null too (only a
+// direct TabControl/Wizard child ever has a real tabPage).
+function cloneChildrenDeep(oldParentId, newParentId, pageMap) {
+  const idMap = {};
+  const newControls = [];
+  state.controls.filter(c => c.parentId === oldParentId).forEach(child => {
+    const childNewTabPage = (child.tabPage != null && pageMap) ? (pageMap[child.tabPage] || null) : null;
+    const result = cloneControlDeep(child, newParentId, childNewTabPage);
+    idMap[child.id] = result.ctrl.id;
+    newControls.push(result.ctrl);
+    const nested = cloneChildrenDeep(child.id, result.ctrl.id, result.pageMap);
+    newControls.push(...nested.newControls);
+    Object.assign(idMap, nested.idMap);
+  });
+  return { newControls, idMap };
+}
+
+// Remaps requirements[].targetId on any cloned Wizard now that the full
+// old-id -> new-id map for its cloned subtree is known.
+function remapWizardRequirements(newControls, idMap) {
+  newControls.forEach(c => {
+    if (CONTROL_DEFS[c.type].isWizard) {
+      (c.props.pages || []).forEach(p => {
+        (p.requirements || []).forEach(r => {
+          if (r.targetId && idMap[r.targetId]) r.targetId = idMap[r.targetId];
+        });
+      });
+    }
+  });
+}
+
+// Clones sourceCtrl plus every descendant (found purely by parentId, so
+// this also picks up a Wizard's footer buttons, which live on the wizard
+// itself with tabPage=null alongside its per-page children). Returns the
+// new controls (root first, then children) and the full old-id -> new-id
+// map.
+function deepCopyControlTree(sourceCtrl, newParentId, newTabPage) {
+  const rootResult = cloneControlDeep(sourceCtrl, newParentId, newTabPage);
+  const idMap = { [sourceCtrl.id]: rootResult.ctrl.id };
+  const newControls = [rootResult.ctrl];
+
+  const nested = cloneChildrenDeep(sourceCtrl.id, rootResult.ctrl.id, rootResult.pageMap);
+  newControls.push(...nested.newControls);
+  Object.assign(idMap, nested.idMap);
+
+  remapWizardRequirements(newControls, idMap);
+  return { newControls, idMap };
+}
+
+// Where a freshly-copied (non-docked) control lands: siblings in the same
+// container (form root, Panel, a TabControl/Wizard page - whichever
+// containerClientRect resolves) are grouped into "columns" by shared x;
+// the copy goes 25px below the bottommost control in the right-most
+// column. Only once that no longer fits in the container's usable area
+// (already excludes a Wizard's Contents nav strip / a docked status bar
+// via containerClientRect, plus the Wizard footer strip which
+// containerClientRect does NOT account for - see footerReserve below)
+// does it wrap to a new column: 25px right of the widest control in that
+// column, back up at the y of the container's topmost non-Label control
+// (its "header row"), so repeated columns start in a lined-up row
+// instead of drifting down.
+function calcCopyPosition(sourceCtrl) {
+  const parentId = sourceCtrl.parentId || null;
+  const tabPage = sourceCtrl.tabPage || null;
+  const rect = containerClientRect(parentId, tabPage);
+
+  const parentCtrl = parentId ? getControl(parentId) : null;
+  const footerReserve = (parentCtrl && CONTROL_DEFS[parentCtrl.type].isWizard && tabPage) ? WIZARD_FOOTER_HEIGHT : 0;
+  const usableBottom = rect.y + rect.h - footerReserve;
+
+  const allSiblings = state.controls.filter(c =>
+    (c.parentId || null) === parentId &&
+    (c.tabPage || null) === tabPage &&
+    !(c.props.dock && c.props.dock !== 'None') &&
+    !c.wizardFooter
+  );
+
+  if (!allSiblings.length) return { x: rect.x, y: rect.y };
+
+  // A page title Label is usually much wider than the real content below
+  // it and often shares the same x - left in, it would win every "widest
+  // control in this column" check and blow the column spacing out to the
+  // title's width. Labels are excluded from the flow math entirely (not
+  // just the row-reset reference below), falling back to including them
+  // only if there's nothing else yet to measure against.
+  const noLabels = allSiblings.filter(c => c.type !== 'Label');
+  const siblings = noLabels.length ? noLabels : allSiblings;
+
+  const columns = {};
+  siblings.forEach(c => {
+    const col = columns[c.x] || (columns[c.x] = { x: c.x, bottom: -Infinity, right: -Infinity });
+    col.bottom = Math.max(col.bottom, c.y + c.h);
+    col.right = Math.max(col.right, c.x + c.w);
+  });
+  const rightmost = Object.values(columns).reduce((a, b) => (b.x > a.x ? b : a));
+
+  const proposedY = snap(rightmost.bottom + 25);
+  if (proposedY + sourceCtrl.h <= usableBottom) {
+    return { x: rightmost.x, y: proposedY };
+  }
+
+  const topRefY = Math.min(...siblings.map(c => c.y));
+  return { x: snap(rightmost.right + 25), y: snap(topRefY) };
+}
+
+// Plain control copy (leaf or container, but NOT the "select a TabControl/
+// Wizard" case - see performCopyTabPage for that). A whole state mutation
+// (push every cloned control, however many) followed by exactly one
+// render() call, so the entire copy - root plus every descendant - lands
+// as a single undo/redo step, never one step per cloned control.
+function performCopy(sourceCtrl) {
+  const { newControls } = deepCopyControlTree(sourceCtrl, sourceCtrl.parentId, sourceCtrl.tabPage);
+  const rootClone = newControls[0];
+
+  // A second Fill-docked control doesn't do anything useful - Fill always
+  // claims whatever space is left regardless of order, so two of them just
+  // sit exactly on top of each other. Reset to None so the copy actually
+  // lands somewhere editable instead.
+  if (rootClone.props.dock === 'Fill') rootClone.props.dock = 'None';
+  const isDocked = !!(rootClone.props.dock && rootClone.props.dock !== 'None');
+
+  if (isDocked) {
+    // x/y/w/h for a docked control are fully recomputed by
+    // recomputeAllDocking() on the next render() - just take a spot at
+    // the end of its dock group's order.
+    rootClone.dockOrder = ++state.dockOrderSeq;
+  } else {
+    const pos = calcCopyPosition(sourceCtrl);
+    rootClone.x = pos.x;
+    rootClone.y = pos.y;
+  }
+
+  state.controls.push(...newControls);
+  render();
+}
+
+// Selecting a TabControl or Wizard (whether by clicking its tab header /
+// Contents-nav item, which also switches activeTabId, or by picking it
+// some other way) means Copy should duplicate the currently ACTIVE tab
+// or page - not the whole container. The new tab/page is inserted
+// immediately after the source in the tabs/pages array (bumping
+// everything after it down one slot); its content is deep-cloned into
+// the new tab/page id; a Wizard's per-page requirements are remapped the
+// same way a whole-Wizard copy remaps them. The container's activeTabId
+// is left pointing at the ORIGINAL tab/page (selection doesn't move to
+// the copy), matching the same "don't change what's selected" rule as a
+// regular control copy.
+function performCopyTabPage(containerCtrl, isWizard) {
+  const listKey = isWizard ? 'pages' : 'tabs';
+  const list = containerCtrl.props[listKey] || [];
+  const activeId = containerCtrl.activeTabId;
+  const srcIndex = list.findIndex(p => p.id === activeId);
+  if (srcIndex === -1) return;
+  const srcEntry = list[srcIndex];
+
+  const newId = isWizard
+    ? wizardGeneratePageId(srcEntry.label, list.map(p => p.id))
+    : ('tab' + Math.random().toString(36).slice(2, 8));
+
+  const newEntry = { ...srcEntry, id: newId, label: (srcEntry.label || '') + ' Copy' };
+  if (isWizard) newEntry.requirements = (srcEntry.requirements || []).map(r => ({ ...r }));
+
+  const idMap = {};
+  const newControls = [];
+  state.controls
+    .filter(c => c.parentId === containerCtrl.id && c.tabPage === activeId && !c.wizardFooter)
+    .forEach(child => {
+      const result = cloneControlDeep(child, containerCtrl.id, newId);
+      idMap[child.id] = result.ctrl.id;
+      newControls.push(result.ctrl);
+      const nested = cloneChildrenDeep(child.id, result.ctrl.id, result.pageMap);
+      newControls.push(...nested.newControls);
+      Object.assign(idMap, nested.idMap);
+    });
+
+  if (isWizard) {
+    (newEntry.requirements || []).forEach(r => {
+      if (r.targetId && idMap[r.targetId]) r.targetId = idMap[r.targetId];
+    });
+  }
+  remapWizardRequirements(newControls, idMap);
+
+  list.splice(srcIndex + 1, 0, newEntry);
+  state.controls.push(...newControls);
+  render();
+}
+
+function copyForSelection(ctrl) {
+  const def = CONTROL_DEFS[ctrl.type];
+  if (def.isTabControl) { performCopyTabPage(ctrl, false); return; }
+  if (def.isWizard) { performCopyTabPage(ctrl, true); return; }
+  performCopy(ctrl);
+}
+
+// Copy button: copies whatever's selected. If nothing is (the Main Panel
+// is "selected"), opens the same Select Control picker used elsewhere -
+// picking a control both selects it AND copies it, so pressing Copy again
+// right after just keeps duplicating that same control without asking
+// again (selection is never moved to the new copy itself).
+function startCopySelected() {
+  const src = getControl(state.selectedId);
+  if (src) { copyForSelection(src); return; }
+  startControlPick((picked) => {
+    selectControl(picked.id);
+    copyForSelection(picked);
+  });
+}
+
+/* =========================================================================
    Toolbox: drag-and-drop placement
    ========================================================================= */
 
@@ -1060,6 +1344,7 @@ function initAboutModal() {
 
 function initTopToolbar() {
   document.getElementById('btnDelete').addEventListener('click', deleteSelected);
+  document.getElementById('btnCopy').addEventListener('click', startCopySelected);
   document.getElementById('btnClearAll').addEventListener('click', () => {
     if (state.controls.length && !confirm('Remove all controls from the form?')) return;
     state.controls = [];
