@@ -1,14 +1,17 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.16
+    Version 1.17
 
     Revision:
 
-    1. Toolbar Copy button (#btnCopy) added next to Delete, wired up
-    in Engine.js (startCopySelected) to duplicate the selected control
-    (or open the Select Control picker first if the Main Panel is
-    selected).
+    1. New script tag for Control-Copy.js (loaded after Wizard-Builder.js,
+    before Engine.js - the Copy feature originally added to Engine.js
+    in 1.35 moved out to this new file in Engine.js 1.36). About modal
+    given a matching Control-Copy.js row, and the Objects modal's
+    heading given an id (objectsModalTitle) since Control-Copy.js's
+    scoped tab/page picker borrows that same modal shell and retitles
+    it.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -17,7 +20,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.16';</script>
+<script>window.PAGE_VERSION = '1.17';</script>
 </head>
 <body>
 
@@ -154,6 +157,7 @@
         <dt>CodeGen-WinUI.js</dt><dd id="aboutCodegenWinUiVersion">1.0</dd>
         <dt>CodeGen-WPF.js</dt><dd id="aboutCodegenWpfVersion">1.0</dd>
         <dt>CodeGen.js</dt><dd id="aboutCodegenVersion">1.0</dd>
+        <dt>Control-Copy.js</dt><dd id="aboutControlCopyVersion">1.0</dd>
         <dt>Control-Data.js</dt><dd id="aboutControlDataVersion">1.0</dd>
         <dt>Engine.js</dt><dd id="aboutEngineVersion">1.0</dd>
         <dt>Properties-Pane.js</dt><dd id="aboutPropsPaneVersion">1.0</dd>
@@ -174,7 +178,7 @@
 <div class="modal-overlay" id="objectsModalOverlay">
   <div class="modal" style="width:380px;">
     <div class="modal-header">
-      <h2>Objects</h2>
+      <h2 id="objectsModalTitle">Objects</h2>
       <button class="btn icon-btn btn-ghost" id="objectsModalClose">&times;</button>
     </div>
     <div class="modal-body">
@@ -198,6 +202,7 @@
 
 <script src="Control-Data.js"></script>
 <script src="Wizard-Builder.js"></script>
+<script src="Control-Copy.js"></script>
 <script src="CodeGen-HTML.js"></script>
 <script src="CodeGen-WinForms.js"></script>
 <script src="CodeGen-WPF.js"></script>
