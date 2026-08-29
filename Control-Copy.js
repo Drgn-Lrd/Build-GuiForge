@@ -1,22 +1,32 @@
 /*
     Control-Copy.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
     Revision:
 
-    1. calcCopyPosition's row spacing changed from a fixed "25px below
-    the previous control's TOP" to "a real 5px gap below the previous
-    control's BOTTOM edge" - now that CheckBox/Button default to a
-    5px-grid-friendly height (25, Control-Data.js 1.11), bottom-edge
-    math no longer needs a top-based workaround to avoid snap drift,
-    and it correctly scales to whatever height the copied control
-    actually has instead of assuming a magic constant. Matches the
-    Options template's own OptionA/OptionB spacing (25 height + 5 gap =
-    30 top-to-top, Wizard-Builder.js 1.21).
+    1. Fixed incrementSuffix only bumping the FIRST character of a
+    multi-letter suffix (OptionZ -> OptionAA correctly, but the next
+    copy's OptionAA -> "OptionB" instead of "OptionAB" - silently
+    collapsing back to a single letter, colliding with names already
+    taken, and burning through the retry guard until it gave up on
+    whatever letter it landed on, producing duplicates). Replaced with
+    a proper base-26 "spreadsheet column" increment (incrementLetterSuffix:
+    A -> B -> ... -> Z -> AA -> AB -> ... ). splitTrailingSuffix's letter
+    pattern also widened to match a whole trailing run of uppercase
+    letters, not just one.
+
+    2. Copying an entire tab/page (performCopyTabPage) now renames its
+    children to match the new page label the same way the page itself
+    does, instead of falling back to a generic name - a starter
+    template's SummaryTitle/SummaryLog become Summary2Title/Summary2Log
+    when "Summary" is copied to "Summary2" (renamePageCopyChildren: any
+    cloned child whose ORIGINAL name started with the exact old page
+    label gets that prefix swapped for the new label; anything else
+    keeps whatever nextSmartName already gave it).
 */
 
-const CONTROL_COPY_VERSION = '1.1';
+const CONTROL_COPY_VERSION = '1.2';
 
 /* =========================================================================
    Shared naming helpers
@@ -47,15 +57,31 @@ function splitTrailingSuffix(str) {
   if (!str) return null;
   let m = str.match(/^(.*?)(\d+)$/);
   if (m) return { base: m[1], sep: '', suffix: m[2], kind: 'digit' };
-  m = str.match(/^(.*[a-z])( ?)([A-Z])$/);
+  m = str.match(/^(.*[a-z])( ?)([A-Z]+)$/);
   if (m) return { base: m[1], sep: m[2], suffix: m[3], kind: 'letter' };
   return null;
 }
 
+// Proper base-26 "spreadsheet column" increment for a run of uppercase
+// letters (A -> B -> ... -> Z -> AA -> AB -> ... -> AZ -> BA -> ...).
+// Only bumping the first character (Z -> AA, but then AA -> "B") was the
+// earlier bug: it silently collapsed back to a single letter, which made
+// every later candidate collide with something already taken and burned
+// through the collision-retry guard, ending on whatever letter it
+// happened to land on when the guard gave up (duplicate names).
+function incrementLetterSuffix(s) {
+  const arr = s.split('');
+  let i = arr.length - 1;
+  while (i >= 0) {
+    if (arr[i] === 'Z') { arr[i] = 'A'; i--; }
+    else { arr[i] = String.fromCharCode(arr[i].charCodeAt(0) + 1); return arr.join(''); }
+  }
+  return 'A' + arr.join(''); // every position rolled over (Z -> AA, ZZ -> AAA, ...)
+}
+
 function incrementSuffix(parsed) {
   if (parsed.kind === 'digit') return String(parseInt(parsed.suffix, 10) + 1);
-  if (parsed.suffix === 'Z') return 'AA'; // rare enough not to worry about beyond this
-  return String.fromCharCode(parsed.suffix.charCodeAt(0) + 1);
+  return incrementLetterSuffix(parsed.suffix);
 }
 
 // Finds the next free NAME for a clone of sourceCtrl, continuing whatever
@@ -342,6 +368,35 @@ function performCopy(sourceCtrl) {
 // numbering (wizardGeneratePageId/nextAvailableLabel) instead of
 // appending " Copy", so e.g. "Options" becomes "Options2" the same way it
 // would from the Pages/Tabs editor's own Add button.
+// A page/tab's starter children are usually named as "<page label><role>"
+// (the Options template's OptionsTitle, SummaryTitle/SummaryLog, ...) -
+// nextSmartName/cloneControlDeep has no way to know that "Summary" in
+// "SummaryLog" is the PAGE's own name rather than an arbitrary counter,
+// so it falls back to a generic name like "RichTextBox3". This walks the
+// just-cloned subtree and, for any clone whose ORIGINAL name started
+// with the exact old page label, swaps that prefix for the new page
+// label instead (SummaryLog -> Summary2Log), leaving the rest of the
+// name untouched. Anything that doesn't start with the old label keeps
+// whatever nextSmartName already gave it.
+function renamePageCopyChildren(oldLabel, newLabel, idMap, newControls) {
+  if (!oldLabel) return;
+  Object.entries(idMap).forEach(([oldId, newId]) => {
+    const oldCtrl = getControl(oldId);
+    if (!oldCtrl || !oldCtrl.name.startsWith(oldLabel)) return;
+    const newCtrl = newControls.find(c => c.id === newId);
+    if (!newCtrl) return;
+    const base = newLabel + oldCtrl.name.slice(oldLabel.length);
+    let candidate = base;
+    let n = 2;
+    const taken = (name) => name !== newCtrl.name && (
+      state.controls.some(c => c.name === name) ||
+      newControls.some(c => c !== newCtrl && c.name === name)
+    );
+    while (taken(candidate)) { candidate = base + n; n++; }
+    newCtrl.name = candidate;
+  });
+}
+
 function performCopyTabPage(containerCtrl, isWizard, activePageId) {
   const listKey = isWizard ? 'pages' : 'tabs';
   const list = containerCtrl.props[listKey] || [];
@@ -369,6 +424,8 @@ function performCopyTabPage(containerCtrl, isWizard, activePageId) {
       newControls.push(...nested.newControls);
       Object.assign(idMap, nested.idMap);
     });
+
+  renamePageCopyChildren(srcEntry.label, newLabel, idMap, newControls);
 
   if (isWizard) {
     (newEntry.requirements || []).forEach(r => {
