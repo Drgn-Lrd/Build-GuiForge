@@ -1,40 +1,23 @@
 /*
     Wizard-Boolean-Builder.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
     Revision:
 
-    1. New Field + Comparator + Value support: an already-required
-    NumericUpDown/DateTimePicker/TextBox/MaskedTextBox/RichTextBox/
-    ComboBox/ListBox item can now start a fresh comparison (its own value
-    against a typed literal) instead of only reusing its pre-set
-    Additional Requirements condition - e.g. "NumericUpDown1 -lt 3 OR
-    NumericUpDown1 -gt 20" as two different comparisons on the same field
-    within one boolean group. CheckBox/RadioButton (or anything without a
-    comparable value) are unaffected - no comparator step, since they're
-    already a complete condition on their own.
-
-    2. Click flow: clicking such an item pushes an incomplete
-    'fieldcompare' chip; a new Comparator palette (only shows the operators
-    that make sense for that field's type - numbers/dates get the full
-    -eq/-ne/-ge/-gt/-lt/-le set, text fields only -eq/-ne) sets the
-    operator on it; the value is then typed directly into a small inline
-    text box that lives ON that same chip. Field, comparator, and value
-    are always one combined chip/token from the start - never three
-    separate pieces that could be pulled apart via drag-reorder.
-
-    3. wizardCustomExprValidity now also requires a 'fieldcompare' chip to
-    have both a comparator and a non-empty value before the expression
-    counts as complete (Apply stays disabled otherwise) - no format/range
-    checking on the value itself, that's left to run as PowerShell would
-    handle it. wizardCustomExprToPs emits the comparison with the value as
-    a raw number, a [DateTime]::Parse(...) call, or a quoted string,
-    matching the field's kind. wizardCustomExprToHumanText reads it as
-    "Field is/is not/is more than/... value" for the friendly popup.
+    1. wizardCustomExprToPs: a 'fieldcompare' comparison now fails
+    gracefully instead of risking a broken script. The typed value is
+    always embedded as a quoted string literal (never a raw/bare token -
+    a bad number/date could otherwise make the GENERATED SCRIPT ITSELF
+    fail to parse, which no amount of try/catch inside it could catch),
+    parsed at runtime via [double]::Parse/[DateTime]::Parse, and the whole
+    comparison wrapped in "(& { try { ... } catch { Write-Warning ...;
+    $false } })" - a bad value now logs a console warning and treats that
+    one comparison as not met, rather than throwing and stopping the
+    wizard cold.
 */
 
-const WIZARD_BOOLEAN_BUILDER_VERSION = '1.1';
+const WIZARD_BOOLEAN_BUILDER_VERSION = '1.2';
 
 // Per-type config for the Field + Comparator + Value feature: which
 // already-required control types have a comparable value at all (a
@@ -388,10 +371,12 @@ function wizardCustomExprValidity(tokens, items) {
 // expression (parenthesized, so combining never depends on -and/-or
 // precedence guesswork) - used by both Test-<n>PageRequirements and
 // Update-<n>NextEnabled for a page in 'custom' combine mode. A
-// 'fieldcompare' token builds its own parenthesized comparison instead of
-// looking up a pre-set requirement expression - the value is emitted as a
-// raw number for a number-kind field, wrapped in [DateTime]::Parse(...)
-// for a date-kind field, or quoted as a string otherwise.
+// 'fieldcompare' token builds its own comparison instead of looking up a
+// pre-set requirement expression, wrapped in a try/catch script block
+// (see the comment above the map below) so a value the person typed that
+// doesn't actually parse fails that ONE comparison gracefully - a console
+// warning and $false (not met) - rather than throwing an uncaught
+// exception that would break the whole generated script.
 function wizardCustomExprToPs(tokens, items) {
   const byKey = {};
   items.forEach(it => { byKey[it.key] = it.expr; });
@@ -403,10 +388,22 @@ function wizardCustomExprToPs(tokens, items) {
       if (!item || !cfg || !t.comparator) return '$true';
       const fieldExpr = cfg.expr(item.ctrl.name);
       const psOp = WIZARD_COMPARATOR_PS[t.comparator];
-      const valLiteral = cfg.kind === 'number' ? String(t.value)
-        : cfg.kind === 'date' ? `[DateTime]::Parse("${wizardEscapePsText(t.value)}")`
-        : `"${wizardEscapePsText(t.value)}"`;
-      return `(${fieldExpr} ${psOp} ${valLiteral})`;
+      // The typed value is ALWAYS embedded as a quoted string literal,
+      // never as a raw/bare token - a number or date kind then parses it
+      // at runtime via [double]::Parse/[DateTime]::Parse instead of
+      // trusting it was typed correctly. This matters beyond just "does
+      // the comparison work": a bad value emitted unquoted (e.g. the
+      // bareword `abc` where a number was expected) could make the
+      // GENERATED SCRIPT ITSELF fail to parse, which no try/catch inside
+      // it could ever catch - quoting first means the worst case is
+      // always a catchable runtime exception, never a broken script.
+      const quoted = `"${wizardEscapePsText(t.value)}"`;
+      const valLiteral = cfg.kind === 'number' ? `[double]::Parse(${quoted})`
+        : cfg.kind === 'date' ? `[DateTime]::Parse(${quoted})`
+        : quoted;
+      const comparison = `${fieldExpr} ${psOp} ${valLiteral}`;
+      const warnMsg = wizardEscapePsText(`Requirement comparison on '${item.ctrl.name}' couldn't be evaluated (value '${t.value}' didn't parse as a ${cfg.kind}) - treating as not met.`);
+      return `(& { try { ${comparison} } catch { Write-Warning "${warnMsg}"; $false } })`;
     }
     if (t.type === 'and') return '-and';
     if (t.type === 'or') return '-or';
