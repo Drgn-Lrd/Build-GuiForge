@@ -1,21 +1,23 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.29
+    Version 1.30
 
     Revision:
 
-    1. New wizardAutoWireOptionsLog, called from createControl (Engine.js)
-    right after a new control is added - a CheckBox/RadioButton landing
-    on a Wizard "Options" page now defaults to the Summary of Tasks log
-    toggle action (same as the "+ Add log" button in Properties-Pane.js)
-    instead of needing it added by hand through that control's Events
-    tab. Applies both to the template's own starter controls and anything
-    dropped onto an Options page afterward; never overwrites a control
-    that already has something wired to CheckedChanged.
+    1. wizardAutoWireOptionsLog now covers every control type that
+    reasonably has a default log line, not just CheckBox/RadioButton:
+    ComboBox/ListBox (selected option), TextBox/MaskedTextBox/RichTextBox
+    (entered text), NumericUpDown/DateTimePicker (the value itself), and
+    CheckedListBox (its currently-checked items joined into one line,
+    manually adjusting for ItemCheck's pre-change timing). Buttons are
+    deliberately left alone - an action, not a value, so there's nothing
+    sensible to default. Split into wizardAutoWireCheckboxLog/
+    wizardAutoWireValueLog/wizardAutoWireCheckedListBoxLog so each type's
+    handling stays readable on its own.
 */
 
-const WIZARD_BUILDER_VERSION = '1.29';
+const WIZARD_BUILDER_VERSION = '1.30';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -580,26 +582,40 @@ function findWizardAnyLogDisplayBox(wizardCtrl) {
   return findWizardSummaryPageBox(wizardCtrl) || findWizardSummaryAfterPageBox(wizardCtrl);
 }
 
-// Auto-wires the Summary-of-Tasks log toggle action (the same one the
-// "+ Add log" button in Properties-Pane.js adds manually) onto a
-// CheckBox/RadioButton the moment it lands on a Wizard "Options" page -
-// whether that's the template's own starter controls (populateWizardPageTemplate)
-// or one dropped there by hand later, since both go through createControl
-// (Engine.js), which calls this. The whole point of an Options page is
-// picking things that belong in the summary, so requiring a trip through
-// that control's own Events tab for every single one was the cumbersome
-// part - this makes it the default instead of a shortcut you still have
-// to reach for. Never overwrites anything already wired to that event -
-// only a control that's never had it touched gets the default.
+// Auto-wires a sensible default Summary-of-Tasks log action onto a control
+// the moment it lands on a Wizard "Options" page - whether that's the
+// template's own starter controls (populateWizardPageTemplate) or one
+// dropped there by hand later, since both go through createControl
+// (Engine.js), which calls this. What gets wired depends on the control
+// type - a checkbox/radio logs its own checked state (toggle on/off), a
+// combo/list/text/numeric/date control logs its live value (always set,
+// no on/off), and a CheckedListBox logs its currently-checked items as one
+// joined line. Buttons (and anything else not covered) are left alone on
+// purpose - a button is an action, not a value/state, so there's nothing
+// sensible to default it to; that one's still best done by hand. Never
+// overwrites a control that already has something wired to the relevant
+// event - only ever fills in an untouched one.
 function wizardAutoWireOptionsLog(ctrl) {
   if (!ctrl.parentId || !ctrl.tabPage) return;
-  const evtName = wizardGateEventForType(ctrl.type);
-  if (evtName !== 'CheckedChanged') return; // only CheckBox/RadioButton have a checked state to log
   const parent = getControl(ctrl.parentId);
   if (!parent || !CONTROL_DEFS[parent.type].isWizard) return;
   const page = (parent.props.pages || []).find(p => p.id === ctrl.tabPage);
   if (!page || page.template !== 'options') return;
-  if (ctrl.events[evtName]) return;
+
+  if (ctrl.type === 'CheckBox' || ctrl.type === 'RadioButton') {
+    wizardAutoWireCheckboxLog(ctrl);
+  } else if (ctrl.type === 'CheckedListBox') {
+    wizardAutoWireCheckedListBoxLog(ctrl, parent);
+  } else if (WIZARD_LOG_VALUE_EXPR_BY_TYPE[ctrl.type]) {
+    wizardAutoWireValueLog(ctrl, parent);
+  }
+}
+
+// CheckBox/RadioButton: the toggle variant (adds the line while checked,
+// removes it again the instant it's unchecked) - same snippet the "+ Add
+// log" button binds by hand for CheckedChanged.
+function wizardAutoWireCheckboxLog(ctrl) {
+  if (ctrl.events.CheckedChanged) return;
   const snippet = EVENT_SNIPPETS.find(s => s.id === 'summaryLogToggle');
   if (!snippet) return;
   const params = {};
@@ -609,9 +625,61 @@ function wizardAutoWireOptionsLog(ctrl) {
     // log" button's own default, just applied automatically here.
     params[p.key] = (p.key === 'message' && ctrl.props && ctrl.props.text) ? ctrl.props.text : (p.default !== undefined ? p.default : '');
   });
-  const action = { code: '', snippetId: snippet.id, params };
-  action.code = computeSnippetCode(snippet, params, ctrl);
-  ctrl.events[evtName] = { code: action.code, actions: [action] };
+  const code = computeSnippetCode(snippet, params, ctrl);
+  ctrl.events.CheckedChanged = { code, actions: [{ code, snippetId: snippet.id, params }] };
+}
+
+// Per-type PowerShell expression that reads a control's own CURRENT value
+// (never a static label) - the whole point here is a live log line, not a
+// fixed sentence. Deliberately never reads ctrl.props.text as a fallback
+// label the way the checkbox/message-label paths do elsewhere: for these
+// types props.text (or its equivalent) generally IS the value being
+// logged, not a caption describing it - using it as a label too would
+// just show the value twice.
+const WIZARD_LOG_VALUE_EXPR_BY_TYPE = {
+  ComboBox: '$ThisControl.Text', ListBox: '$ThisControl.Text',
+  TextBox: '$ThisControl.Text', MaskedTextBox: '$ThisControl.Text', RichTextBox: '$ThisControl.Text',
+  NumericUpDown: '$ThisControl.Value', DateTimePicker: '$ThisControl.Value',
+};
+const WIZARD_LOG_VALUE_EVENT_BY_TYPE = {
+  ComboBox: 'SelectedIndexChanged', ListBox: 'SelectedIndexChanged',
+  TextBox: 'TextChanged', MaskedTextBox: 'TextChanged', RichTextBox: 'TextChanged',
+  NumericUpDown: 'ValueChanged', DateTimePicker: 'ValueChanged',
+};
+
+// ComboBox/ListBox (selected option), TextBox/MaskedTextBox/RichTextBox
+// (entered text), NumericUpDown/DateTimePicker (the number/date itself) -
+// always sets the line (no toggle/remove - there's no "unchecked" state
+// for a value), prefixed with the control's own name as a plain, editable
+// starting point (e.g. "TextBox1: ") since there's no reliable label to
+// pull from otherwise (see the comment on WIZARD_LOG_VALUE_EXPR_BY_TYPE).
+function wizardAutoWireValueLog(ctrl, wizardCtrl) {
+  const evtName = WIZARD_LOG_VALUE_EVENT_BY_TYPE[ctrl.type];
+  const valueExpr = WIZARD_LOG_VALUE_EXPR_BY_TYPE[ctrl.type];
+  if (!evtName || ctrl.events[evtName]) return;
+  const prefix = wizardEscapePsText(`${ctrl.name}: `);
+  const code = `$script:${wizardCtrl.name}_LogEntries['${ctrl.name}'] = "${prefix}" + ${valueExpr}`;
+  ctrl.events[evtName] = { code, actions: [{ code, snippetId: null, params: {} }] };
+}
+
+// CheckedListBox: "essentially a couple of checkboxes" - logs whichever
+// items are currently checked as one joined line, removing the line
+// entirely once nothing's checked. ItemCheck fires BEFORE the check state
+// is actually applied (the same quirk that keeps CheckedListBox out of
+// wizardGateEventForType's live Disable-Next tracking), so this manually
+// adjusts for the ONE item mid-toggle (e.Index/e.NewValue) against the
+// otherwise-still-current CheckedItems collection, rather than trusting
+// CheckedItems as if it already reflected this click.
+function wizardAutoWireCheckedListBoxLog(ctrl, wizardCtrl) {
+  if (ctrl.events.ItemCheck) return;
+  const code = [
+    `$__checked = @($ThisControl.CheckedItems | ForEach-Object { $_.ToString() })`,
+    `$__changed = $ThisControl.Items[$e.Index].ToString()`,
+    `if ($e.NewValue -eq [System.Windows.Forms.CheckState]::Checked) { if ($__checked -notcontains $__changed) { $__checked += $__changed } }`,
+    `else { $__checked = @($__checked | Where-Object { $_ -ne $__changed }) }`,
+    `if ($__checked.Count -gt 0) { $script:${wizardCtrl.name}_LogEntries['${ctrl.name}'] = ($__checked -join ', ') } else { $script:${wizardCtrl.name}_LogEntries.Remove('${ctrl.name}') }`,
+  ].join('\n');
+  ctrl.events.ItemCheck = { code, actions: [{ code, snippetId: null, params: {} }] };
 }
 
 // Escapes a JS string (which may contain real newlines - a RichTextBox's
