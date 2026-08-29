@@ -1,19 +1,19 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.12
+    Version 1.13
 
     Revision:
 
-    1. Wizard case now also emits Footer Options extras (footerOptions
-    prop, Control-Data.js 1.12): a 1px BackColor Panel divider above the
-    footer when Border is on, and a Label kept in sync by
-    wizardShowFunctionLines' existing per-page update logic when Step
-    Counter is on. wizardShowFunctionLines takes a new 4th argument
-    (stepCounterVar) for this.
+    1. Footer Options' divider/step-counter geometry follows
+    WIZARD_FOOTER_HEIGHT's 46 -> 45 change and the footer buttons now
+    being vertically centered (Wizard-Builder.js 1.23): the divider
+    stays at the true top of the 45px strip, but the step counter Label
+    moves down 10px to line up with the now-centered buttons instead of
+    sitting flush against the top of the strip.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.12';
+const CODEGEN_WINFORMS_VERSION = '1.13';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -264,12 +264,13 @@ function generateWinForms() {
         // they sit visually behind them in z-order (matches AddRange call
         // order elsewhere - later Adds paint on top).
         const footerOpts = p.footerOptions || {};
-        const footerY = c.h - WIZARD_FOOTER_HEIGHT;
+        const footerTop = c.h - WIZARD_FOOTER_HEIGHT;
+        const footerButtonY = footerTop + 10; // centered in the 45px strip, same as the real footer buttons
         let stepCounterVar = null;
         if (footerOpts.border) {
           const dividerVar = `${c.name}_FooterDivider`;
           lines.push(`$${dividerVar} = New-Object System.Windows.Forms.Panel`);
-          lines.push(`$${dividerVar}.Location = New-Object System.Drawing.Point(0, ${footerY})`);
+          lines.push(`$${dividerVar}.Location = New-Object System.Drawing.Point(0, ${footerTop})`);
           lines.push(`$${dividerVar}.Size = New-Object System.Drawing.Size(${c.w}, 1)`);
           lines.push(`$${dividerVar}.BackColor = [System.Drawing.SystemColors]::ControlDark`);
           lines.push(`$${dividerVar}.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right`);
@@ -278,7 +279,7 @@ function generateWinForms() {
         if (footerOpts.stepCounter) {
           stepCounterVar = `${c.name}_StepCounter`;
           lines.push(`$${stepCounterVar} = New-Object System.Windows.Forms.Label`);
-          lines.push(`$${stepCounterVar}.Location = New-Object System.Drawing.Point(20, ${footerY})`);
+          lines.push(`$${stepCounterVar}.Location = New-Object System.Drawing.Point(20, ${footerButtonY})`);
           lines.push(`$${stepCounterVar}.Size = New-Object System.Drawing.Size(150, 20)`);
           lines.push(`$${stepCounterVar}.Text = "Step 1 of ${pages.length}"`);
           lines.push(`$${stepCounterVar}.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left`);
