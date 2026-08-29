@@ -1,13 +1,14 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.39
+    Version 1.41
 
     Revision:
 
-    1. New .wizard-expr-chip-value-input - the small inline text box that
-    lives directly on a "fieldcompare" chip (Wizard-Boolean-Builder.js)
-    for typing its comparison value.
+    1. File Versions modal: removed .about-grid (replaced by a
+    subtitle block) and added .file-versions-icon / .file-versions-
+    subtitle / .file-versions-app-name / .file-versions-author to style
+    the new header glyph and the app-name/author lines above the table.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -569,7 +570,8 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.39';
+  --stylesheet-version: '1.41';
+  --stylesheet-last-updated: '29Aug2026 @ 12:00:00';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -1618,9 +1620,32 @@ body.picking-mode .ctrl { cursor: crosshair !important; }
 .modal-body { padding: 16px; overflow-y: auto; }
 .modal-footer { padding: 12px 16px; border-top: 1px solid var(--bp-border); display: flex; justify-content: flex-end; gap: 8px; }
 
-.about-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; }
-.about-grid dt { color: var(--bp-text-faint); }
-.about-grid dd { margin: 0; font-family: var(--bp-font-mono); color: var(--bp-accent-2); }
+.file-versions-icon { display: inline-block; margin-right: 4px; }
+
+.file-versions-subtitle { margin-bottom: 14px; }
+.file-versions-app-name { font-size: 14px; font-weight: 600; color: var(--bp-text); }
+.file-versions-author { font-size: 12px; color: var(--bp-text-faint); margin-top: 2px; }
+
+.file-versions-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.file-versions-table th {
+  text-align: left;
+  color: var(--bp-text-faint);
+  font-weight: 600;
+  padding: 4px 10px 6px 0;
+  border-bottom: 1px solid var(--bp-border-soft);
+}
+.file-versions-table td {
+  padding: 5px 10px 5px 0;
+  border-bottom: 1px solid var(--bp-border-soft);
+}
+.file-versions-table td:first-child { color: var(--bp-text); }
+.file-versions-table td:nth-child(2),
+.file-versions-table td:nth-child(3) {
+  font-family: var(--bp-font-mono);
+  color: var(--bp-accent-2);
+  white-space: nowrap;
+}
+.file-versions-table tr:last-child td { border-bottom: none; }
 
 /* Objects list (finds controls hidden behind others) */
 .objects-row {
