@@ -1,17 +1,13 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.17
+    Version 1.18
 
     Revision:
 
-    1. New script tag for Control-Copy.js (loaded after Wizard-Builder.js,
-    before Engine.js - the Copy feature originally added to Engine.js
-    in 1.35 moved out to this new file in Engine.js 1.36). About modal
-    given a matching Control-Copy.js row, and the Objects modal's
-    heading given an id (objectsModalTitle) since Control-Copy.js's
-    scoped tab/page picker borrows that same modal shell and retitles
-    it.
+    1. New script tag for Wizard-Boolean-Builder.js (loaded after
+    Wizard-Builder.js), and a matching About modal row, for the Custom
+    Requirement Logic builder split out into its own file.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -20,7 +16,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.17';</script>
+<script>window.PAGE_VERSION = '1.18';</script>
 </head>
 <body>
 
@@ -163,6 +159,7 @@
         <dt>Properties-Pane.js</dt><dd id="aboutPropsPaneVersion">1.0</dd>
         <dt>Render.js</dt><dd id="aboutRenderVersion">1.0</dd>
         <dt>Styles.css</dt><dd id="aboutStyleVersion">1.0</dd>
+        <dt>Wizard-Boolean-Builder.js</dt><dd id="aboutWizardBooleanBuilderVersion">1.0</dd>
         <dt>Wizard-Builder.js</dt><dd id="aboutWizardBuilderVersion">1.0</dd>
         <dt>index.html</dt><dd id="aboutPageVersion">1.0</dd>
       </dl>
@@ -202,6 +199,7 @@
 
 <script src="Control-Data.js"></script>
 <script src="Wizard-Builder.js"></script>
+<script src="Wizard-Boolean-Builder.js"></script>
 <script src="Control-Copy.js"></script>
 <script src="CodeGen-HTML.js"></script>
 <script src="CodeGen-WinForms.js"></script>
