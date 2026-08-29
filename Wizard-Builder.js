@@ -1,21 +1,21 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.28
+    Version 1.29
 
     Revision:
 
-    1. Get-<n>UnmetRequirementMessage header wording: "All" mode now
-    reads "All the following must be selected to continue:", "Any" mode
-    now reads "1 of the following must be selected to continue:" -
-    replacing the old "The following options are required to continue."
-    / "Complete at least one of the following:" text. The item list
-    itself was already limited to whatever's actually marked "Required
-    before Next" on that page (wizardRequirementItemsForPage) - no change
-    needed there.
+    1. New wizardAutoWireOptionsLog, called from createControl (Engine.js)
+    right after a new control is added - a CheckBox/RadioButton landing
+    on a Wizard "Options" page now defaults to the Summary of Tasks log
+    toggle action (same as the "+ Add log" button in Properties-Pane.js)
+    instead of needing it added by hand through that control's Events
+    tab. Applies both to the template's own starter controls and anything
+    dropped onto an Options page afterward; never overwrites a control
+    that already has something wired to CheckedChanged.
 */
 
-const WIZARD_BUILDER_VERSION = '1.28';
+const WIZARD_BUILDER_VERSION = '1.29';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -578,6 +578,40 @@ function findWizardSummaryAfterPageBox(wizardCtrl) {
 // which content.
 function findWizardAnyLogDisplayBox(wizardCtrl) {
   return findWizardSummaryPageBox(wizardCtrl) || findWizardSummaryAfterPageBox(wizardCtrl);
+}
+
+// Auto-wires the Summary-of-Tasks log toggle action (the same one the
+// "+ Add log" button in Properties-Pane.js adds manually) onto a
+// CheckBox/RadioButton the moment it lands on a Wizard "Options" page -
+// whether that's the template's own starter controls (populateWizardPageTemplate)
+// or one dropped there by hand later, since both go through createControl
+// (Engine.js), which calls this. The whole point of an Options page is
+// picking things that belong in the summary, so requiring a trip through
+// that control's own Events tab for every single one was the cumbersome
+// part - this makes it the default instead of a shortcut you still have
+// to reach for. Never overwrites anything already wired to that event -
+// only a control that's never had it touched gets the default.
+function wizardAutoWireOptionsLog(ctrl) {
+  if (!ctrl.parentId || !ctrl.tabPage) return;
+  const evtName = wizardGateEventForType(ctrl.type);
+  if (evtName !== 'CheckedChanged') return; // only CheckBox/RadioButton have a checked state to log
+  const parent = getControl(ctrl.parentId);
+  if (!parent || !CONTROL_DEFS[parent.type].isWizard) return;
+  const page = (parent.props.pages || []).find(p => p.id === ctrl.tabPage);
+  if (!page || page.template !== 'options') return;
+  if (ctrl.events[evtName]) return;
+  const snippet = EVENT_SNIPPETS.find(s => s.id === 'summaryLogToggle');
+  if (!snippet) return;
+  const params = {};
+  snippet.params.forEach(p => {
+    // Defaults to this control's own Text (e.g. "Option A") rather than
+    // the generic placeholder sentence - same reasoning as the "+ Add
+    // log" button's own default, just applied automatically here.
+    params[p.key] = (p.key === 'message' && ctrl.props && ctrl.props.text) ? ctrl.props.text : (p.default !== undefined ? p.default : '');
+  });
+  const action = { code: '', snippetId: snippet.id, params };
+  action.code = computeSnippetCode(snippet, params, ctrl);
+  ctrl.events[evtName] = { code: action.code, actions: [action] };
 }
 
 // Escapes a JS string (which may contain real newlines - a RichTextBox's
