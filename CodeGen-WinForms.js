@@ -1,27 +1,19 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.9
+    Version 1.11
 
     Revision:
 
-    1. Wizard case now also emits the Summary of Tasks log's supporting
-    state whenever the wizard has a summary-template page with a
-    RichTextBox target (findWizardSummaryLogTarget, Wizard-Builder.js):
-    $script:<Name>_LogEntries (the dictionary log-contributing controls
-    set/clear their own key in), $script:<Name>_LogOrder (the fixed
-    page-order/top-left-to-bottom-right replay sequence,
-    wizardLogTargetOrderedControlNames), $script:<Name>_LogBaseText (the
-    RichTextBox's own authored Text, captured as a literal so the rebuild
-    doesn't depend on child-control emission order), and the
-    Update-<Name>SummaryLog function itself
-    (wizardSummaryLogFunctionLines). Part of replacing the old
-    AppendText/Text.Replace summary log with a state-based rebuild - see
-    Wizard-Builder.js 1.16 and Properties-Pane.js's summaryLogAdd/
-    summaryLogToggle for the rest of it.
+    1. Updated the two Wizard-case call sites for Wizard-Builder.js's
+    split summary-log generators: wizardSummaryLogFunctionLines (Summary,
+    unchanged signature) and the new wizardSummaryAfterLogFunctionLines
+    (summaryAfter, which now generates its own Get-<Name>SummaryAfterEntries
+    stub + fallback-with-warning logic instead of the plain rebuild both
+    used to share).
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.9';
+const CODEGEN_WINFORMS_VERSION = '1.11';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -272,20 +264,31 @@ function generateWinForms() {
         // not on when those children get emitted by the main loop below.
         lines.push(...wizardShowFunctionLines(c, pageVarNames, nav.navVarNames));
         lines.push(...wizardTestFunctionLines(c));
-        // Summary of Tasks log: only generated if this wizard actually has
-        // a summary-template page with a RichTextBox to target
-        // (findWizardSummaryLogTarget) - the dictionary, the fixed replay
-        // order, and the base text captured from whatever the person
-        // authored directly on the box are all baked in here so
-        // Update-<Name>SummaryLog (called from Show-<Name>Page, see
-        // Wizard-Builder.js) has everything it needs at runtime.
-        const logTarget = findWizardSummaryLogTarget(c);
-        if (logTarget) {
+        // Summary of Tasks log: the shared dictionary/order is emitted if
+        // EITHER a Summary or a summaryAfter RichTextBox exists to display
+        // it (findWizardSummaryPageBox / findWizardSummaryAfterPageBox,
+        // Wizard-Builder.js) - the entries themselves aren't tied to either
+        // display. Each box that exists gets its OWN base-text variable
+        // (its own authored Text, never the other page's) and its own
+        // Update-<Name>...Log function; Show-<Name>Page (Wizard-Builder.js)
+        // calls whichever one(s) apply when their page is reached.
+        // summaryAfter has no dedicated console/log-file capture yet (a
+        // separate, future feature) so for now it just mirrors the same
+        // entries as a fallback - never Summary's own header text.
+        const summaryBox = findWizardSummaryPageBox(c);
+        const summaryAfterBox = findWizardSummaryAfterPageBox(c);
+        if (summaryBox || summaryAfterBox) {
           const orderedNames = wizardLogTargetOrderedControlNames(c);
           lines.push(`$script:${c.name}_LogEntries = @{}`);
           lines.push(`$script:${c.name}_LogOrder = @(${orderedNames.map(n => `'${n}'`).join(', ')})`);
-          lines.push(`$script:${c.name}_LogBaseText = "${wizardEscapePsText(logTarget.props.text)}"`);
-          lines.push(...wizardSummaryLogFunctionLines(c, logTarget));
+          if (summaryBox) {
+            lines.push(`$script:${c.name}_LogBaseText = "${wizardEscapePsText(summaryBox.props.text)}"`);
+            lines.push(...wizardSummaryLogFunctionLines(c, summaryBox));
+          }
+          if (summaryAfterBox) {
+            lines.push(`$script:${c.name}_LogAfterBaseText = "${wizardEscapePsText(summaryAfterBox.props.text)}"`);
+            lines.push(...wizardSummaryAfterLogFunctionLines(c, summaryAfterBox));
+          }
         }
         lines.push(`$script:${c.name}_CurrentPage = 0`);
         wizardInitCalls.push(c.name);
