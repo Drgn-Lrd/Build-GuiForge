@@ -1,17 +1,13 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.34
+    Version 1.36
 
     Revision:
 
-    1. New .wizard-footer-divider / .wizard-step-counter - the Footer
-    Options preview (Render.js), matching what CodeGen-WinForms.js now
-    generates for a Wizard's Border/Step Counter toggles.
-
-    2. .step-options switched from a single flex column to a 2-column
-    grid, for the Nudge section's new 25/50/100 second column
-    (Properties-Pane.js).
+    1. New .wizard-expr-chip / .wizard-custom-expr-* classes for the
+    Custom Requirement Logic builder modal's chip row and operator/item
+    palettes (Wizard-Builder.js).
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -411,6 +407,66 @@
 }
 .wizard-requirements-mode-row label { font-size: 10px; color: var(--bp-text-muted); flex-shrink: 0; }
 .wizard-requirements-mode-row select { flex: 1; font-size: 10.5px; padding: 3px 4px; }
+.wizard-custom-expr-btn { margin: 2px 0 4px; align-self: flex-start; }
+.wizard-custom-expr-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 8px;
+  border: 1px dashed var(--bp-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+.wizard-custom-expr-empty { font-size: 10.5px; color: var(--bp-text-faint); }
+.wizard-custom-expr-error { font-size: 10.5px; color: var(--bp-danger, #d9534f); margin-bottom: 6px; display: none; }
+.wizard-custom-expr-palette-heading { font-size: 10px; color: var(--bp-text-faint); margin: 4px 0 3px; }
+.wizard-custom-expr-palette { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.wizard-expr-palette-btn { font-size: 10.5px; padding: 4px 8px; }
+.wizard-expr-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 3px 3px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bp-panel-raised);
+  font-size: 10.5px;
+  cursor: default;
+}
+.wizard-expr-chip.drag-over { outline: 2px dashed var(--bp-accent); }
+.wizard-expr-chip-lparen, .wizard-expr-chip-rparen, .wizard-expr-chip-and, .wizard-expr-chip-or {
+  background: var(--bp-panel);
+  color: var(--bp-text-muted);
+  font-weight: 600;
+}
+.wizard-expr-chip-handle { cursor: grab; color: var(--bp-text-faint); font-size: 9px; line-height: 1; }
+.wizard-expr-chip-handle:active { cursor: grabbing; }
+.wizard-expr-chip-label { white-space: nowrap; }
+.wizard-expr-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--bp-text-faint);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 3px;
+}
+.wizard-expr-chip-remove:hover { color: var(--bp-danger, #d9534f); }
+.wizard-requirement-group { display: flex; flex-direction: column; gap: 3px; }
+.wizard-requirement-message-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 0 4px;
+}
+.wizard-requirement-message-row label { font-size: 9.5px; color: var(--bp-text-faint); flex-shrink: 0; }
+.wizard-requirement-message-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  padding: 3px 4px;
+}
 .wizard-requirement-row {
   display: flex;
   align-items: center;
@@ -505,7 +561,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.34';
+  --stylesheet-version: '1.36';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
