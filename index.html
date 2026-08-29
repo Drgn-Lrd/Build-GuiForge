@@ -1,18 +1,20 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.11
+    Version 1.15
 
     Revision:
 
-    1. WPF is now the default format: its toolbar button is the active
-    one in the PowerShell language group (was WinForms), and it's the
-    default-active tab in the Show Code modal. Added the modal's new
-    WPF single-file/dual-file toggle (#wpfFileModeSwitch), the editable
-    XAML filename row (#wpfXamlFilenameRow), and a second labeled code
-    box (#xamlOutputLabel/#xamlOutput) plus its own copy button
-    (#btnCopyXaml) for dual-file mode's external .xaml content - wired
-    up in Engine.js, styled in Styles.css.
+    1. About modal rows reordered alphabetically by filename, with dt
+    labels switched from friendly names (e.g. "Codegen (WPF) version")
+    to actual filenames (e.g. "CodeGen-WPF.js"), and a "Copy versions"
+    button (#aboutCopyVersions) added next to Close, wired up in
+    Engine.js to copy all file versions to the clipboard as
+    "<Filename> version - <#>" lines.
+
+    Note: this file's header comment version and window.PAGE_VERSION
+    had drifted out of sync (comment read 1.11, const read 1.14) prior
+    to this edit; both are now aligned.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -21,7 +23,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.14';</script>
+<script>window.PAGE_VERSION = '1.15';</script>
 </head>
 <body>
 
@@ -152,21 +154,22 @@
       <dl class="about-grid">
         <dt>Application</dt><dd>GUI Designer</dd>
         <dt>Author</dt><dd>Johnathon Largent</dd>
-        <dt>Page version</dt><dd id="aboutPageVersion">1.0</dd>
-        <dt>Engine version</dt><dd id="aboutEngineVersion">1.0</dd>
-        <dt>Control data version</dt><dd id="aboutControlDataVersion">1.0</dd>
-        <dt>Wizard builder version</dt><dd id="aboutWizardBuilderVersion">1.0</dd>
-        <dt>Codegen version</dt><dd id="aboutCodegenVersion">1.0</dd>
-        <dt>Codegen (HTML) version</dt><dd id="aboutCodegenHtmlVersion">1.0</dd>
-        <dt>Codegen (WinForms) version</dt><dd id="aboutCodegenWinFormsVersion">1.0</dd>
-        <dt>Codegen (WPF) version</dt><dd id="aboutCodegenWpfVersion">1.0</dd>
-        <dt>Codegen (WinUI) version</dt><dd id="aboutCodegenWinUiVersion">1.0</dd>
-        <dt>Render version</dt><dd id="aboutRenderVersion">1.0</dd>
-        <dt>Properties pane version</dt><dd id="aboutPropsPaneVersion">1.0</dd>
-        <dt>Stylesheet version</dt><dd id="aboutStyleVersion">1.0</dd>
+        <dt>CodeGen-HTML.js</dt><dd id="aboutCodegenHtmlVersion">1.0</dd>
+        <dt>CodeGen-WinForms.js</dt><dd id="aboutCodegenWinFormsVersion">1.0</dd>
+        <dt>CodeGen-WinUI.js</dt><dd id="aboutCodegenWinUiVersion">1.0</dd>
+        <dt>CodeGen-WPF.js</dt><dd id="aboutCodegenWpfVersion">1.0</dd>
+        <dt>CodeGen.js</dt><dd id="aboutCodegenVersion">1.0</dd>
+        <dt>Control-Data.js</dt><dd id="aboutControlDataVersion">1.0</dd>
+        <dt>Engine.js</dt><dd id="aboutEngineVersion">1.0</dd>
+        <dt>index.html</dt><dd id="aboutPageVersion">1.0</dd>
+        <dt>Properties-Pane.js</dt><dd id="aboutPropsPaneVersion">1.0</dd>
+        <dt>Render.js</dt><dd id="aboutRenderVersion">1.0</dd>
+        <dt>Styles.css</dt><dd id="aboutStyleVersion">1.0</dd>
+        <dt>Wizard-Builder.js</dt><dd id="aboutWizardBuilderVersion">1.0</dd>
       </dl>
     </div>
     <div class="modal-footer">
+      <button class="btn" id="aboutCopyVersions">Copy versions</button>
       <button class="btn btn-accent" id="aboutModalClose2">Close</button>
     </div>
   </div>
