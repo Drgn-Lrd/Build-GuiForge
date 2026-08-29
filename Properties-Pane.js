@@ -1,19 +1,18 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.10
+    Version 1.11
 
     Revision:
 
-    1. "+ Add log" now gates on findWizardAnyLogDisplayBox
-    (Wizard-Builder.js) instead of the removed findWizardSummaryLogTarget
-    - a wizard with only a summaryAfter page (no Summary page at all)
-    now correctly still offers logging, since summaryAfter can display
-    the log's entries as a fallback on its own. No change to
-    summaryLogAdd/summaryLogToggle themselves.
+    1. "+ Add log" now defaults its Log Message to the control's own Text
+    (e.g. a checkbox named "Option A" defaults to "Option A") instead of
+    the generic "This will install the selected feature." placeholder,
+    when that control has Text set - still just a starting point, edited
+    the same way as before.
 */
 
-const PROPERTIES_PANE_VERSION = '1.10';
+const PROPERTIES_PANE_VERSION = '1.11';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -1824,7 +1823,15 @@ function buildActionsEditor(ctrl, evtName, data) {
     if (!logTarget) return;
     const snippet = EVENT_SNIPPETS.find(s => s.id === logSnippetId);
     const action = { code: '', snippetId: snippet.id, params: {} };
-    snippet.params.forEach(p => { action.params[p.key] = p.default !== undefined ? p.default : ''; });
+    snippet.params.forEach(p => {
+      // The message defaults to this control's own Text (e.g. "Option A")
+      // when it has one, rather than the generic placeholder sentence -
+      // short and specific beats a one-size-fits-all default, and it's
+      // still just a starting point the person can edit either way.
+      let val = p.default !== undefined ? p.default : '';
+      if (p.key === 'message' && ctrl.props && ctrl.props.text) val = ctrl.props.text;
+      action.params[p.key] = val;
+    });
     action.code = computeSnippetCode(snippet, action.params, ctrl);
     actions.push(action);
     sync();
