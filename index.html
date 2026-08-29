@@ -1,13 +1,14 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.18
+    Version 1.20
 
     Revision:
 
-    1. New script tag for Wizard-Boolean-Builder.js (loaded after
-    Wizard-Builder.js), and a matching About modal row, for the Custom
-    Requirement Logic builder split out into its own file.
+    1. File Versions modal: replaced the Application/Author dt/dl grid
+    with a subtitle block (app name, then Author on its own line below
+    it) between the header and the table, and added a package-glyph
+    icon next to the "File Versions" heading.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -16,7 +17,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.18';</script>
+<script>
+  window.PAGE_VERSION = '1.20';
+  window.PAGE_LAST_UPDATED = '29Aug2026 @ 12:00:00';
+</script>
 </head>
 <body>
 
@@ -137,32 +141,39 @@
   </div>
 </div>
 
-<!-- About modal -->
+<!-- File Versions modal -->
 <div class="modal-overlay" id="aboutModalOverlay">
-  <div class="modal" style="width:420px;">
+  <div class="modal" style="width:520px;">
     <div class="modal-header">
-      <h2>About</h2>
+      <h2><span class="file-versions-icon" aria-hidden="true">&#128230;</span> File Versions</h2>
       <button class="btn icon-btn btn-ghost" id="aboutModalClose">&times;</button>
     </div>
     <div class="modal-body">
-      <dl class="about-grid">
-        <dt>Application</dt><dd>GUI Designer</dd>
-        <dt>Author</dt><dd>Johnathon Largent</dd>
-        <dt>CodeGen-HTML.js</dt><dd id="aboutCodegenHtmlVersion">1.0</dd>
-        <dt>CodeGen-WinForms.js</dt><dd id="aboutCodegenWinFormsVersion">1.0</dd>
-        <dt>CodeGen-WinUI.js</dt><dd id="aboutCodegenWinUiVersion">1.0</dd>
-        <dt>CodeGen-WPF.js</dt><dd id="aboutCodegenWpfVersion">1.0</dd>
-        <dt>CodeGen.js</dt><dd id="aboutCodegenVersion">1.0</dd>
-        <dt>Control-Copy.js</dt><dd id="aboutControlCopyVersion">1.0</dd>
-        <dt>Control-Data.js</dt><dd id="aboutControlDataVersion">1.0</dd>
-        <dt>Engine.js</dt><dd id="aboutEngineVersion">1.0</dd>
-        <dt>Properties-Pane.js</dt><dd id="aboutPropsPaneVersion">1.0</dd>
-        <dt>Render.js</dt><dd id="aboutRenderVersion">1.0</dd>
-        <dt>Styles.css</dt><dd id="aboutStyleVersion">1.0</dd>
-        <dt>Wizard-Boolean-Builder.js</dt><dd id="aboutWizardBooleanBuilderVersion">1.0</dd>
-        <dt>Wizard-Builder.js</dt><dd id="aboutWizardBuilderVersion">1.0</dd>
-        <dt>index.html</dt><dd id="aboutPageVersion">1.0</dd>
-      </dl>
+      <div class="file-versions-subtitle">
+        <div class="file-versions-app-name">GUI Designer</div>
+        <div class="file-versions-author">Johnathon Largent</div>
+      </div>
+      <table class="file-versions-table">
+        <thead>
+          <tr><th>File</th><th>Version</th><th>Last Updated</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>CodeGen-HTML.js</td><td id="aboutCodegenHtmlVersion">1.0</td><td id="aboutCodegenHtmlLastUpdated">n/a</td></tr>
+          <tr><td>CodeGen-WinForms.js</td><td id="aboutCodegenWinFormsVersion">1.0</td><td id="aboutCodegenWinFormsLastUpdated">n/a</td></tr>
+          <tr><td>CodeGen-WinUI.js</td><td id="aboutCodegenWinUiVersion">1.0</td><td id="aboutCodegenWinUiLastUpdated">n/a</td></tr>
+          <tr><td>CodeGen-WPF.js</td><td id="aboutCodegenWpfVersion">1.0</td><td id="aboutCodegenWpfLastUpdated">n/a</td></tr>
+          <tr><td>CodeGen.js</td><td id="aboutCodegenVersion">1.0</td><td id="aboutCodegenLastUpdated">n/a</td></tr>
+          <tr><td>Control-Copy.js</td><td id="aboutControlCopyVersion">1.0</td><td id="aboutControlCopyLastUpdated">n/a</td></tr>
+          <tr><td>Control-Data.js</td><td id="aboutControlDataVersion">1.0</td><td id="aboutControlDataLastUpdated">n/a</td></tr>
+          <tr><td>Engine.js</td><td id="aboutEngineVersion">1.0</td><td id="aboutEngineLastUpdated">n/a</td></tr>
+          <tr><td>Properties-Pane.js</td><td id="aboutPropsPaneVersion">1.0</td><td id="aboutPropsPaneLastUpdated">n/a</td></tr>
+          <tr><td>Render.js</td><td id="aboutRenderVersion">1.0</td><td id="aboutRenderLastUpdated">n/a</td></tr>
+          <tr><td>Styles.css</td><td id="aboutStyleVersion">1.0</td><td id="aboutStyleLastUpdated">n/a</td></tr>
+          <tr><td>Wizard-Boolean-Builder.js</td><td id="aboutWizardBooleanBuilderVersion">1.0</td><td id="aboutWizardBooleanBuilderLastUpdated">n/a</td></tr>
+          <tr><td>Wizard-Builder.js</td><td id="aboutWizardBuilderVersion">1.0</td><td id="aboutWizardBuilderLastUpdated">n/a</td></tr>
+          <tr><td>index.html</td><td id="aboutPageVersion">1.0</td><td id="aboutPageLastUpdated">n/a</td></tr>
+        </tbody>
+      </table>
     </div>
     <div class="modal-footer">
       <button class="btn" id="aboutCopyVersions">Copy versions</button>
