@@ -1,28 +1,22 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.26
+    Version 1.27
 
     Revision:
 
-    1. New "Custom" combine mode: a "Build Custom Expression..." modal
-    lets you build grouped AND/OR/parentheses logic (e.g. "(A AND B) OR
-    C") out of a page's requirements, with draggable/removable chips.
-    Selecting it sets page.requirementsMode to 'custom'; the built token
-    list (page.customExpr) is kept independently of that mode, so
-    reopening the builder - or switching back to All/Any and later back
-    to Custom - never wipes it. Only hitting Apply in the modal writes
-    changes back onto the page.
-
-    2. Test-<n>PageRequirements, Update-<n>NextEnabled (Disable Next
-    mode), and Get-<n>UnmetRequirementMessage all now honor 'custom' mode
-    via a shared wizardCustomExprToPs converter - Disable Next pages using
-    it evaluate the full built expression directly on each gate event
-    instead of the incremental unmet-count list used by All/Any (a
-    grouped AND/OR/parentheses result can't be reduced to a simple count).
+    1. Fixed Get-<n>UnmetRequirementMessage for 'custom' combine mode:
+    it was listing EVERY item marked "Required before Next" on the page
+    that was currently unmet, regardless of whether the built expression
+    even referenced it - a page with 10 required options but a formula
+    only using 3 of them showed all 10. It now renders the built
+    expression itself as plain English (new wizardCustomExprToHumanText,
+    e.g. "Option A and Option B or Option J") instead of a per-item
+    unmet check - the only thing that stays accurate no matter which
+    OR-branch the person is going for.
 */
 
-const WIZARD_BUILDER_VERSION = '1.26';
+const WIZARD_BUILDER_VERSION = '1.27';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -1120,6 +1114,25 @@ function wizardCustomExprToPs(tokens, items) {
   }).join(' ');
 }
 
+// Renders a page's built token list as a plain-English restatement of the
+// rule itself - "Option A and Option B or Option J" - for the "Show
+// message" friendly text. Deliberately NOT a per-item unmet check: which
+// specific items still need attention depends on which OR-branch the
+// person is pursuing, so the fixed rule text is the only thing that's
+// always accurate, however many other requirements the page also has.
+function wizardCustomExprToHumanText(tokens, items) {
+  const byKey = {};
+  items.forEach(it => { byKey[it.key] = it.label; });
+  return tokens.map(t => {
+    if (t.type === 'item') return byKey[t.key] || '(removed control)';
+    if (t.type === 'and') return 'and';
+    if (t.type === 'or') return 'or';
+    if (t.type === 'lparen') return '(';
+    if (t.type === 'rparen') return ')';
+    return '';
+  }).join(' ').replace(/\( /g, '(').replace(/ \)/g, ')');
+}
+
 /* =========================================================================
    Pages properties-pane editor - mirrors the TabControl Tabs editor
    (rename / Show-Active / delete), plus reorder and per-page validation.
@@ -2115,22 +2128,37 @@ function wizardUnmetMessageFunctionLines(c) {
   lines.push(`function Get-${name}UnmetRequirementMessage {`);
   lines.push(`    param([int]$Index)`);
   lines.push(`    $labels = New-Object System.Collections.Generic.List[string]`);
+  // Custom-combine pages can't be reduced to "here's what's unmet" - which
+  // specific items still need attention depends on which OR-branch the
+  // person is going for, and listing every item in the whole expression
+  // regardless of whether the built logic actually needs it (e.g. all 10
+  // options on a page where only 3 are wired into the expression) is
+  // actively misleading. Instead, $customText holds the expression itself,
+  // rendered with item labels and lowercase and/or in place of the raw
+  // tokens - a fixed explanation of the rule, not a per-item runtime check.
+  lines.push(`    $customText = $null`);
   lines.push(`    switch ($Index) {`);
   pages.forEach((page, i) => {
     const items = wizardRequirementItemsForPage(c, page);
     if (!items.length) return;
     anyClause = true;
     lines.push(`        ${i} {`);
-    items.forEach(it => lines.push(`            if (-not (${it.expr})) { $labels.Add("${wizardEscapePsText(it.label)}") }`));
+    if (page.requirementsMode === 'custom' && page.customExpr && page.customExpr.length) {
+      lines.push(`            $customText = "${wizardEscapePsText(wizardCustomExprToHumanText(page.customExpr, items))}"`);
+    } else {
+      items.forEach(it => lines.push(`            if (-not (${it.expr})) { $labels.Add("${wizardEscapePsText(it.label)}") }`));
+    }
     lines.push(`        }`);
   });
   if (!anyClause) lines.push(`        default { }`);
+  lines.push(`    }`);
+  lines.push(`    if ($customText) {`);
+  lines.push(`        return "The following must be satisfied to continue:" + [Environment]::NewLine + [Environment]::NewLine + $customText`);
   lines.push(`    }`);
   lines.push(`    if ($labels.Count -eq 0) { return $null }`);
   lines.push(`    $header = switch ($Index) {`);
   pages.forEach((page, i) => {
     if (page.requirementsMode === 'any') lines.push(`        ${i} { "Complete at least one of the following:" }`);
-    else if (page.requirementsMode === 'custom') lines.push(`        ${i} { "Please complete the following to continue:" }`);
   });
   lines.push(`        default { "The following options are required to continue." }`);
   lines.push(`    }`);
