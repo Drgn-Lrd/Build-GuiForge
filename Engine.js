@@ -1,18 +1,18 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.37
+    Version 1.38
 
     Revision:
 
-    1. Arrow-key nudge and the Nudge section's D-pad no longer run the
-    moved position through snap() - snap() is reserved for actual
-    click-and-drag (moving/resizing with the mouse), not discrete
-    button/key nudges, which now move by exactly the selected step with
-    no rounding.
+    1. createControl now calls wizardAutoWireOptionsLog (Wizard-Builder.js)
+    right after adding a new control - auto-wires the Summary of Tasks
+    log toggle onto a CheckBox/RadioButton the moment it lands on a
+    Wizard "Options" page, covering both the template's starter controls
+    and anything dropped there by hand afterward.
 */
 
-const ENGINE_VERSION = '1.37';
+const ENGINE_VERSION = '1.38';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -124,6 +124,10 @@ function createControl(type, x, y, parentId, tabPage) {
   }
 
   state.controls.push(ctrl);
+  // A CheckBox/RadioButton landing on a Wizard "Options" page defaults to
+  // logging itself to the Summary of Tasks (Wizard-Builder.js) - covers
+  // both the template's own starter controls and one dropped there later.
+  wizardAutoWireOptionsLog(ctrl);
   return ctrl;
 }
 
