@@ -1,17 +1,28 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.24
+    Version 1.26
 
     Revision:
 
-    1. Options template's OptionA/OptionB width: 200 -> 195 - 200 was
-    just wide enough to overlap into a 3rd Copy-wrapped column; 195
-    leaves no visible difference in the checkbox itself but clears that
-    overlap.
+    1. New "Custom" combine mode: a "Build Custom Expression..." modal
+    lets you build grouped AND/OR/parentheses logic (e.g. "(A AND B) OR
+    C") out of a page's requirements, with draggable/removable chips.
+    Selecting it sets page.requirementsMode to 'custom'; the built token
+    list (page.customExpr) is kept independently of that mode, so
+    reopening the builder - or switching back to All/Any and later back
+    to Custom - never wipes it. Only hitting Apply in the modal writes
+    changes back onto the page.
+
+    2. Test-<n>PageRequirements, Update-<n>NextEnabled (Disable Next
+    mode), and Get-<n>UnmetRequirementMessage all now honor 'custom' mode
+    via a shared wizardCustomExprToPs converter - Disable Next pages using
+    it evaluate the full built expression directly on each gate event
+    instead of the incremental unmet-count list used by All/Any (a
+    grouped AND/OR/parentheses result can't be reduced to a simple count).
 */
 
-const WIZARD_BUILDER_VERSION = '1.24';
+const WIZARD_BUILDER_VERSION = '1.26';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -873,6 +884,243 @@ function closeWizardSetupModal() {
 }
 
 /* =========================================================================
+   Custom requirement-logic builder - grouped AND/OR/parentheses instead of
+   the flat All/Any combine mode. A page's built expression
+   (page.customExpr, an ordered token list) is independent of
+   page.requirementsMode: it's only ACTIVE when the mode is 'custom', but
+   it's kept around either way so switching back to All/Any and later back
+   to Custom (or just reopening the builder) never loses what was built -
+   only hitting Apply here ever writes it back onto the page.
+   ========================================================================= */
+
+let wizardCustomExprDraft = null; // { wizardCtrl, page, tokens } - null when closed
+let wizardCustomExprDragIndex = null;
+
+function getWizardCustomExprOverlay() {
+  let overlay = document.getElementById('wizardCustomExprModalOverlay');
+  if (overlay) return overlay;
+
+  overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'wizardCustomExprModalOverlay';
+  overlay.innerHTML = `
+    <div class="modal" style="width:480px;">
+      <div class="modal-header">
+        <h2>Build Custom Requirement Logic</h2>
+        <button class="btn icon-btn btn-ghost" id="wizardCustomExprClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="items-hint" style="margin-bottom:8px;">Click items and operators below to build a boolean expression, e.g. (A AND B) OR C. Drag a chip by its handle to reorder; use the &times; on a chip to remove it.</div>
+        <div class="wizard-custom-expr-chips" id="wizardCustomExprChips"></div>
+        <div class="wizard-custom-expr-error" id="wizardCustomExprError"></div>
+        <div class="wizard-custom-expr-palette-heading">Operators</div>
+        <div class="wizard-custom-expr-palette" id="wizardCustomExprOpPalette"></div>
+        <div class="wizard-custom-expr-palette-heading">Required Items</div>
+        <div class="wizard-custom-expr-palette" id="wizardCustomExprItemPalette"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost btn-danger" id="wizardCustomExprClear">Clear</button>
+        <button class="btn" id="wizardCustomExprCancel">Cancel</button>
+        <button class="btn btn-accent" id="wizardCustomExprApply">Apply</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeWizardCustomExprModal(); });
+  document.getElementById('wizardCustomExprClose').addEventListener('click', closeWizardCustomExprModal);
+  document.getElementById('wizardCustomExprCancel').addEventListener('click', closeWizardCustomExprModal);
+  document.getElementById('wizardCustomExprClear').addEventListener('click', () => {
+    if (!wizardCustomExprDraft) return;
+    wizardCustomExprDraft.tokens = [];
+    renderWizardCustomExprModal();
+  });
+  document.getElementById('wizardCustomExprApply').addEventListener('click', () => {
+    if (!wizardCustomExprDraft || !wizardCustomExprValidity(wizardCustomExprDraft.tokens).valid) return;
+    wizardCustomExprDraft.page.customExpr = wizardCustomExprDraft.tokens.map(t => ({ ...t }));
+    wizardCustomExprDraft.page.requirementsMode = 'custom';
+    closeWizardCustomExprModal();
+    render();
+  });
+
+  return overlay;
+}
+
+function closeWizardCustomExprModal() {
+  const overlay = document.getElementById('wizardCustomExprModalOverlay');
+  if (overlay) overlay.classList.remove('open');
+  // Discards any unapplied edits - only Apply above ever writes back onto
+  // the page, so Cancel/backdrop-click/X safely revert to whatever was
+  // last saved, exactly as if nothing had been touched this time around.
+  wizardCustomExprDraft = null;
+  wizardCustomExprDragIndex = null;
+}
+
+// Opens the builder for one page, pre-loaded from its last-saved
+// page.customExpr (or empty, the first time) - reopening never wipes it.
+function openWizardCustomExprModal(wizardCtrl, page) {
+  const overlay = getWizardCustomExprOverlay();
+  wizardCustomExprDraft = {
+    wizardCtrl,
+    page,
+    tokens: (page.customExpr || []).map(t => ({ ...t })),
+  };
+  renderWizardCustomExprModal();
+  overlay.classList.add('open');
+}
+
+function wizardCustomExprTokenLabel(token, items) {
+  if (token.type === 'and') return 'AND';
+  if (token.type === 'or') return 'OR';
+  if (token.type === 'lparen') return '(';
+  if (token.type === 'rparen') return ')';
+  const item = items.find(it => it.key === token.key);
+  return item ? item.label : '(removed control)';
+}
+
+function renderWizardCustomExprModal() {
+  if (!wizardCustomExprDraft) return;
+  const { wizardCtrl, page, tokens } = wizardCustomExprDraft;
+  const items = wizardRequirementItemsForPage(wizardCtrl, page);
+
+  const chipRow = document.getElementById('wizardCustomExprChips');
+  chipRow.innerHTML = '';
+  if (!tokens.length) {
+    const empty = document.createElement('div');
+    empty.className = 'wizard-custom-expr-empty';
+    empty.textContent = 'Nothing built yet - use the buttons below.';
+    chipRow.appendChild(empty);
+  }
+  tokens.forEach((token, i) => {
+    const chip = document.createElement('div');
+    chip.className = `wizard-expr-chip wizard-expr-chip-${token.type}`;
+    chip.draggable = true;
+
+    const handle = document.createElement('span');
+    handle.className = 'wizard-expr-chip-handle';
+    handle.textContent = '\u22ee\u22ee';
+    handle.title = 'Drag to reorder';
+
+    const label = document.createElement('span');
+    label.className = 'wizard-expr-chip-label';
+    label.textContent = wizardCustomExprTokenLabel(token, items);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'wizard-expr-chip-remove';
+    removeBtn.textContent = '\u2715';
+    removeBtn.title = 'Remove';
+    removeBtn.addEventListener('click', () => { tokens.splice(i, 1); renderWizardCustomExprModal(); });
+
+    chip.appendChild(handle);
+    chip.appendChild(label);
+    chip.appendChild(removeBtn);
+
+    chip.addEventListener('dragstart', () => { wizardCustomExprDragIndex = i; });
+    chip.addEventListener('dragover', (e) => { e.preventDefault(); chip.classList.add('drag-over'); });
+    chip.addEventListener('dragleave', () => chip.classList.remove('drag-over'));
+    chip.addEventListener('drop', (e) => {
+      e.preventDefault();
+      chip.classList.remove('drag-over');
+      if (wizardCustomExprDragIndex === null || wizardCustomExprDragIndex === i) return;
+      const [moved] = tokens.splice(wizardCustomExprDragIndex, 1);
+      const insertAt = wizardCustomExprDragIndex < i ? i - 1 : i;
+      tokens.splice(insertAt, 0, moved);
+      wizardCustomExprDragIndex = null;
+      renderWizardCustomExprModal();
+    });
+
+    chipRow.appendChild(chip);
+  });
+
+  const opPalette = document.getElementById('wizardCustomExprOpPalette');
+  opPalette.innerHTML = '';
+  [['lparen', '('], ['rparen', ')'], ['and', 'AND'], ['or', 'OR']].forEach(([type, label]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost wizard-expr-palette-btn';
+    btn.textContent = label;
+    btn.addEventListener('click', () => { tokens.push({ type }); renderWizardCustomExprModal(); });
+    opPalette.appendChild(btn);
+  });
+
+  // One button per requirement currently marked required on this page
+  // (toggle, detected, or manual) - the same set Test-<n>PageRequirements
+  // already checks, just clickable here instead of typed.
+  const itemPalette = document.getElementById('wizardCustomExprItemPalette');
+  itemPalette.innerHTML = '';
+  if (!items.length) {
+    const hint = document.createElement('div');
+    hint.className = 'items-hint';
+    hint.textContent = 'No requirements on this page yet - mark a control "Required before Next" first.';
+    itemPalette.appendChild(hint);
+  }
+  items.forEach(item => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost wizard-expr-palette-btn';
+    btn.textContent = item.label;
+    btn.title = item.ctrl.name;
+    btn.addEventListener('click', () => { tokens.push({ type: 'item', key: item.key }); renderWizardCustomExprModal(); });
+    itemPalette.appendChild(btn);
+  });
+
+  const errEl = document.getElementById('wizardCustomExprError');
+  const validity = wizardCustomExprValidity(tokens);
+  errEl.textContent = validity.message || '';
+  errEl.style.display = validity.message ? 'block' : 'none';
+  document.getElementById('wizardCustomExprApply').disabled = !validity.valid;
+}
+
+// Stack-based structural check: balanced parentheses, no two operands or
+// two operators back to back, doesn't start/end on AND/OR, no empty
+// parentheses. A missing-item token (its control got deleted since the
+// expression was built) isn't flagged here - wizardCustomExprToPs below
+// substitutes $true for it rather than breaking codegen outright.
+function wizardCustomExprValidity(tokens) {
+  if (!tokens.length) return { valid: false, message: 'Add at least one item.' };
+  let depth = 0;
+  let expectOperand = true; // true: an item or "(" is valid next
+  for (const t of tokens) {
+    if (t.type === 'lparen') {
+      if (!expectOperand) return { valid: false, message: 'A "(" can\'t follow an item or ")".' };
+      depth++;
+    } else if (t.type === 'rparen') {
+      if (expectOperand) return { valid: false, message: 'A ")" can\'t follow an operator or "(".' };
+      depth--;
+      if (depth < 0) return { valid: false, message: 'Unmatched ")".' };
+    } else if (t.type === 'and' || t.type === 'or') {
+      if (expectOperand) return { valid: false, message: 'AND/OR can\'t follow another operator or "(".' };
+      expectOperand = true;
+    } else if (t.type === 'item') {
+      if (!expectOperand) return { valid: false, message: 'Two items in a row need AND/OR between them.' };
+      expectOperand = false;
+    }
+  }
+  if (depth !== 0) return { valid: false, message: 'Unmatched "(".' };
+  if (expectOperand) return { valid: false, message: 'Expression can\'t end with an operator or "(".' };
+  return { valid: true, message: '' };
+}
+
+// Converts a page's saved token list into a single PowerShell boolean
+// expression, substituting each item token with its own requirement
+// expression (parenthesized, so combining never depends on -and/-or
+// precedence guesswork) - used by both Test-<n>PageRequirements and
+// Update-<n>NextEnabled for a page in 'custom' combine mode.
+function wizardCustomExprToPs(tokens, items) {
+  const byKey = {};
+  items.forEach(it => { byKey[it.key] = it.expr; });
+  return tokens.map(t => {
+    if (t.type === 'item') return byKey[t.key] !== undefined ? `(${byKey[t.key]})` : '$true';
+    if (t.type === 'and') return '-and';
+    if (t.type === 'or') return '-or';
+    if (t.type === 'lparen') return '(';
+    if (t.type === 'rparen') return ')';
+    return '';
+  }).join(' ');
+}
+
+/* =========================================================================
    Pages properties-pane editor - mirrors the TabControl Tabs editor
    (rename / Show-Active / delete), plus reorder and per-page validation.
    ========================================================================= */
@@ -1018,15 +1266,39 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   if (totalCount > 1) {
     const modeRow = document.createElement('div');
     modeRow.className = 'wizard-requirements-mode-row';
-    modeRow.title = 'How every requirement on this page combines - a control\'s own "Required before Next" toggle and a detected event handler included, not just the manual list below. "All" (default): every one must hold. "Any": at least one of them must hold - e.g. "CheckBox1 OR CheckBox2 must be checked" instead of both. (This is flat All/Any across everything on the page - grouping some of them separately, like "(A and B) or C", isn\'t supported yet.)';
+    modeRow.title = 'How every requirement on this page combines - a control\'s own "Required before Next" toggle and a detected event handler included, not just the manual list below. "All": every one must hold. "Any": at least one of them must hold. "Custom": a boolean expression built with the button below, e.g. "(A AND B) OR C".';
     const mode = page.requirementsMode || 'all';
+    const hasCustom = !!(page.customExpr && page.customExpr.length);
     modeRow.innerHTML = `<label>Combine as</label>
       <select>
         <option value="all" ${mode === 'all' ? 'selected' : ''}>All of these must hold</option>
         <option value="any" ${mode === 'any' ? 'selected' : ''}>Any one of these must hold</option>
+        ${hasCustom ? `<option value="custom" ${mode === 'custom' ? 'selected' : ''}>Custom (built with builder)</option>` : ''}
       </select>`;
     modeRow.querySelector('select').addEventListener('change', (e) => { page.requirementsMode = e.target.value; render(); });
     reqWrap.appendChild(modeRow);
+
+    const customBtn = document.createElement('button');
+    customBtn.type = 'button';
+    customBtn.className = 'btn btn-ghost wizard-custom-expr-btn';
+    customBtn.textContent = hasCustom ? 'Edit Custom Expression\u2026' : 'Build Custom Expression\u2026';
+    customBtn.title = 'Opens a builder for grouped AND/OR logic, e.g. "(A AND B) OR C", instead of the flat All/Any above. Reopening keeps whatever you built last time - it never wipes on open.';
+    customBtn.addEventListener('click', () => openWizardCustomExprModal(ctrl, page));
+    reqWrap.appendChild(customBtn);
+  }
+
+  if (totalCount > 0) {
+    const nextModeRow = document.createElement('div');
+    nextModeRow.className = 'wizard-requirements-mode-row';
+    nextModeRow.title = '"Show a message" (default): Next stays clickable - clicking it while something\'s unmet shows a friendly message naming what\'s outstanding. "Keep Next disabled": Next\'s Enabled state tracks this page\'s requirements live as the person fills it out, instead of only checking on click.';
+    const nextMode = page.nextMode || 'message';
+    nextModeRow.innerHTML = `<label>When incomplete</label>
+      <select>
+        <option value="message" ${nextMode === 'message' ? 'selected' : ''}>Show a message</option>
+        <option value="disable" ${nextMode === 'disable' ? 'selected' : ''}>Keep Next disabled</option>
+      </select>`;
+    nextModeRow.querySelector('select').addEventListener('change', (e) => { page.nextMode = e.target.value; render(); });
+    reqWrap.appendChild(nextModeRow);
   }
 
   detected.forEach(d => reqWrap.appendChild(buildWizardDetectedRequirementRow(d, ctrl)));
@@ -1093,6 +1365,32 @@ const WIZARD_COMPARATORS = [
   { id: 'lt', label: 'Less Than', ps: '-lt' },
   { id: 'le', label: 'Less Or Equal', ps: '-le' },
 ];
+
+// The expanding "Message Label" line shown under any active requirement
+// (a control's own "Required before Next" toggle, a detected requirement,
+// or a manual row) - an optional override for how that item reads in the
+// "Show message" friendly list. `source` is where the override itself is
+// stored (the control, for toggle/detected requirements; the requirement
+// row object, for manual ones) - `ctrl` is always the target control,
+// used only for the placeholder fallback text.
+function buildWizardMessageLabelRow(source, ctrl) {
+  const row = document.createElement('div');
+  row.className = 'wizard-requirement-message-row';
+  const label = document.createElement('label');
+  label.textContent = 'Message Label';
+  label.title = 'Optional text for this item in the "Show message" mode\'s friendly list of what\'s outstanding - falls back to the control\'s own Text property, or its name if that\'s blank, when left empty.';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = source.wizardMessageLabel || '';
+  input.placeholder = (ctrl.props && ctrl.props.text) ? ctrl.props.text : ctrl.name;
+  input.addEventListener('change', (e) => {
+    source.wizardMessageLabel = e.target.value.trim();
+    render();
+  });
+  row.appendChild(label);
+  row.appendChild(input);
+  return row;
+}
 
 // One requirement row: [target control] [its property] [comparator] [value] -
 // reuses getSettableProps() and resolveValueWidgetKind() (Control-Data.js),
@@ -1222,7 +1520,11 @@ function buildWizardRequirementRow(ctrl, page, req, ri, pageControls) {
   delBtn.addEventListener('click', () => { page.requirements.splice(ri, 1); render(); });
   row.appendChild(delBtn);
 
-  return row;
+  const group = document.createElement('div');
+  group.className = 'wizard-requirement-group';
+  group.appendChild(row);
+  group.appendChild(buildWizardMessageLabelRow(req, target));
+  return group;
 }
 
 // Read-only row for a requirement detected from an existing event handler
@@ -1247,7 +1549,12 @@ function buildWizardDetectedRequirementRow(detected, wizardCtrl) {
   });
   row.appendChild(text);
   row.appendChild(delBtn);
-  return row;
+
+  const group = document.createElement('div');
+  group.className = 'wizard-requirement-group';
+  group.appendChild(row);
+  group.appendChild(buildWizardMessageLabelRow(detected.ctrl, detected.ctrl));
+  return group;
 }
 
 /* =========================================================================
@@ -1398,6 +1705,7 @@ function buildWizardChildRows(ctrl, parentCtrl) {
       render();
     });
     frag.appendChild(reqRow);
+    if (ctrl.wizardRequired) frag.appendChild(buildWizardMessageLabelRow(ctrl, ctrl));
   }
 
   return frag;
@@ -1547,6 +1855,15 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames, stepCounterVar) {
   if (summaryAfterBox && summaryAfterPageIndex !== -1) {
     lines.push(`    if ($Index -eq ${summaryAfterPageIndex}) { Update-${name}SummaryAfterLog }`);
   }
+  // Disable Next pages: reseed that page's live unmet-requirements list
+  // from the controls' ACTUAL current values every time it's shown - not
+  // just relying on each control's own change event, since values can
+  // differ from a prior visit (or never have changed at all) by the time
+  // the person comes back to this page.
+  pages.forEach((page, i) => {
+    const seedLines = wizardUnmetListSeedLines(c, page, i);
+    if (seedLines.length) lines.push(`    if ($Index -eq ${i}) {`, ...seedLines, `    }`);
+  });
   if (nextBtn) {
     // "Run" on a Summary-of-Tasks page that ISN'T the last page (a
     // Summary-of-Actions-Taken page follows it) - "Finish" on whichever
@@ -1566,6 +1883,12 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames, stepCounterVar) {
     lines.push(`        else { $navLabels[$i].Font = New-Object System.Drawing.Font($navLabels[$i].Font.FontFamily, $navLabels[$i].Font.Size, [System.Drawing.FontStyle]::Regular) }`);
     lines.push(`    }`);
   }
+  // Always recompute Next's Enabled for whichever page is now showing -
+  // pages without "Disable Next" requirements just fall to
+  // Update-<n>NextEnabled's default (Enabled = $true), so this both
+  // activates the live gate on pages that need it AND resets Next back to
+  // enabled when leaving one.
+  if (nextBtn) lines.push(`    Update-${name}NextEnabled`);
   lines.push(`}`);
   return lines;
 }
@@ -1648,11 +1971,49 @@ function wizardRequirementExpr(req) {
 // page.requirementsMode (All/Any) actually governs, not just the manual
 // list alone - a toggle-driven and a detected requirement both belong to
 // the same "requirements for this page" set the user edits and combines.
-function wizardAllRequirementExprsForPage(wizardCtrl, page) {
+// A requirement's friendly display text for the "Show message" list - an
+// explicit override (wizardMessageLabel, stored on the control itself for
+// toggle/detected requirements, or on the requirement row for manual ones)
+// wins; otherwise falls back to the target control's own Text property,
+// and finally its name. Deliberately never derived from a nearby Label
+// control - matching by canvas proximity/placement is fragile.
+function wizardMessageLabelFor(source, ctrl) {
+  const raw = source && source.wizardMessageLabel;
+  if (raw && String(raw).trim()) return String(raw).trim();
+  if (ctrl.props && ctrl.props.text) return String(ctrl.props.text);
+  return ctrl.name;
+}
+
+// Per-control-type event that fires on a SPECIFIC state change of that
+// control's primary gate property (see WIZARD_PRIMARY_GATE_PROPERTY) -
+// used only by the "Disable Next" live-tracking path (wizardShowFunctionLines
+// seeding + the per-control Add_<Event> injection in CodeGen-WinForms.js).
+// CheckedListBox is deliberately absent: its ItemCheck event fires BEFORE
+// the check state is actually applied, so live Enabled-tracking for it is
+// deferred rather than wired against stale state.
+const WIZARD_GATE_EVENT_BY_TYPE = {
+  CheckBox: 'CheckedChanged', RadioButton: 'CheckedChanged',
+  TextBox: 'TextChanged', MaskedTextBox: 'TextChanged', RichTextBox: 'TextChanged',
+  ComboBox: 'SelectedIndexChanged', ListBox: 'SelectedIndexChanged',
+  NumericUpDown: 'ValueChanged', DateTimePicker: 'ValueChanged', TrackBar: 'ValueChanged',
+};
+function wizardGateEventForType(type) {
+  return WIZARD_GATE_EVENT_BY_TYPE[type] || null;
+}
+
+// The full requirement-item list for one page - a superset of the plain
+// expression list below, also carrying the target control, a stable key
+// (for the Disable-Next unmet-list add/remove pattern), and the friendly
+// label (for the Show-message list). One combined set regardless of how
+// the requirement got here (a control's own toggle, a detected event
+// handler, or the manual Additional Requirements list) - same dedup rule
+// as before: a toggle-driven and a detected requirement for the same
+// control only count once; the manual list is never deduped against them.
+function wizardRequirementItemsForPage(wizardCtrl, page) {
   const reqChildren = state.controls.filter(ch => ch.parentId === wizardCtrl.id && ch.tabPage === page.id && ch.wizardRequired);
   const detected = wizardDetectedRequirementsForPage(wizardCtrl, page);
   const seenIds = new Set();
-  const exprs = [];
+  const items = [];
   // Detected first: it's still the only path for a requirement that was
   // hand-wired through the ordinary Events UI rather than the Required
   // toggle - the toggle itself now carries its own Checked/Unchecked mode
@@ -1660,18 +2021,43 @@ function wizardAllRequirementExprsForPage(wizardCtrl, page) {
   // through event-handler detection to know which one was asked for.
   detected.forEach(d => {
     seenIds.add(d.ctrl.id);
-    exprs.push(d.checkedRequired ? `$${d.ctrl.name}.Checked` : `-not $${d.ctrl.name}.Checked`);
+    items.push({
+      key: `c${d.ctrl.id}`,
+      ctrl: d.ctrl,
+      expr: d.checkedRequired ? `$${d.ctrl.name}.Checked` : `-not $${d.ctrl.name}.Checked`,
+      label: wizardMessageLabelFor(d.ctrl, d.ctrl),
+    });
   });
   reqChildren.forEach(ch => {
     if (seenIds.has(ch.id)) return;
     seenIds.add(ch.id);
-    exprs.push(wizardRequiredCheckExpr(ch));
+    items.push({
+      key: `c${ch.id}`,
+      ctrl: ch,
+      expr: wizardRequiredCheckExpr(ch),
+      label: wizardMessageLabelFor(ch, ch),
+    });
   });
-  (page.requirements || []).forEach(req => {
+  (page.requirements || []).forEach((req, ri) => {
+    const target = getControl(req.targetId);
+    if (!target) return;
     const expr = wizardRequirementExpr(req);
-    if (expr) exprs.push(expr);
+    if (!expr) return;
+    items.push({
+      key: `r${ri}_${target.id}`,
+      ctrl: target,
+      expr,
+      label: wizardMessageLabelFor(req, target),
+    });
   });
-  return exprs;
+  return items;
+}
+
+// Backward-compatible plain-expression list - Test-<n>PageRequirements only
+// ever needed the boolean expressions, so it stays untouched, now just
+// derived from the richer item list above instead of rebuilding it.
+function wizardAllRequirementExprsForPage(wizardCtrl, page) {
+  return wizardRequirementItemsForPage(wizardCtrl, page).map(it => it.expr);
 }
 
 function wizardTestFunctionLines(c) {
@@ -1687,14 +2073,18 @@ function wizardTestFunctionLines(c) {
     if (!exprs.length) return; // nothing to check on this page - falls through to default $true
     anyClause = true;
     lines.push(`        ${i} {`);
-    // "any" mode combines every requirement on the page into a single
-    // -or- expression instead of checking each independently - "all"
-    // (the default) keeps one check per requirement, equivalent to
-    // ANDing them. This applies uniformly across however the requirement
-    // got here (a control's own toggle, a detected event handler, or the
-    // manual list) - they're all one combined set now, not three
-    // separately-governed ones.
-    if (exprs.length > 1 && page.requirementsMode === 'any') {
+    // "custom" mode uses the page's built token expression (grouped
+    // AND/OR/parentheses) instead of a flat combine - "any" combines every
+    // requirement into a single -or- expression; "all" (the default)
+    // keeps one check per requirement, equivalent to ANDing them. This
+    // applies uniformly across however the requirement got here (a
+    // control's own toggle, a detected event handler, or the manual
+    // list) - they're all one combined set now, not three separately-
+    // governed ones.
+    if (page.requirementsMode === 'custom' && page.customExpr && page.customExpr.length) {
+      const items = wizardRequirementItemsForPage(c, page);
+      lines.push(`            if (-not (${wizardCustomExprToPs(page.customExpr, items)})) { return $false }`);
+    } else if (exprs.length > 1 && page.requirementsMode === 'any') {
       lines.push(`            if (-not (${exprs.map(e => `(${e})`).join(' -or ')})) { return $false }`);
     } else {
       exprs.forEach(expr => lines.push(`            if (-not (${expr})) { return $false }`));
@@ -1708,6 +2098,135 @@ function wizardTestFunctionLines(c) {
   return lines;
 }
 
+// Generates Get-<n>UnmetRequirementMessage: given a page index, returns the
+// ready-to-show MessageBox text listing that page's currently-unmet
+// requirements, or $null if everything is satisfied. Built fresh at
+// Next-click time by re-evaluating each requirement's expression - "Show
+// message" mode only ever needs this at the moment Next is clicked, so
+// there's no need for a live-tracked list the way "Disable Next" mode uses
+// (see wizardNextEnabledFunctionLines/wizardUnmetListSeedLines below).
+// Header wording adapts to that page's combine mode - "any" asks for at
+// least one item from the list, "all" (the default) asks for every one.
+function wizardUnmetMessageFunctionLines(c) {
+  const name = c.name;
+  const pages = c.props.pages || [];
+  const lines = [];
+  let anyClause = false;
+  lines.push(`function Get-${name}UnmetRequirementMessage {`);
+  lines.push(`    param([int]$Index)`);
+  lines.push(`    $labels = New-Object System.Collections.Generic.List[string]`);
+  lines.push(`    switch ($Index) {`);
+  pages.forEach((page, i) => {
+    const items = wizardRequirementItemsForPage(c, page);
+    if (!items.length) return;
+    anyClause = true;
+    lines.push(`        ${i} {`);
+    items.forEach(it => lines.push(`            if (-not (${it.expr})) { $labels.Add("${wizardEscapePsText(it.label)}") }`));
+    lines.push(`        }`);
+  });
+  if (!anyClause) lines.push(`        default { }`);
+  lines.push(`    }`);
+  lines.push(`    if ($labels.Count -eq 0) { return $null }`);
+  lines.push(`    $header = switch ($Index) {`);
+  pages.forEach((page, i) => {
+    if (page.requirementsMode === 'any') lines.push(`        ${i} { "Complete at least one of the following:" }`);
+    else if (page.requirementsMode === 'custom') lines.push(`        ${i} { "Please complete the following to continue:" }`);
+  });
+  lines.push(`        default { "The following options are required to continue." }`);
+  lines.push(`    }`);
+  lines.push(`    return $header + [Environment]::NewLine + [Environment]::NewLine + "- " + ($labels -join ([Environment]::NewLine + "- "))`);
+  lines.push(`}`);
+  return lines;
+}
+
+// Pages using "Disable Next" mode (page.nextMode === 'disable') keep
+// $script:<n>_UnmetN - a List[string] of that page's currently-unmet
+// requirement keys - up to date live: seeded whenever the page is shown
+// (this function), then kept current by each required control's own
+// specific-state change event adding/removing itself
+// (wizardUnmetListUpdateLines, wired in by CodeGen-WinForms.js), never by
+// a blanket re-check of every requirement on every keystroke.
+function wizardUnmetListSeedLines(c, page, pageIndex) {
+  if (page.nextMode !== 'disable') return [];
+  // Custom-combine pages don't use the incremental unmet-list mechanism at
+  // all (see wizardNextEnabledFunctionLines) - nothing to seed.
+  if (page.requirementsMode === 'custom') return [];
+  const items = wizardRequirementItemsForPage(c, page);
+  if (!items.length) return [];
+  const varName = `${c.name}_Unmet${pageIndex}`;
+  const lines = [`    $script:${varName} = [System.Collections.Generic.List[string]]::new()`];
+  items.forEach(it => lines.push(`    if (-not (${it.expr})) { $script:${varName}.Add('${it.key}') }`));
+  return lines;
+}
+
+// The snippet appended into ONE required control's own gate event
+// (wizardGateEventForType) when its page is in "Disable Next" mode - adds
+// or removes just this control's own key(s) (normally one, but a control
+// can back more than one requirement item in rare cases - see
+// wizardRequirementItemsForPage's dedup notes) from that page's unmet list
+// (never a full page re-check) and asks Update-<n>NextEnabled to
+// recompute Next's Enabled from the list's current state. Page-scoped by
+// construction - a control only ever lives on the one page whose list
+// variable name is baked in here, so there's no cross-page leakage the way
+// the old direct-mirror-onto-Enabled approach had. Custom-combine pages
+// skip the list entirely (see wizardNextEnabledFunctionLines) - the
+// control's own event just asks Update-<n>NextEnabled to re-evaluate the
+// full built expression directly.
+function wizardUnmetListUpdateLines(c, page, items) {
+  const pages = c.props.pages || [];
+  const pageIndex = pages.indexOf(page);
+  const lines = [];
+  if (page.requirementsMode === 'custom') {
+    lines.push(`Update-${c.name}NextEnabled`);
+    return lines.join('\n    ');
+  }
+  const varName = `${c.name}_Unmet${pageIndex}`;
+  items.forEach(item => {
+    lines.push(`if (${item.expr}) { $script:${varName}.Remove('${item.key}') | Out-Null }`);
+    lines.push(`elseif (-not $script:${varName}.Contains('${item.key}')) { $script:${varName}.Add('${item.key}') }`);
+  });
+  lines.push(`Update-${c.name}NextEnabled`);
+  return lines.join('\n    ');
+}
+
+// Generates Update-<n>NextEnabled: recomputes the shared Next button's
+// Enabled state from whichever page is currently showing. Pages in "Show
+// message" mode (the default) always leave Next enabled - Next stays
+// clickable there and Test-<n>PageRequirements/Get-<n>UnmetRequirementMessage
+// handle validation on click instead. Pages in "Disable Next" mode compare
+// their live unmet-list count against the page's combine mode: "all"
+// requires the list empty, "any" requires at least one requirement met
+// (list smaller than the full requirement count).
+function wizardNextEnabledFunctionLines(c) {
+  const name = c.name;
+  const nextBtn = state.controls.find(ch => ch.parentId === c.id && ch.wizardFooter && ch.wizardRole === 'next');
+  if (!nextBtn) return [];
+  const nextBtnName = nextBtn.name;
+  const pages = c.props.pages || [];
+  const lines = [];
+  lines.push(`function Update-${name}NextEnabled {`);
+  lines.push(`    switch ($script:${name}_CurrentPage) {`);
+  pages.forEach((page, i) => {
+    if (page.nextMode !== 'disable') return;
+    const items = wizardRequirementItemsForPage(c, page);
+    if (!items.length) return;
+    // Custom-combine pages evaluate the full built expression directly on
+    // every gate event instead of tracking an incremental unmet-count
+    // list - a grouped AND/OR/parentheses result can't be reduced to "how
+    // many are unmet", so there's no shortcut list to keep in sync here.
+    const cond = (page.requirementsMode === 'custom' && page.customExpr && page.customExpr.length)
+      ? wizardCustomExprToPs(page.customExpr, items)
+      : (page.requirementsMode === 'any'
+        ? `$script:${name}_Unmet${i}.Count -lt ${items.length}`
+        : `$script:${name}_Unmet${i}.Count -eq 0`);
+    lines.push(`        ${i} { $${nextBtnName}.Enabled = (${cond}) }`);
+  });
+  lines.push(`        default { $${nextBtnName}.Enabled = $true }`);
+  lines.push(`    }`);
+  lines.push(`}`);
+  return lines;
+}
+
 // Click-body generators for the three built-in wizard roles - always
 // generated fresh from the live page count, overriding whatever is stored
 // in the button's own events.Click.code (same convention as MenuStrip's
@@ -1717,7 +2236,12 @@ function wizardNextClickBody(wizardCtrl) {
   const lastIndex = (wizardCtrl.props.pages || []).length - 1;
   return [
     `if (-not (Test-${name}PageRequirements $script:${name}_CurrentPage)) {`,
-    `    [System.Windows.Forms.MessageBox]::Show("Please complete this page before continuing.")`,
+    // "Disable Next" pages normally never reach here (Next is Enabled=$false
+    // until requirements are met) - the generic fallback text only shows if
+    // Next somehow got clicked anyway. "Show message" pages hit this every
+    // time and get the real per-page unmet-requirements list.
+    `    $msg = Get-${name}UnmetRequirementMessage $script:${name}_CurrentPage`,
+    `    [System.Windows.Forms.MessageBox]::Show($(if ($msg) { $msg } else { "Please complete this page before continuing." }))`,
     `} elseif ($script:${name}_CurrentPage -ge ${lastIndex}) {`,
     `    # TODO: run your install/finish action here`,
     `    $Form.Close()`,
