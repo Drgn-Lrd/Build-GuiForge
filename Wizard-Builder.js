@@ -1,36 +1,31 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.16
+    Version 1.18
 
     Revision:
 
-    1. Rebuilt the "Add to Summary of Tasks log" feature as a state-based
-    rebuild instead of the old AppendText/Text.Replace approach (which
-    silently failed to remove a CheckBox-driven line on uncheck, since
-    RichTextBox.Text doesn't reliably round-trip the exact string
-    AppendText wrote). Every log-contributing control now just sets or
-    deletes its own key in $script:<Name>_LogEntries (end-state only,
-    see summaryLogAdd/summaryLogToggle in Properties-Pane.js) - the
-    RichTextBox's Text is never touched directly by a control's own
-    event anymore. New Update-<Name>SummaryLog (wizardSummaryLogFunctionLines)
-    is the one place that rebuilds it, called from Show-<Name>Page only
-    when navigating TO the Summary page, in a fixed order baked in at
-    build time as $script:<Name>_LogOrder (wizardLogTargetOrderedControlNames -
-    wizard page order, then top-left-to-bottom-right placement within a
-    page, NOT click order). Whatever text the person authored directly on
-    the RichTextBox (e.g. "Options Chosen:") is preserved as a base/header
-    and a line break is guaranteed before the first log entry only if the
-    base text doesn't already end in one, so a header no longer runs
-    inline with the first entry.
-
-    2. findWizardSummaryLogTarget no longer falls back to a "summaryAfter"
-    page's RichTextBox - summaryAfter is going to be a separate
-    console/log-file style feature entirely, unrelated to this dictionary
-    rebuild system, so it's no longer a valid target for it.
+    1. Reworked the summaryAfter fallback into a real runtime if/else
+    instead of a Properties-pane-only note (which never showed up in the
+    actual exported/running wizard). New Get-<Name>SummaryAfterEntries is
+    a deliberate stub - always returns $null for now - standing in for
+    real console/log-file capture (a separate, not-yet-built feature).
+    Update-<Name>SummaryAfterLog (split out of wizardSummaryLogFunctionLines
+    into its own wizardSummaryAfterLogFunctionLines) calls that stub
+    first; when it's empty (always, today), it falls through to a visible
+    "[Fallback - showing Summary of Tasks log entries, not live output]"
+    line followed by the Summary log's entries, under summaryAfter's own
+    authored base text - so exporting and running the script now actually
+    shows the fallback happening on the summaryAfter page, testable
+    before real capture exists. wizardSummaryLogFunctionLines reverted to
+    Summary-only (no more fnSuffix/baseVarName parameterization, since
+    the two functions' bodies now genuinely diverge). The old
+    Properties-pane warning row in buildWizardChildRows is removed - it
+    was invisible to anyone actually running the exported code, so it
+    didn't serve the purpose it was added for.
 */
 
-const WIZARD_BUILDER_VERSION = '1.16';
+const WIZARD_BUILDER_VERSION = '1.18';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -380,12 +375,11 @@ function findAncestorWizard(ctrl) {
 }
 
 // The read-only RichTextBox on a Summary-template page inside the given
-// Wizard - i.e. the box "Add to Summary of Tasks log" actions are meant to
-// target. Only "summary" (before) pages are considered - "summaryAfter"
-// (after) pages are a separate, unwired future feature (a console/log-file
-// style display, not this dictionary-driven running-list system), so a
-// summaryAfter box is never treated as a fallback target here.
-function findWizardSummaryLogTarget(wizardCtrl) {
+// The read-only RichTextBox on the wizard's Summary-of-Tasks ("before")
+// page - the box that OWNS the log: its own authored Text is the base/header
+// that entries get appended under, and it's the thing "Add to Summary of
+// Tasks log" actions are conceptually describing ("what this will do").
+function findWizardSummaryPageBox(wizardCtrl) {
   if (!wizardCtrl) return null;
   const pages = (wizardCtrl.props.pages || []).filter(pg => pg.template === 'summary');
   for (const pg of pages) {
@@ -393,6 +387,31 @@ function findWizardSummaryLogTarget(wizardCtrl) {
     if (box) return box;
   }
   return null;
+}
+
+// The read-only RichTextBox on the wizard's Summary-of-Actions-Taken
+// ("after") page. summaryAfter has no dedicated console/log-file capture of
+// its own yet (a separate, future feature) - until it does, its box falls
+// back to mirroring the SAME entries the Summary page shows (never
+// Summary's own authored base text - that's Summary's alone), under its
+// own authored base text instead. This is one-directional: Summary never
+// looks at summaryAfter, only the reverse.
+function findWizardSummaryAfterPageBox(wizardCtrl) {
+  if (!wizardCtrl) return null;
+  const pages = (wizardCtrl.props.pages || []).filter(pg => pg.template === 'summaryAfter');
+  for (const pg of pages) {
+    const box = state.controls.find(ch => ch.parentId === wizardCtrl.id && ch.tabPage === pg.id && ch.type === 'RichTextBox');
+    if (box) return box;
+  }
+  return null;
+}
+
+// Whichever of the two boxes above exists first (Summary preferred) - used
+// only to decide whether logging is possible at all (e.g. gating the
+// "+ Add log" button in Properties-Pane.js), not to pick which one gets
+// which content.
+function findWizardAnyLogDisplayBox(wizardCtrl) {
+  return findWizardSummaryPageBox(wizardCtrl) || findWizardSummaryAfterPageBox(wizardCtrl);
 }
 
 // Escapes a JS string (which may contain real newlines - a RichTextBox's
@@ -411,7 +430,9 @@ function wizardEscapePsText(text) {
 // True if this control has a "summary log" action (summaryLogAdd or
 // summaryLogToggle, EVENT_SNIPPETS in Properties-Pane.js) bound anywhere in
 // its events - i.e. it's a contributor to the wizard's Summary of Tasks log
-// and belongs in the rebuild order below.
+// and belongs in the rebuild order below. Page-target-independent on
+// purpose: the same entries feed both the Summary box and (as a fallback)
+// the summaryAfter box, so this has no notion of "which display" at all.
 function wizardControlHasLogAction(ctrl) {
   if (!ctrl.events) return false;
   return Object.values(ctrl.events).some(data => {
@@ -438,16 +459,16 @@ function wizardLogTargetOrderedControlNames(wizardCtrl) {
   return names;
 }
 
-// Generates Update-<Name>SummaryLog: the ONE place the Summary RichTextBox's
-// Text is ever written. Rebuilds it end-to-end from $script:<Name>_LogEntries
-// (set/cleared per-control by the summaryLogAdd/summaryLogToggle snippets -
-// never appended/replaced-in-place) every time it's called, in the fixed
-// $script:<Name>_LogOrder sequence, on top of whatever base text the person
-// authored directly on the RichTextBox (preserved verbatim, with a guaranteed
-// line break inserted before the first log entry only if the base text
-// doesn't already end in one - so "Options Chosen:" followed by entries
-// lands as a real header line instead of running the first entry onto it).
-function wizardSummaryLogFunctionLines(c, logTarget) {
+// Generates Update-<Name>SummaryLog: rebuilds the Summary page's
+// RichTextBox Text end-to-end from $script:<Name>_LogEntries (set/cleared
+// per-control by the summaryLogAdd/summaryLogToggle snippets - never
+// appended/replaced-in-place) every time it's called, in the fixed
+// $script:<Name>_LogOrder sequence, on top of whatever text the person
+// authored directly on the box. A line break is guaranteed before the
+// first log entry only if that base text doesn't already end in one, so a
+// header like "Options Chosen:" lands as a real header line instead of
+// running the first entry onto it.
+function wizardSummaryLogFunctionLines(c, displayTarget) {
   const name = c.name;
   const lines = [];
   lines.push(`function Update-${name}SummaryLog {`);
@@ -458,17 +479,63 @@ function wizardSummaryLogFunctionLines(c, logTarget) {
   lines.push(`    $entryText = $entryLines -join [Environment]::NewLine`);
   lines.push(`    $baseText = $script:${name}_LogBaseText`);
   lines.push(`    if ([string]::IsNullOrEmpty($baseText)) {`);
-  lines.push(`        $${logTarget.name}.Text = $entryText`);
+  lines.push(`        $${displayTarget.name}.Text = $entryText`);
   lines.push(`    } elseif ([string]::IsNullOrEmpty($entryText)) {`);
-  lines.push(`        $${logTarget.name}.Text = $baseText`);
+  lines.push(`        $${displayTarget.name}.Text = $baseText`);
   lines.push(`    } else {`);
   lines.push('        $needsBreak = -not ($baseText.EndsWith("`r`n") -or $baseText.EndsWith("`n"))');
   lines.push(`        $sep = if ($needsBreak) { [Environment]::NewLine } else { '' }`);
-  lines.push(`        $${logTarget.name}.Text = $baseText + $sep + $entryText`);
+  lines.push(`        $${displayTarget.name}.Text = $baseText + $sep + $entryText`);
   lines.push(`    }`);
   lines.push(`}`);
   return lines;
 }
+
+// Generates Get-<Name>SummaryAfterEntries and Update-<Name>SummaryAfterLog.
+// Get-<Name>SummaryAfterEntries is the deliberate placeholder for real
+// console/log-file capture (a separate, not-yet-built feature) - it always
+// returns $null for now, which is what routes Update-<Name>SummaryAfterLog
+// into the fallback branch below every time. When real capture exists
+// later, only this one function's body needs to change; the fallback
+// branch (and the warning that makes it visibly obvious it IS a fallback,
+// not real output) stays exactly as-is underneath it.
+function wizardSummaryAfterLogFunctionLines(c, displayTarget) {
+  const name = c.name;
+  const lines = [];
+  lines.push(`function Get-${name}SummaryAfterEntries {`);
+  lines.push(`    # TODO: wire this up to real console/log-file output once`);
+  lines.push(`    # that feature exists. Returning $null here is deliberate -`);
+  lines.push(`    # it's what makes Update-${name}SummaryAfterLog fall back to`);
+  lines.push(`    # mirroring the Summary of Tasks log below, so this page is`);
+  lines.push(`    # testable end-to-end before real capture is built.`);
+  lines.push(`    return $null`);
+  lines.push(`}`);
+  lines.push(``);
+  lines.push(`function Update-${name}SummaryAfterLog {`);
+  lines.push(`    $realEntries = Get-${name}SummaryAfterEntries`);
+  lines.push(`    if (-not [string]::IsNullOrEmpty($realEntries)) {`);
+  lines.push(`        $${displayTarget.name}.Text = $realEntries`);
+  lines.push(`    } else {`);
+  lines.push(`        $entryLines = @()`);
+  lines.push(`        foreach ($key in $script:${name}_LogOrder) {`);
+  lines.push(`            if ($script:${name}_LogEntries.ContainsKey($key)) { $entryLines += $script:${name}_LogEntries[$key] }`);
+  lines.push(`        }`);
+  lines.push(`        $entryText = $entryLines -join [Environment]::NewLine`);
+  lines.push(`        $warning = "[Fallback - showing Summary of Tasks log entries, not live output]"`);
+  lines.push(`        $fallbackBody = if ([string]::IsNullOrEmpty($entryText)) { $warning } else { $warning + [Environment]::NewLine + $entryText }`);
+  lines.push(`        $baseText = $script:${name}_LogAfterBaseText`);
+  lines.push(`        if ([string]::IsNullOrEmpty($baseText)) {`);
+  lines.push(`            $${displayTarget.name}.Text = $fallbackBody`);
+  lines.push(`        } else {`);
+  lines.push('            $needsBreak = -not ($baseText.EndsWith("`r`n") -or $baseText.EndsWith("`n"))');
+  lines.push(`            $sep = if ($needsBreak) { [Environment]::NewLine } else { '' }`);
+  lines.push(`            $${displayTarget.name}.Text = $baseText + $sep + $fallbackBody`);
+  lines.push(`        }`);
+  lines.push(`    }`);
+  lines.push(`}`);
+  return lines;
+}
+
 
 function getWizardSetupOverlay() {
   let overlay = document.getElementById('wizardSetupModalOverlay');
@@ -1271,15 +1338,22 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   lines.push(`    $pages = @(${pageVarNames.map(v => '$' + v).join(', ')})`);
   lines.push(`    for ($i = 0; $i -lt $pages.Count; $i++) { $pages[$i].Visible = ($i -eq $Index) }`);
   lines.push(`    $script:${name}_CurrentPage = $Index`);
-  // Rebuild the Summary of Tasks log the moment the person actually lands
-  // on the Summary page - not on each contributing control's own event
-  // (wizardSummaryLogFunctionLines above) - so it always reflects the
-  // live end-state of $script:<Name>_LogEntries at the moment it's seen,
-  // regardless of what order pages were visited or revisited in.
-  const logTarget = findWizardSummaryLogTarget(c);
+  // Rebuild whichever log display(s) this wizard has, the moment the person
+  // actually lands on that page - not on each contributing control's own
+  // event (wizardSummaryLogFunctionLines above) - so each always reflects
+  // the live end-state of $script:<Name>_LogEntries at the moment it's
+  // seen, regardless of what order pages were visited or revisited in.
+  // Summary and summaryAfter are independent triggers on independent page
+  // indices - a wizard can have either, both, or neither.
+  const summaryBox = findWizardSummaryPageBox(c);
   const summaryPageIndex = pages.findIndex(p => p.template === 'summary');
-  if (logTarget && summaryPageIndex !== -1) {
+  if (summaryBox && summaryPageIndex !== -1) {
     lines.push(`    if ($Index -eq ${summaryPageIndex}) { Update-${name}SummaryLog }`);
+  }
+  const summaryAfterBox = findWizardSummaryAfterPageBox(c);
+  const summaryAfterPageIndex = pages.findIndex(p => p.template === 'summaryAfter');
+  if (summaryAfterBox && summaryAfterPageIndex !== -1) {
+    lines.push(`    if ($Index -eq ${summaryAfterPageIndex}) { Update-${name}SummaryAfterLog }`);
   }
   if (nextBtn) {
     // "Run" on a Summary-of-Tasks page that ISN'T the last page (a
