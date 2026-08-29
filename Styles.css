@@ -1,13 +1,13 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.37
+    Version 1.38
 
     Revision:
 
-    1. .wizard-expr-chip-not added alongside the existing lparen/rparen/
-    and/or selector, so the new NOT operator chip (Wizard-Builder.js)
-    gets the same operator styling as the rest.
+    1. .wizard-expr-chip-andnot added alongside the operator-chip
+    selector, for the Custom Requirement Logic builder's folded "AND NOT"
+    chip (Wizard-Builder.js).
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -435,7 +435,7 @@
   cursor: default;
 }
 .wizard-expr-chip.drag-over { outline: 2px dashed var(--bp-accent); }
-.wizard-expr-chip-lparen, .wizard-expr-chip-rparen, .wizard-expr-chip-and, .wizard-expr-chip-or, .wizard-expr-chip-not {
+.wizard-expr-chip-lparen, .wizard-expr-chip-rparen, .wizard-expr-chip-and, .wizard-expr-chip-or, .wizard-expr-chip-not, .wizard-expr-chip-andnot {
   background: var(--bp-panel);
   color: var(--bp-text-muted);
   font-weight: 600;
@@ -561,7 +561,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.37';
+  --stylesheet-version: '1.38';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
