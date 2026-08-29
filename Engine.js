@@ -1,18 +1,26 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.39
+    Version 1.40
 
     Revision:
 
-    1. About modal: new Wizard-Boolean-Builder.js row (the Custom
-    Requirement Logic builder split out of Wizard-Builder.js). The Copy
-    Versions button's row list also reordered to put index.html last,
-    matching GitHub's case-sensitive file-browser sort - it had drifted
-    from that convention.
+    1. File Versions modal (formerly "About"): added a Last Updated
+    column alongside File/Version, read from each file's new
+    "_LAST_UPDATED" constant (falls back to 'n/a' when a loaded file
+    doesn't define one yet). Copy Versions button rewritten to write
+    both text/plain and text/html clipboard formats at once via
+    ClipboardItem - a tab-aligned, space-padded File/Version list
+    wrapped in a fenced code block for text/plain, and the same content
+    inside <pre><code> for text/html (so HTML-aware paste targets
+    render it as a formatted block immediately instead of showing raw
+    backticks/tabs) - falling back to navigator.clipboard.writeText(),
+    then a hidden-textarea execCommand('copy'), if ClipboardItem isn't
+    available or the write fails.
 */
 
-const ENGINE_VERSION = '1.39';
+const ENGINE_VERSION = '1.40';
+const ENGINE_LAST_UPDATED = '29Aug2026 @ 12:00:00';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -1017,51 +1025,83 @@ function switchCodeTab(tab) {
 
 function initAboutModal() {
   const overlay = document.getElementById('aboutModalOverlay');
+
+  // [file name, version cell id, last-updated cell id, version value, last-updated value]
+  function fileVersionsRows() {
+    const stylesheetVersion = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-version').trim().replace(/'/g, '') || 'n/a';
+    const stylesheetLastUpdated = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-last-updated').trim().replace(/'/g, '') || 'n/a';
+    return [
+      ['CodeGen-HTML.js', 'aboutCodegenHtmlVersion', 'aboutCodegenHtmlLastUpdated', typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a', typeof CODEGEN_HTML_LAST_UPDATED !== 'undefined' ? CODEGEN_HTML_LAST_UPDATED : 'n/a'],
+      ['CodeGen-WinForms.js', 'aboutCodegenWinFormsVersion', 'aboutCodegenWinFormsLastUpdated', typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a', typeof CODEGEN_WINFORMS_LAST_UPDATED !== 'undefined' ? CODEGEN_WINFORMS_LAST_UPDATED : 'n/a'],
+      ['CodeGen-WinUI.js', 'aboutCodegenWinUiVersion', 'aboutCodegenWinUiLastUpdated', typeof CODEGEN_WINUI_VERSION !== 'undefined' ? CODEGEN_WINUI_VERSION : 'n/a', typeof CODEGEN_WINUI_LAST_UPDATED !== 'undefined' ? CODEGEN_WINUI_LAST_UPDATED : 'n/a'],
+      ['CodeGen-WPF.js', 'aboutCodegenWpfVersion', 'aboutCodegenWpfLastUpdated', typeof CODEGEN_WPF_VERSION !== 'undefined' ? CODEGEN_WPF_VERSION : 'n/a', typeof CODEGEN_WPF_LAST_UPDATED !== 'undefined' ? CODEGEN_WPF_LAST_UPDATED : 'n/a'],
+      ['CodeGen.js', 'aboutCodegenVersion', 'aboutCodegenLastUpdated', typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a', typeof CODEGEN_LAST_UPDATED !== 'undefined' ? CODEGEN_LAST_UPDATED : 'n/a'],
+      ['Control-Copy.js', 'aboutControlCopyVersion', 'aboutControlCopyLastUpdated', typeof CONTROL_COPY_VERSION !== 'undefined' ? CONTROL_COPY_VERSION : 'n/a', typeof CONTROL_COPY_LAST_UPDATED !== 'undefined' ? CONTROL_COPY_LAST_UPDATED : 'n/a'],
+      ['Control-Data.js', 'aboutControlDataVersion', 'aboutControlDataLastUpdated', typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a', typeof CONTROL_DATA_LAST_UPDATED !== 'undefined' ? CONTROL_DATA_LAST_UPDATED : 'n/a'],
+      ['Engine.js', 'aboutEngineVersion', 'aboutEngineLastUpdated', ENGINE_VERSION, typeof ENGINE_LAST_UPDATED !== 'undefined' ? ENGINE_LAST_UPDATED : 'n/a'],
+      ['Properties-Pane.js', 'aboutPropsPaneVersion', 'aboutPropsPaneLastUpdated', typeof PROPERTIES_PANE_VERSION !== 'undefined' ? PROPERTIES_PANE_VERSION : 'n/a', typeof PROPERTIES_PANE_LAST_UPDATED !== 'undefined' ? PROPERTIES_PANE_LAST_UPDATED : 'n/a'],
+      ['Render.js', 'aboutRenderVersion', 'aboutRenderLastUpdated', typeof RENDER_VERSION !== 'undefined' ? RENDER_VERSION : 'n/a', typeof RENDER_LAST_UPDATED !== 'undefined' ? RENDER_LAST_UPDATED : 'n/a'],
+      ['Styles.css', 'aboutStyleVersion', 'aboutStyleLastUpdated', stylesheetVersion, stylesheetLastUpdated],
+      ['Wizard-Boolean-Builder.js', 'aboutWizardBooleanBuilderVersion', 'aboutWizardBooleanBuilderLastUpdated', typeof WIZARD_BOOLEAN_BUILDER_VERSION !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_VERSION : 'n/a', typeof WIZARD_BOOLEAN_BUILDER_LAST_UPDATED !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_LAST_UPDATED : 'n/a'],
+      ['Wizard-Builder.js', 'aboutWizardBuilderVersion', 'aboutWizardBuilderLastUpdated', typeof WIZARD_BUILDER_VERSION !== 'undefined' ? WIZARD_BUILDER_VERSION : 'n/a', typeof WIZARD_BUILDER_LAST_UPDATED !== 'undefined' ? WIZARD_BUILDER_LAST_UPDATED : 'n/a'],
+      ['index.html', 'aboutPageVersion', 'aboutPageLastUpdated', window.PAGE_VERSION || 'n/a', window.PAGE_LAST_UPDATED || 'n/a']
+    ];
+  }
+
   document.getElementById('btnAbout').addEventListener('click', () => {
-    document.getElementById('aboutEngineVersion').textContent = ENGINE_VERSION;
-    document.getElementById('aboutControlCopyVersion').textContent = typeof CONTROL_COPY_VERSION !== 'undefined' ? CONTROL_COPY_VERSION : 'n/a';
-    document.getElementById('aboutControlDataVersion').textContent = typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a';
-    document.getElementById('aboutWizardBuilderVersion').textContent = typeof WIZARD_BUILDER_VERSION !== 'undefined' ? WIZARD_BUILDER_VERSION : 'n/a';
-    document.getElementById('aboutWizardBooleanBuilderVersion').textContent = typeof WIZARD_BOOLEAN_BUILDER_VERSION !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_VERSION : 'n/a';
-    document.getElementById('aboutCodegenVersion').textContent = typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a';
-    document.getElementById('aboutCodegenHtmlVersion').textContent = typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a';
-    document.getElementById('aboutCodegenWinFormsVersion').textContent = typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a';
-    document.getElementById('aboutCodegenWpfVersion').textContent = typeof CODEGEN_WPF_VERSION !== 'undefined' ? CODEGEN_WPF_VERSION : 'n/a';
-    document.getElementById('aboutCodegenWinUiVersion').textContent = typeof CODEGEN_WINUI_VERSION !== 'undefined' ? CODEGEN_WINUI_VERSION : 'n/a';
-    document.getElementById('aboutRenderVersion').textContent = typeof RENDER_VERSION !== 'undefined' ? RENDER_VERSION : 'n/a';
-    document.getElementById('aboutPropsPaneVersion').textContent = typeof PROPERTIES_PANE_VERSION !== 'undefined' ? PROPERTIES_PANE_VERSION : 'n/a';
-    document.getElementById('aboutStyleVersion').textContent = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-version').trim().replace(/'/g, '');
-    document.getElementById('aboutPageVersion').textContent = window.PAGE_VERSION || 'n/a';
+    fileVersionsRows().forEach(([, verId, updId, verVal, updVal]) => {
+      document.getElementById(verId).textContent = verVal;
+      document.getElementById(updId).textContent = updVal;
+    });
     overlay.classList.add('open');
   });
   document.getElementById('aboutModalClose').addEventListener('click', () => overlay.classList.remove('open'));
   document.getElementById('aboutModalClose2').addEventListener('click', () => overlay.classList.remove('open'));
 
   document.getElementById('aboutCopyVersions').addEventListener('click', async () => {
-    const rows = [
-      ['CodeGen-HTML.js', 'aboutCodegenHtmlVersion'],
-      ['CodeGen-WinForms.js', 'aboutCodegenWinFormsVersion'],
-      ['CodeGen-WinUI.js', 'aboutCodegenWinUiVersion'],
-      ['CodeGen-WPF.js', 'aboutCodegenWpfVersion'],
-      ['CodeGen.js', 'aboutCodegenVersion'],
-      ['Control-Copy.js', 'aboutControlCopyVersion'],
-      ['Control-Data.js', 'aboutControlDataVersion'],
-      ['Engine.js', 'aboutEngineVersion'],
-      ['Properties-Pane.js', 'aboutPropsPaneVersion'],
-      ['Render.js', 'aboutRenderVersion'],
-      ['Styles.css', 'aboutStyleVersion'],
-      ['Wizard-Boolean-Builder.js', 'aboutWizardBooleanBuilderVersion'],
-      ['Wizard-Builder.js', 'aboutWizardBuilderVersion'],
-      ['index.html', 'aboutPageVersion']
-    ];
-    const text = rows.map(([name, id]) => `${name} version - ${document.getElementById(id).textContent}`).join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
-      const btn = document.getElementById('aboutCopyVersions');
-      const orig = btn.textContent;
+    const rows = fileVersionsRows();
+    const nameWidth = Math.max(...rows.map(([name]) => name.length));
+    const plainBody = rows.map(([name, verId]) => `${name.padEnd(nameWidth)}\t${document.getElementById(verId).textContent}`).join('\n');
+    const fencedPlain = '```\n' + plainBody + '\n```';
+    const htmlBody = `<pre><code>${escapeHtml(plainBody)}</code></pre>`;
+
+    const btn = document.getElementById('aboutCopyVersions');
+    const orig = btn.textContent;
+    const showCopied = () => {
       btn.textContent = 'Copied';
       setTimeout(() => { btn.textContent = orig; }, 1200);
-    } catch (err) { /* clipboard may be unavailable in this context */ }
+    };
+
+    if (window.ClipboardItem) {
+      try {
+        const item = new ClipboardItem({
+          'text/plain': new Blob([fencedPlain], { type: 'text/plain' }),
+          'text/html': new Blob([htmlBody], { type: 'text/html' })
+        });
+        await navigator.clipboard.write([item]);
+        showCopied();
+        return;
+      } catch (err) { /* fall through to plain-text clipboard write */ }
+    }
+
+    try {
+      await navigator.clipboard.writeText(fencedPlain);
+      showCopied();
+      return;
+    } catch (err) { /* fall through to execCommand fallback */ }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = fencedPlain;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      showCopied();
+    } catch (err) { /* clipboard unavailable in this context */ }
   });
 
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
