@@ -1,20 +1,14 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.15
+    Version 1.16
 
     Revision:
 
-    1. About modal rows reordered alphabetically by filename, with dt
-    labels switched from friendly names (e.g. "Codegen (WPF) version")
-    to actual filenames (e.g. "CodeGen-WPF.js"), and a "Copy versions"
-    button (#aboutCopyVersions) added next to Close, wired up in
-    Engine.js to copy all file versions to the clipboard as
-    "<Filename> version - <#>" lines.
-
-    Note: this file's header comment version and window.PAGE_VERSION
-    had drifted out of sync (comment read 1.11, const read 1.14) prior
-    to this edit; both are now aligned.
+    1. Toolbar Copy button (#btnCopy) added next to Delete, wired up
+    in Engine.js (startCopySelected) to duplicate the selected control
+    (or open the Select Control picker first if the Main Panel is
+    selected).
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -23,7 +17,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.15';</script>
+<script>window.PAGE_VERSION = '1.16';</script>
 </head>
 <body>
 
@@ -66,6 +60,7 @@
     <button class="btn btn-ghost" id="btnRedo" title="Redo (Ctrl+Y)">&#8631;</button>
     <button class="btn btn-ghost" id="btnWizards" title="Add a wizard">Wizards</button>
     <button class="btn btn-ghost btn-danger" id="btnDelete" title="Delete selected (Del)">Delete</button>
+    <button class="btn btn-ghost" id="btnCopy" title="Copy selected control (or pick one if the Main Panel is selected)">Copy</button>
     <button class="btn btn-ghost" id="btnClearAll" title="Remove all controls">Clear</button>
     <button class="btn btn-accent" id="btnShowCode">Show Code</button>
     <button class="btn icon-btn" id="btnAbout" title="About / Version Info">i</button>
