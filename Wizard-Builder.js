@@ -1,33 +1,24 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.22
+    Version 1.23
 
     Revision:
 
-    1. New Footer Options editor (buildWizardFooterOptionsEditorRow),
-    under the existing Wizard-specific section alongside Contents/Pages
-    (backed by the new footerOptions prop, Control-Data.js 1.12):
-    - Lists the wizard's footer buttons (Back/Next/Cancel plus any
-    custom ones) with Select/Remove per button (role buttons can't be
-    removed from here - clear their Wizard Role first) and a "+ Add
-    footer button" action (addWizardFooterButton) that lines a new one
-    up to the left of the current leftmost footer button, instead of
-    leaving it wherever it happened to be when its "Show on all pages"
-    switch was flipped on.
-    - Footer Border / Step Counter toggles - both render live in the
-    canvas preview (Render.js) and generate real WinForms output
-    (CodeGen-WinForms.js: a 1px divider Panel, and a Label kept in
-    sync by wizardShowFunctionLines' existing per-page update logic,
-    the same place Next's Run/Finish label and Back's visibility
-    already get updated).
+    1. WIZARD_FOOTER_HEIGHT: 46 -> 45 (5px-grid friendly, matches
+    Control-Data.js 1.12's CheckBox/Button height cleanup). Footer
+    buttons now vertically CENTER in that 45px strip - y is footer-top
+    + 10, so 10px above the 25-tall button, 25 for the button, 10 below
+    (10 + 25 + 10 = 45) - instead of sitting flush against the top of
+    the strip. Both createWizardFooterButtons and addWizardFooterButton
+    updated the same way.
 */
 
-const WIZARD_BUILDER_VERSION = '1.22';
+const WIZARD_BUILDER_VERSION = '1.23';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
-const WIZARD_FOOTER_HEIGHT = 46;
+const WIZARD_FOOTER_HEIGHT = 45;
 
 // The area available to a wizard's PAGE content (not its always-visible
 // footer, which always spans the full control) - shrunk to make room for
@@ -182,7 +173,9 @@ function populateWizardPageTemplate(wizardCtrl, page) {
    ========================================================================= */
 
 function createWizardFooterButtons(wizardCtrl) {
-  const y = wizardCtrl.h - WIZARD_FOOTER_HEIGHT;
+  // Centered in the 45px footer strip: 10px above, 25px button, 10px
+  // below (10 + 25 + 10 = 45).
+  const y = wizardCtrl.h - WIZARD_FOOTER_HEIGHT + 10;
   const btnW = 80;
   // Back sits left-of-center, Next dead center, Cancel at the right edge -
   // each anchored so it tracks proportionally as the wizard resizes
@@ -217,7 +210,7 @@ function createWizardFooterButtons(wizardCtrl) {
 function addWizardFooterButton(wizardCtrl) {
   const existing = state.controls.filter(c => c.parentId === wizardCtrl.id && c.wizardFooter && c.type === 'Button');
   const btnW = 80;
-  const y = wizardCtrl.h - WIZARD_FOOTER_HEIGHT;
+  const y = wizardCtrl.h - WIZARD_FOOTER_HEIGHT + 10; // centered, same as createWizardFooterButtons
   const leftmostX = existing.length ? Math.min(...existing.map(c => c.x)) : (wizardCtrl.w - 20 - btnW);
   const x = Math.max(10, leftmostX - btnW - 10);
   const btn = createControl('Button', x, y, wizardCtrl.id, null);
