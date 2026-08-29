@@ -1,25 +1,21 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.40
+    Version 1.41
 
     Revision:
 
-    1. File Versions modal (formerly "About"): added a Last Updated
-    column alongside File/Version, read from each file's new
-    "_LAST_UPDATED" constant (falls back to 'n/a' when a loaded file
-    doesn't define one yet). Copy Versions button rewritten to write
-    both text/plain and text/html clipboard formats at once via
-    ClipboardItem - a tab-aligned, space-padded File/Version list
-    wrapped in a fenced code block for text/plain, and the same content
-    inside <pre><code> for text/html (so HTML-aware paste targets
-    render it as a formatted block immediately instead of showing raw
-    backticks/tabs) - falling back to navigator.clipboard.writeText(),
-    then a hidden-textarea execCommand('copy'), if ClipboardItem isn't
-    available or the write fails.
+    1. File Versions modal: Last Updated column now tries a live
+    Last-Modified HTTP header check (HEAD request) per file when the
+    modal opens, via new formatHttpDateForFileVersions() and
+    fetchLastModifiedForFileVersions() helpers. Each cell shows its
+    hardcoded LAST_UPDATED constant immediately, then gets overwritten
+    if/when that file's fetch succeeds - so it degrades gracefully on
+    file:// (where fetch to local files fails) or if a host doesn't
+    return the header.
 */
 
-const ENGINE_VERSION = '1.40';
+const ENGINE_VERSION = '1.41';
 const ENGINE_LAST_UPDATED = '29Aug2026 @ 12:00:00';
 
 /* =========================================================================
@@ -1023,6 +1019,32 @@ function switchCodeTab(tab) {
   document.getElementById('codeOutput').textContent = GENERATORS[tab]();
 }
 
+// Formats a Last-Modified HTTP-date header into the project's
+// "DDMonYYYY @ HH:MM:SS" display style (local time).
+function formatHttpDateForFileVersions(httpDateStr) {
+  const d = new Date(httpDateStr);
+  if (isNaN(d.getTime())) return null;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad2 = (n) => String(n).padStart(2, '0');
+  return `${pad2(d.getDate())}${months[d.getMonth()]}${d.getFullYear()} @ ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+// Attempts to read the server's Last-Modified header for a file via a
+// HEAD request (works when served over HTTP, e.g. GitHub Pages; fails
+// silently on file:// or if the header is missing/blocked, in which
+// case the caller's hardcoded LAST_UPDATED fallback stays on screen).
+async function fetchLastModifiedForFileVersions(fileName) {
+  try {
+    const res = await fetch(fileName, { method: 'HEAD', cache: 'no-store' });
+    if (!res.ok) return null;
+    const lastModified = res.headers.get('Last-Modified');
+    if (!lastModified) return null;
+    return formatHttpDateForFileVersions(lastModified);
+  } catch (err) {
+    return null;
+  }
+}
+
 function initAboutModal() {
   const overlay = document.getElementById('aboutModalOverlay');
 
@@ -1049,9 +1071,13 @@ function initAboutModal() {
   }
 
   document.getElementById('btnAbout').addEventListener('click', () => {
-    fileVersionsRows().forEach(([, verId, updId, verVal, updVal]) => {
+    const rows = fileVersionsRows();
+    rows.forEach(([fileName, verId, updId, verVal, fallbackUpdVal]) => {
       document.getElementById(verId).textContent = verVal;
-      document.getElementById(updId).textContent = updVal;
+      document.getElementById(updId).textContent = fallbackUpdVal;
+      fetchLastModifiedForFileVersions(fileName).then((headerVal) => {
+        if (headerVal) document.getElementById(updId).textContent = headerVal;
+      });
     });
     overlay.classList.add('open');
   });
