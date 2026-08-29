@@ -1,22 +1,19 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.7
+    Version 1.8
 
     Revision:
 
-    1. The wizard footer's Next button now previews "Run" (on a
-    Summary-of-Tasks page that isn't also the last page) or "Finish" (on
-    whichever page actually is last) on the canvas, matching the
-    generated PowerShell's Show-<Name>Page label logic (Wizard-Builder.js
-    wizardShowFunctionLines) instead of always showing the static "Next"
-    text stored on the button. New wizardNextButtonLabelForActivePage
-    (Wizard-Builder.js) computes the label for whichever page is
-    currently active; only the rendered button face text is swapped, not
-    the button's own stored Text property.
+    1. Wizard footer preview now shows the new Footer Options extras
+    (footerOptions prop, Control-Data.js 1.12): a divider line above the
+    footer when Border is on, and a "Step X of N" label when Step
+    Counter is on - both preview-only (no backing control, same idea as
+    the existing Run/Finish button-face swap just below), matching what
+    CodeGen-WinForms.js now generates for real.
 */
 
-const RENDER_VERSION = '1.7';
+const RENDER_VERSION = '1.8';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -76,8 +73,29 @@ function renderControl(c) {
     el.appendChild(pageContent);
 
     const footerContent = document.createElement('div');
+    const footerOpts = c.props.footerOptions || {};
     footerContent.className = 'wizard-footer-content';
     const onFirstPage = (c.props.pages || [])[0] && (c.props.pages || [])[0].id === c.activeTabId;
+    if (footerOpts.border) {
+      const divider = document.createElement('div');
+      divider.className = 'wizard-footer-divider';
+      divider.style.bottom = WIZARD_FOOTER_HEIGHT + 'px';
+      footerContent.appendChild(divider);
+    }
+    if (footerOpts.stepCounter) {
+      // Positioned to match the real Label CodeGen-WinForms.js emits for
+      // this (x:20, same top-anchor y as Back/Next/Cancel) - preview-only,
+      // same idea as the Next button's Run/Finish text swap below: no
+      // backing control exists at design time, so nothing here can be
+      // selected/moved/deleted the way a real control could.
+      const pages = c.props.pages || [];
+      const idx = pages.findIndex(p => p.id === c.activeTabId);
+      const counter = document.createElement('div');
+      counter.className = 'wizard-step-counter';
+      counter.style.top = (c.h - WIZARD_FOOTER_HEIGHT) + 'px';
+      counter.textContent = `Step ${idx + 1} of ${pages.length}`;
+      footerContent.appendChild(counter);
+    }
     state.controls
       .filter(ch => ch.parentId === c.id && ch.wizardFooter)
       .forEach(ch => {

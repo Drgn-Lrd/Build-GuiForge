@@ -1,19 +1,19 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.11
+    Version 1.12
 
     Revision:
 
-    1. CheckBox's defaultH: 22 -> 25, Button's defaultH: 26 -> 25 - both
-    now land on the app's 5px grid instead of an odd height that only
-    left a 3px real gap when stacked 25px apart (the Options template's
-    OptionA/OptionB, and the Copy feature's row spacing). Only these two
-    types changed; other defaults (RadioButton, ComboBox, etc. at 22)
-    are untouched for now.
+    1. Wizard's props gained a third entry, footerOptions (default
+    { border: false, stepCounter: false }) - backs the new Footer
+    Options editor (Wizard-Builder.js) under the Wizard-specific
+    section: a Footer Border divider line and an auto-updating "Step X
+    of N" counter, both live in the canvas preview (Render.js) and in
+    generated WinForms code.
 */
 
-const CONTROL_DATA_VERSION = '1.11';
+const CONTROL_DATA_VERSION = '1.12';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -367,6 +367,7 @@ const CONTROL_DEFS = {
     props: [
       ['contentsStyle', 'Contents', 'select', 'None', { options: ['None', 'Horizontal', 'Horizontal Flat', 'Vertical', 'Vertical Flat'] }],
       ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
+      ['footerOptions', 'Footer Options', 'wizardFooterOptionsEditor', { border: false, stepCounter: false }],
     ],
     events: [],
     isContainer: true,

@@ -1,22 +1,18 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.36
+    Version 1.37
 
     Revision:
 
-    1. The Copy feature added in 1.35 moved out to its own file,
-    Control-Copy.js - it had grown into a self-contained chunk of logic
-    (deep-clone helpers, placement math, tab/page-copy), same reasoning
-    as Wizard-Builder.js's original split. Engine.js keeps only the
-    toolbar wiring (#btnCopy -> startCopySelected, which now lives in
-    the new file). About modal updated with a Control-Copy.js row/
-    version lookup, and initObjectsModal now resets the Objects
-    modal's title on open since Control-Copy.js's scoped tab/page
-    picker borrows that same modal shell and retitles it.
+    1. Arrow-key nudge and the Nudge section's D-pad no longer run the
+    moved position through snap() - snap() is reserved for actual
+    click-and-drag (moving/resizing with the mouse), not discrete
+    button/key nudges, which now move by exactly the selected step with
+    no rounding.
 */
 
-const ENGINE_VERSION = '1.36';
+const ENGINE_VERSION = '1.37';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -751,10 +747,10 @@ document.addEventListener('keydown', (e) => {
   if (!ctrl) return;
   const step = state.nudgeStep;
   let moved = true;
-  if (e.key === 'ArrowUp') ctrl.y = snap(ctrl.y - step);
-  else if (e.key === 'ArrowDown') ctrl.y = snap(ctrl.y + step);
-  else if (e.key === 'ArrowLeft') ctrl.x = snap(ctrl.x - step);
-  else if (e.key === 'ArrowRight') ctrl.x = snap(ctrl.x + step);
+  if (e.key === 'ArrowUp') ctrl.y = ctrl.y - step;
+  else if (e.key === 'ArrowDown') ctrl.y = ctrl.y + step;
+  else if (e.key === 'ArrowLeft') ctrl.x = ctrl.x - step;
+  else if (e.key === 'ArrowRight') ctrl.x = ctrl.x + step;
   else if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); return; }
   else moved = false;
   if (moved) { e.preventDefault(); render(); }
@@ -764,10 +760,10 @@ function nudge(dir) {
   const ctrl = getControl(state.selectedId);
   if (!ctrl) return;
   const step = state.nudgeStep;
-  if (dir === 'up') ctrl.y = snap(ctrl.y - step);
-  if (dir === 'down') ctrl.y = snap(ctrl.y + step);
-  if (dir === 'left') ctrl.x = snap(ctrl.x - step);
-  if (dir === 'right') ctrl.x = snap(ctrl.x + step);
+  if (dir === 'up') ctrl.y = ctrl.y - step;
+  if (dir === 'down') ctrl.y = ctrl.y + step;
+  if (dir === 'left') ctrl.x = ctrl.x - step;
+  if (dir === 'right') ctrl.x = ctrl.x + step;
   render();
 }
 

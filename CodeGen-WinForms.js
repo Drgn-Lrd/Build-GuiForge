@@ -1,19 +1,19 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.11
+    Version 1.12
 
     Revision:
 
-    1. Updated the two Wizard-case call sites for Wizard-Builder.js's
-    split summary-log generators: wizardSummaryLogFunctionLines (Summary,
-    unchanged signature) and the new wizardSummaryAfterLogFunctionLines
-    (summaryAfter, which now generates its own Get-<Name>SummaryAfterEntries
-    stub + fallback-with-warning logic instead of the plain rebuild both
-    used to share).
+    1. Wizard case now also emits Footer Options extras (footerOptions
+    prop, Control-Data.js 1.12): a 1px BackColor Panel divider above the
+    footer when Border is on, and a Label kept in sync by
+    wizardShowFunctionLines' existing per-page update logic when Step
+    Counter is on. wizardShowFunctionLines takes a new 4th argument
+    (stepCounterVar) for this.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.11';
+const CODEGEN_WINFORMS_VERSION = '1.12';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -258,11 +258,37 @@ function generateWinForms() {
         // once here, independent of which page is currently showing.
         const nav = wizardContentsNavCodegenLines(c);
         lines.push(...nav.lines);
+        // Footer Options extras (border divider / step counter) - same
+        // "chrome belonging to the wizard, not any one page" idea as the
+        // Contents nav strip above. Emitted before the footer buttons so
+        // they sit visually behind them in z-order (matches AddRange call
+        // order elsewhere - later Adds paint on top).
+        const footerOpts = p.footerOptions || {};
+        const footerY = c.h - WIZARD_FOOTER_HEIGHT;
+        let stepCounterVar = null;
+        if (footerOpts.border) {
+          const dividerVar = `${c.name}_FooterDivider`;
+          lines.push(`$${dividerVar} = New-Object System.Windows.Forms.Panel`);
+          lines.push(`$${dividerVar}.Location = New-Object System.Drawing.Point(0, ${footerY})`);
+          lines.push(`$${dividerVar}.Size = New-Object System.Drawing.Size(${c.w}, 1)`);
+          lines.push(`$${dividerVar}.BackColor = [System.Drawing.SystemColors]::ControlDark`);
+          lines.push(`$${dividerVar}.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right`);
+          lines.push(`$${c.name}.Controls.Add($${dividerVar})`);
+        }
+        if (footerOpts.stepCounter) {
+          stepCounterVar = `${c.name}_StepCounter`;
+          lines.push(`$${stepCounterVar} = New-Object System.Windows.Forms.Label`);
+          lines.push(`$${stepCounterVar}.Location = New-Object System.Drawing.Point(20, ${footerY})`);
+          lines.push(`$${stepCounterVar}.Size = New-Object System.Drawing.Size(150, 20)`);
+          lines.push(`$${stepCounterVar}.Text = "Step 1 of ${pages.length}"`);
+          lines.push(`$${stepCounterVar}.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left`);
+          lines.push(`$${c.name}.Controls.Add($${stepCounterVar})`);
+        }
         // Show-<Name>Page and Test-<Name>PageRequirements only depend on
         // the page list and each child's own wizardRequired/validation
         // fields (all already known from state.controls at this point),
         // not on when those children get emitted by the main loop below.
-        lines.push(...wizardShowFunctionLines(c, pageVarNames, nav.navVarNames));
+        lines.push(...wizardShowFunctionLines(c, pageVarNames, nav.navVarNames, stepCounterVar));
         lines.push(...wizardTestFunctionLines(c));
         // Summary of Tasks log: the shared dictionary/order is emitted if
         // EITHER a Summary or a summaryAfter RichTextBox exists to display

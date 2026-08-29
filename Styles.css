@@ -1,13 +1,17 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.33
+    Version 1.34
 
     Revision:
 
-    1. Added .content-align-editor-row/-grid/-cell - the 3x3 grid picker
-    for Label's new Text Align (contentAlignEditor, Properties-Pane.js) -
-    same visual family as the Anchor editor's chip row.
+    1. New .wizard-footer-divider / .wizard-step-counter - the Footer
+    Options preview (Render.js), matching what CodeGen-WinForms.js now
+    generates for a Wizard's Border/Step Counter toggles.
+
+    2. .step-options switched from a single flex column to a 2-column
+    grid, for the Nudge section's new 25/50/100 second column
+    (Properties-Pane.js).
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -131,6 +135,25 @@
   pointer-events: none;
 }
 .wizard-footer-content .ctrl { pointer-events: auto; }
+.wizard-footer-divider {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid #ACA899;
+  pointer-events: none;
+}
+.wizard-step-counter {
+  position: absolute;
+  left: 20px;
+  width: 150px;
+  height: 20px;
+  font-size: 11px;
+  color: #555;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
 .wizard-footer-hidden-here { opacity: 0.35; }
 .wizard-footer-hidden-here::after {
   content: 'Hidden on first page';
@@ -482,7 +505,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.33';
+  --stylesheet-version: '1.34';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
@@ -1245,9 +1268,9 @@ button, input, select, textarea {
 .dpad .d-down { grid-column: 2; grid-row: 3; }
 
 .step-options {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 14px;
 }
 
 .step-options label {

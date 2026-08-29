@@ -1,18 +1,30 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.11
+    Version 1.13
 
     Revision:
 
-    1. "+ Add log" now defaults its Log Message to the control's own Text
-    (e.g. a checkbox named "Option A" defaults to "Option A") instead of
-    the generic "This will install the selected feature." placeholder,
-    when that control has Text set - still just a starting point, edited
-    the same way as before.
+    1. Corrected the Layout section's Position (X/Y) and Size
+    (Width/Height) number input fix from 1.12: snap() is only meant for
+    click-and-drag (moving/resizing controls with the mouse), not typed
+    values or the native spinner arrows, which now always step by
+    exactly 1 and set the field to the exact value entered - no
+    snapping. The earlier 1.12 fix instead tied the step to the grid
+    size, which wasn't the actual intent.
+
+    2. The grow/shrink buttons under Width/Height (already using the
+    Nudge section's selected step) and the D-pad/arrow-key nudge
+    (Engine.js) no longer run through snap() either, for the same
+    reason - snap() stays reserved for actual drag operations
+    (Engine.js's control-drag/resize/handle-drag code, untouched).
+
+    3. New wizardFooterOptionsEditor prop type dispatch, for the new
+    Footer Options editor (Wizard-Builder.js) under the Wizard-specific
+    section.
 */
 
-const PROPERTIES_PANE_VERSION = '1.11';
+const PROPERTIES_PANE_VERSION = '1.13';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -558,8 +570,9 @@ function xyQuickRow(ctrl, axis, label) {
   const input = document.createElement('input');
   input.type = 'number';
   input.value = ctrl[axis];
+  input.step = 1;
   input.className = 'px-input';
-  input.addEventListener('change', () => { ctrl[axis] = snap(Number(input.value) || 0); render(); });
+  input.addEventListener('change', () => { ctrl[axis] = Number(input.value) || 0; render(); });
 
   const btnRow = document.createElement('div');
   btnRow.className = 'xy-quick-btns';
@@ -600,8 +613,9 @@ function whQuickRow(ctrl, dim, label, growSymbol) {
   const input = document.createElement('input');
   input.type = 'number';
   input.value = ctrl[dim];
+  input.step = 1;
   input.className = 'px-input';
-  input.addEventListener('change', () => { ctrl[dim] = Math.max(12, snap(Number(input.value) || 12)); render(); });
+  input.addEventListener('change', () => { ctrl[dim] = Math.max(12, Number(input.value) || 12); render(); });
 
   const btnRow = document.createElement('div');
   btnRow.className = 'xy-quick-btns';
@@ -615,8 +629,8 @@ function whQuickRow(ctrl, dim, label, growSymbol) {
     return b;
   };
   const step = state.nudgeStep;
-  btnRow.appendChild(mk('\u2212', `Shrink ${step}px (uses the Nudge section's step size)`, () => { ctrl[dim] = Math.max(12, snap(ctrl[dim] - step)); render(); }));
-  btnRow.appendChild(mk(growSymbol, `Grow ${step}px (uses the Nudge section's step size)`, () => { ctrl[dim] = snap(ctrl[dim] + step); render(); }));
+  btnRow.appendChild(mk('\u2212', `Shrink ${step}px (uses the Nudge section's step size)`, () => { ctrl[dim] = Math.max(12, ctrl[dim] - step); render(); }));
+  btnRow.appendChild(mk(growSymbol, `Grow ${step}px (uses the Nudge section's step size)`, () => { ctrl[dim] = ctrl[dim] + step; render(); }));
   btnRow.appendChild(mk('Max', dim === 'w' ? "Fit parent's width" : "Fit parent's height", () => {
     const b = parentBounds(ctrl);
     ctrl[dim] = dim === 'w' ? b.w : b.h;
@@ -853,11 +867,15 @@ function buildNudgeSection(ctrl) {
 
   const steps = document.createElement('div');
   steps.className = 'step-options';
-  [1, 5, 10].forEach(step => {
-    const label = document.createElement('label');
-    label.innerHTML = `<input type="radio" name="nudgeStep" value="${step}" ${state.nudgeStep === step ? 'checked' : ''}> ${step}px`;
-    label.querySelector('input').addEventListener('change', () => { state.nudgeStep = step; });
-    steps.appendChild(label);
+  // Two columns: [1,5,10] alongside [25,50,100] - paired up so default
+  // row-major grid flow (CSS) lands each pair on the same row.
+  [[1, 25], [5, 50], [10, 100]].forEach(pair => {
+    pair.forEach(step => {
+      const label = document.createElement('label');
+      label.innerHTML = `<input type="radio" name="nudgeStep" value="${step}" ${state.nudgeStep === step ? 'checked' : ''}> ${step}px`;
+      label.querySelector('input').addEventListener('change', () => { state.nudgeStep = step; });
+      steps.appendChild(label);
+    });
   });
 
   wrap.appendChild(dpad);
@@ -1096,6 +1114,10 @@ function buildPropRows(ctrl, propDefs) {
     }
     if (type === 'wizardPagesEditor') {
       frag.appendChild(buildWizardPagesEditorRow(ctrl, key, label));
+      return;
+    }
+    if (type === 'wizardFooterOptionsEditor') {
+      frag.appendChild(buildWizardFooterOptionsEditorRow(ctrl, key, label));
       return;
     }
     if (type === 'anchorEditor') {

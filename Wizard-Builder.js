@@ -1,19 +1,29 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.21
+    Version 1.22
 
     Revision:
 
-    1. Options template's OptionA/OptionB moved to y:70/y:100 (was
-    71/97) and h:25 (was 22), matching CheckBox's new default height
-    (Control-Data.js 1.11) - lands on the 5px grid with a real 5px gap
-    between them (25 height + 5 gap = 30 top-to-top) instead of the old
-    odd 22-tall/26px-apart pairing that only left 3px of actual
-    clearance.
+    1. New Footer Options editor (buildWizardFooterOptionsEditorRow),
+    under the existing Wizard-specific section alongside Contents/Pages
+    (backed by the new footerOptions prop, Control-Data.js 1.12):
+    - Lists the wizard's footer buttons (Back/Next/Cancel plus any
+    custom ones) with Select/Remove per button (role buttons can't be
+    removed from here - clear their Wizard Role first) and a "+ Add
+    footer button" action (addWizardFooterButton) that lines a new one
+    up to the left of the current leftmost footer button, instead of
+    leaving it wherever it happened to be when its "Show on all pages"
+    switch was flipped on.
+    - Footer Border / Step Counter toggles - both render live in the
+    canvas preview (Render.js) and generate real WinForms output
+    (CodeGen-WinForms.js: a 1px divider Panel, and a Label kept in
+    sync by wizardShowFunctionLines' existing per-page update logic,
+    the same place Next's Run/Finish label and Back's visibility
+    already get updated).
 */
 
-const WIZARD_BUILDER_VERSION = '1.21';
+const WIZARD_BUILDER_VERSION = '1.22';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -196,6 +206,121 @@ function createWizardFooterButtons(wizardCtrl) {
     btn.wizardRole = spec.role;
     btn.events.Click = { fn: `${btn.name}_Click`, code: '# Auto-generated wizard navigation (see generated code) - clear Wizard Role above to write your own.', ps1: '' };
   });
+}
+
+// Adds a plain (no wizardRole) footer Button, lined up to the left of
+// whatever's currently the leftmost footer button - fixes the earlier
+// complaint that manually flipping a button's "Show on all pages" switch
+// on left it wherever it happened to already be sitting, not aligned
+// with Back/Next/Cancel at all. Same height/anchor/footer-y convention
+// as createWizardFooterButtons above.
+function addWizardFooterButton(wizardCtrl) {
+  const existing = state.controls.filter(c => c.parentId === wizardCtrl.id && c.wizardFooter && c.type === 'Button');
+  const btnW = 80;
+  const y = wizardCtrl.h - WIZARD_FOOTER_HEIGHT;
+  const leftmostX = existing.length ? Math.min(...existing.map(c => c.x)) : (wizardCtrl.w - 20 - btnW);
+  const x = Math.max(10, leftmostX - btnW - 10);
+  const btn = createControl('Button', x, y, wizardCtrl.id, null);
+  btn.name = wizardUniqueControlName('Button');
+  btn.w = btnW;
+  btn.props.text = btn.name;
+  btn.props.anchor = 'Bottom, Left';
+  btn.wizardFooter = true;
+  return btn;
+}
+
+/* =========================================================================
+   Footer Options editor (Wizard-specific section) - the footer button
+   list (Add/Remove) plus the scripted extras (border, step counter).
+   ========================================================================= */
+
+function buildWizardFooterOptionsEditorRow(ctrl, key, label) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tab-editor';
+
+  const heading = document.createElement('div');
+  heading.className = 'tab-editor-heading';
+  heading.title = tt(key);
+  heading.textContent = label;
+  wrap.appendChild(heading);
+
+  const footerBtns = state.controls
+    .filter(c => c.parentId === ctrl.id && c.wizardFooter && c.type === 'Button')
+    .sort((a, b) => a.x - b.x);
+  footerBtns.forEach(btn => wrap.appendChild(buildWizardFooterButtonItem(ctrl, btn)));
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn btn-ghost tab-add-btn';
+  addBtn.textContent = '+ Add footer button';
+  addBtn.title = 'Adds a new Button that shows on every page, lined up next to the current footer buttons.';
+  addBtn.addEventListener('click', () => {
+    const btn = addWizardFooterButton(ctrl);
+    selectControl(btn.id);
+    render();
+  });
+  wrap.appendChild(addBtn);
+
+  const opts = ctrl.props[key] || (ctrl.props[key] = { border: false, stepCounter: false });
+
+  const borderRow = document.createElement('div');
+  borderRow.className = 'toggle-row';
+  borderRow.title = 'Draws a thin line above the footer strip, separating it from the page content.';
+  borderRow.innerHTML = `<span class="toggle-label">Footer Border</span><label class="switch"><input type="checkbox" ${opts.border ? 'checked' : ''}><span class="track"></span></label>`;
+  borderRow.querySelector('input').addEventListener('change', (e) => { opts.border = e.target.checked; render(); });
+  wrap.appendChild(borderRow);
+
+  const stepRow = document.createElement('div');
+  stepRow.className = 'toggle-row';
+  stepRow.title = 'Adds a "Step X of N" label to the footer that updates automatically as the active page changes.';
+  stepRow.innerHTML = `<span class="toggle-label">Step Counter</span><label class="switch"><input type="checkbox" ${opts.stepCounter ? 'checked' : ''}><span class="track"></span></label>`;
+  stepRow.querySelector('input').addEventListener('change', (e) => { opts.stepCounter = e.target.checked; render(); });
+  wrap.appendChild(stepRow);
+
+  return wrap;
+}
+
+function buildWizardFooterButtonItem(ctrl, btn) {
+  const outer = document.createElement('div');
+  outer.className = 'tab-editor-item' + (btn.id === state.selectedId ? ' active' : '');
+
+  const topRow = document.createElement('div');
+  topRow.className = 'wizard-page-editor-toprow';
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'menu-editor-label-input';
+  nameInput.value = btn.props.text;
+  nameInput.disabled = !!btn.wizardRole; // role buttons manage their own preview text (Run/Finish) elsewhere
+  nameInput.addEventListener('change', (e) => { btn.props.text = e.target.value.trim() || btn.props.text; render(); });
+
+  const selectBtn = document.createElement('button');
+  selectBtn.type = 'button';
+  selectBtn.className = 'btn btn-ghost tab-select-btn';
+  selectBtn.textContent = btn.id === state.selectedId ? 'Selected' : 'Select';
+  selectBtn.title = 'Select this button to edit its full properties/events.';
+  selectBtn.addEventListener('click', () => { selectControl(btn.id); render(); });
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn btn-ghost btn-danger menu-del-btn';
+  delBtn.textContent = '\u2715';
+  delBtn.disabled = !!btn.wizardRole;
+  delBtn.title = btn.wizardRole
+    ? 'Clear its Wizard Role first (select it, then set Wizard Role back to None) before removing it.'
+    : 'Remove this footer button.';
+  delBtn.addEventListener('click', () => {
+    if (btn.wizardRole) return;
+    state.controls = state.controls.filter(c => c.id !== btn.id);
+    if (state.selectedId === btn.id) state.selectedId = null;
+    render();
+  });
+
+  topRow.appendChild(nameInput);
+  topRow.appendChild(selectBtn);
+  topRow.appendChild(delBtn);
+  outer.appendChild(topRow);
+  return outer;
 }
 
 /* =========================================================================
@@ -1400,7 +1525,7 @@ function wizardNextButtonLabelForActivePage(c) {
   return pages[idx].template === 'summary' ? 'Run' : 'Next';
 }
 
-function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
+function wizardShowFunctionLines(c, pageVarNames, navVarNames, stepCounterVar) {
   const name = c.name;
   const pages = c.props.pages || [];
   const footerBtns = state.controls.filter(ch => ch.parentId === c.id && ch.wizardFooter);
@@ -1412,6 +1537,9 @@ function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   lines.push(`    $pages = @(${pageVarNames.map(v => '$' + v).join(', ')})`);
   lines.push(`    for ($i = 0; $i -lt $pages.Count; $i++) { $pages[$i].Visible = ($i -eq $Index) }`);
   lines.push(`    $script:${name}_CurrentPage = $Index`);
+  if (stepCounterVar) {
+    lines.push(`    $${stepCounterVar}.Text = "Step " + ($Index + 1) + " of " + $pages.Count`);
+  }
   // Rebuild whichever log display(s) this wizard has, the moment the person
   // actually lands on that page - not on each contributing control's own
   // event (wizardSummaryLogFunctionLines above) - so each always reflects
