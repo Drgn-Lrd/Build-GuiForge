@@ -1,14 +1,13 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.21
+    Version 1.22
 
     Revision:
 
-    1. File Versions modal: header title changed from "File Versions"
-    to "GUI Designer" (app name), the now-redundant app-name subtitle
-    line removed, and the remaining line reworded from "Johnathon
-    Largent" to "Author: Johnathon Largent".
+    1. Removed window.PAGE_LAST_UPDATED (the hardcoded fallback
+    timestamp) now that the File Versions modal's GitHub API
+    commit-date lookup is confirmed working and no longer needs it.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -17,10 +16,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>
-  window.PAGE_VERSION = '1.21';
-  window.PAGE_LAST_UPDATED = '29Aug2026 @ 12:00:00';
-</script>
+<script>window.PAGE_VERSION = '1.22';</script>
 </head>
 <body>
 
