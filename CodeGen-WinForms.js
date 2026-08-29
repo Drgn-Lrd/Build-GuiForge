@@ -1,19 +1,18 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.13
+    Version 1.15
 
     Revision:
 
-    1. Footer Options' divider/step-counter geometry follows
-    WIZARD_FOOTER_HEIGHT's 46 -> 45 change and the footer buttons now
-    being vertically centered (Wizard-Builder.js 1.23): the divider
-    stays at the true top of the 45px strip, but the step counter Label
-    moves down 10px to line up with the now-centered buttons instead of
-    sitting flush against the top of the strip.
+    1. Wizard "Disable Next" gate injection now passes the page object
+    itself (not just its index) into wizardUnmetListUpdateLines
+    (Wizard-Builder.js), so a required control on a 'custom' combine-mode
+    page gets a direct Update-<n>NextEnabled call instead of the
+    incremental unmet-list add/remove used by All/Any.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.13';
+const CODEGEN_WINFORMS_VERSION = '1.15';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -289,8 +288,10 @@ function generateWinForms() {
         // the page list and each child's own wizardRequired/validation
         // fields (all already known from state.controls at this point),
         // not on when those children get emitted by the main loop below.
+        lines.push(...wizardNextEnabledFunctionLines(c));
         lines.push(...wizardShowFunctionLines(c, pageVarNames, nav.navVarNames, stepCounterVar));
         lines.push(...wizardTestFunctionLines(c));
+        lines.push(...wizardUnmetMessageFunctionLines(c));
         // Summary of Tasks log: the shared dictionary/order is emitted if
         // EITHER a Summary or a summaryAfter RichTextBox exists to display
         // it (findWizardSummaryPageBox / findWizardSummaryAfterPageBox,
@@ -326,6 +327,31 @@ function generateWinForms() {
     // events
     const wizardParent = c.parentId ? getControl(c.parentId) : null;
     const isWizardNavBtn = c.wizardRole && wizardParent && CONTROL_DEFS[wizardParent.type].isWizard;
+    // A required control on a "Disable Next" page needs Update-<n>NextEnabled
+    // wired into its own gate event (wizardGateEventForType - the SPECIFIC
+    // state-change event for that control type, e.g. CheckedChanged, not a
+    // generic catch-all) so the Next button's live Enabled state tracks
+    // that page's unmet-requirements list the moment the person interacts -
+    // not only when Test-<n>PageRequirements runs on Next's own Click.
+    // Purely additive: appended after whatever the person authored on that
+    // same event, never replacing it - same non-destructive spirit as the
+    // rest of the wizard's codegen overrides.
+    let wizardGateEvtName = null, wizardGateItems = null, wizardGatePage = null;
+    if (!isWizardNavBtn && wizardParent && CONTROL_DEFS[wizardParent.type].isWizard && !c.wizardFooter) {
+      const pages = wizardParent.props.pages || [];
+      const page = pages.find(p => p.id === c.tabPage);
+      if (page && page.nextMode === 'disable') {
+        const evtName = wizardGateEventForType(c.type);
+        if (evtName) {
+          const items = wizardRequirementItemsForPage(wizardParent, page).filter(it => it.ctrl.id === c.id);
+          if (items.length) {
+            wizardGateEvtName = evtName;
+            wizardGateItems = items;
+            wizardGatePage = page;
+          }
+        }
+      }
+    }
     if (isWizardNavBtn) {
       // Back/Next/Cancel Click code is always generated fresh from the
       // wizard's live page list/validation rules, overriding whatever is
@@ -334,11 +360,24 @@ function generateWinForms() {
       const body = wizardNavClickBody(c, wizardParent);
       lines.push(`$${c.name}.Add_Click({\n    param($sender, $e)\n    ${body}\n})`);
     } else {
-      Object.entries(c.events).forEach(([evtName, data]) => {
+      // If this control needs the gate wired in but has no handler on that
+      // event at all yet, synthesize an empty one so the loop below still
+      // visits it - same reasoning as isWizardNavBtn above: the gate must
+      // fire regardless of whether the person happened to open that event.
+      const eventsForCodegen = { ...c.events };
+      if (wizardGateEvtName && !eventsForCodegen[wizardGateEvtName]) eventsForCodegen[wizardGateEvtName] = { code: '' };
+      Object.entries(eventsForCodegen).forEach(([evtName, data]) => {
         if (!data) return;
-        const body = data.ps1
-          ? `. "${data.ps1}"; ${data.fn}`
-          : (data.code || '# TODO: handler body').split('\n').join('\n    ');
+        const isGateEvt = evtName === wizardGateEvtName;
+        const isSynthetic = isGateEvt && !c.events[evtName];
+        let body;
+        if (data.ps1) body = `. "${data.ps1}"; ${data.fn}`;
+        else if (data.code && data.code.trim()) body = data.code.split('\n').join('\n    ');
+        else body = isSynthetic ? '' : '# TODO: handler body';
+        if (isGateEvt) {
+          const gateLines = wizardUnmetListUpdateLines(wizardParent, wizardGatePage, wizardGateItems).split('\n').join('\n    ');
+          body = body ? `${body}\n    ${gateLines}` : gateLines;
+        }
         // ClickToClose is a designer-only convenience label, not a real
         // .NET event - it wires up to the actual Click event underneath.
         // PowerShell/.NET happily supports multiple Add_Click registrations
