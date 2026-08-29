@@ -1,24 +1,27 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.8
+    Version 1.9
 
     Revision:
 
-    1. Fixed a real runtime bug: $ThisControl (used by several event
-    snippets - readValue, mirrorChecked, mirrorUnchecked) was never
-    actually assigned anywhere in the generated event handler, so it was
-    $null at runtime. $null.Checked reads as $null, and assigning $null
-    to a WinForms Boolean property (e.g. a mirrorChecked handler's
-    .Enabled = $ThisControl.Checked) silently coerces to $false - so a
-    "mirror Checked" handler always disabled its target and never
-    re-enabled it, regardless of the checkbox's actual state, since it
-    was writing the same wrong value every single time it fired. Now
-    every generated handler assigns $ThisControl = $sender as its first
-    line, which is exactly the control that raised the event.
+    1. Wizard case now also emits the Summary of Tasks log's supporting
+    state whenever the wizard has a summary-template page with a
+    RichTextBox target (findWizardSummaryLogTarget, Wizard-Builder.js):
+    $script:<Name>_LogEntries (the dictionary log-contributing controls
+    set/clear their own key in), $script:<Name>_LogOrder (the fixed
+    page-order/top-left-to-bottom-right replay sequence,
+    wizardLogTargetOrderedControlNames), $script:<Name>_LogBaseText (the
+    RichTextBox's own authored Text, captured as a literal so the rebuild
+    doesn't depend on child-control emission order), and the
+    Update-<Name>SummaryLog function itself
+    (wizardSummaryLogFunctionLines). Part of replacing the old
+    AppendText/Text.Replace summary log with a state-based rebuild - see
+    Wizard-Builder.js 1.16 and Properties-Pane.js's summaryLogAdd/
+    summaryLogToggle for the rest of it.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.8';
+const CODEGEN_WINFORMS_VERSION = '1.9';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -269,6 +272,21 @@ function generateWinForms() {
         // not on when those children get emitted by the main loop below.
         lines.push(...wizardShowFunctionLines(c, pageVarNames, nav.navVarNames));
         lines.push(...wizardTestFunctionLines(c));
+        // Summary of Tasks log: only generated if this wizard actually has
+        // a summary-template page with a RichTextBox to target
+        // (findWizardSummaryLogTarget) - the dictionary, the fixed replay
+        // order, and the base text captured from whatever the person
+        // authored directly on the box are all baked in here so
+        // Update-<Name>SummaryLog (called from Show-<Name>Page, see
+        // Wizard-Builder.js) has everything it needs at runtime.
+        const logTarget = findWizardSummaryLogTarget(c);
+        if (logTarget) {
+          const orderedNames = wizardLogTargetOrderedControlNames(c);
+          lines.push(`$script:${c.name}_LogEntries = @{}`);
+          lines.push(`$script:${c.name}_LogOrder = @(${orderedNames.map(n => `'${n}'`).join(', ')})`);
+          lines.push(`$script:${c.name}_LogBaseText = "${wizardEscapePsText(logTarget.props.text)}"`);
+          lines.push(...wizardSummaryLogFunctionLines(c, logTarget));
+        }
         lines.push(`$script:${c.name}_CurrentPage = 0`);
         wizardInitCalls.push(c.name);
         break;
