@@ -1,23 +1,28 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.30
+    Version 1.31
 
     Revision:
 
-    1. wizardAutoWireOptionsLog now covers every control type that
-    reasonably has a default log line, not just CheckBox/RadioButton:
-    ComboBox/ListBox (selected option), TextBox/MaskedTextBox/RichTextBox
-    (entered text), NumericUpDown/DateTimePicker (the value itself), and
-    CheckedListBox (its currently-checked items joined into one line,
-    manually adjusting for ItemCheck's pre-change timing). Buttons are
-    deliberately left alone - an action, not a value, so there's nothing
-    sensible to default. Split into wizardAutoWireCheckboxLog/
-    wizardAutoWireValueLog/wizardAutoWireCheckedListBoxLog so each type's
-    handling stays readable on its own.
+    1. Custom Requirement Logic builder: new NOT operator/chip, e.g.
+    "(A AND B AND NOT C) OR (J AND NOT B) OR C". NOT is a prefix - it
+    occupies an "operand expected" slot without resolving it, so it can
+    precede an item or "(" but can't follow one directly (write
+    "AND NOT X", not a bare "NOT" after an item/")"). Wired into
+    wizardCustomExprValidity, wizardCustomExprToPs (-> "-not"), and
+    wizardCustomExprToHumanText (-> "not") alongside AND/OR.
+
+    2. Get-<n>UnmetRequirementMessage's custom-mode header: "must be
+    satisfied" -> "must be selected", matching the All/Any header wording.
+
+    3. wizardAutoWireValueLog's two parallel per-type lookup tables
+    (event, expression) collapsed into one WIZARD_LOG_VALUE_BY_TYPE map -
+    adding another control type later is now one line instead of two
+    tables to keep in sync.
 */
 
-const WIZARD_BUILDER_VERSION = '1.30';
+const WIZARD_BUILDER_VERSION = '1.31';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -606,7 +611,7 @@ function wizardAutoWireOptionsLog(ctrl) {
     wizardAutoWireCheckboxLog(ctrl);
   } else if (ctrl.type === 'CheckedListBox') {
     wizardAutoWireCheckedListBoxLog(ctrl, parent);
-  } else if (WIZARD_LOG_VALUE_EXPR_BY_TYPE[ctrl.type]) {
+  } else if (WIZARD_LOG_VALUE_BY_TYPE[ctrl.type]) {
     wizardAutoWireValueLog(ctrl, parent);
   }
 }
@@ -629,22 +634,22 @@ function wizardAutoWireCheckboxLog(ctrl) {
   ctrl.events.CheckedChanged = { code, actions: [{ code, snippetId: snippet.id, params }] };
 }
 
-// Per-type PowerShell expression that reads a control's own CURRENT value
-// (never a static label) - the whole point here is a live log line, not a
-// fixed sentence. Deliberately never reads ctrl.props.text as a fallback
-// label the way the checkbox/message-label paths do elsewhere: for these
-// types props.text (or its equivalent) generally IS the value being
-// logged, not a caption describing it - using it as a label too would
-// just show the value twice.
-const WIZARD_LOG_VALUE_EXPR_BY_TYPE = {
-  ComboBox: '$ThisControl.Text', ListBox: '$ThisControl.Text',
-  TextBox: '$ThisControl.Text', MaskedTextBox: '$ThisControl.Text', RichTextBox: '$ThisControl.Text',
-  NumericUpDown: '$ThisControl.Value', DateTimePicker: '$ThisControl.Value',
-};
-const WIZARD_LOG_VALUE_EVENT_BY_TYPE = {
-  ComboBox: 'SelectedIndexChanged', ListBox: 'SelectedIndexChanged',
-  TextBox: 'TextChanged', MaskedTextBox: 'TextChanged', RichTextBox: 'TextChanged',
-  NumericUpDown: 'ValueChanged', DateTimePicker: 'ValueChanged',
+// Per-type PowerShell event + value expression that reads a control's own
+// CURRENT value (never a static label) - one entry per type, so adding
+// another type later (TrackBar, ProgressBar, ...) is just one more line
+// here rather than touching wizardAutoWireValueLog itself. Deliberately
+// never reads ctrl.props.text as a fallback label the way the checkbox/
+// message-label paths do elsewhere: for these types props.text (or its
+// equivalent) generally IS the value being logged, not a caption
+// describing it - using it as a label too would just show the value twice.
+const WIZARD_LOG_VALUE_BY_TYPE = {
+  ComboBox: { event: 'SelectedIndexChanged', expr: '$ThisControl.Text' },
+  ListBox: { event: 'SelectedIndexChanged', expr: '$ThisControl.Text' },
+  TextBox: { event: 'TextChanged', expr: '$ThisControl.Text' },
+  MaskedTextBox: { event: 'TextChanged', expr: '$ThisControl.Text' },
+  RichTextBox: { event: 'TextChanged', expr: '$ThisControl.Text' },
+  NumericUpDown: { event: 'ValueChanged', expr: '$ThisControl.Value' },
+  DateTimePicker: { event: 'ValueChanged', expr: '$ThisControl.Value' },
 };
 
 // ComboBox/ListBox (selected option), TextBox/MaskedTextBox/RichTextBox
@@ -652,14 +657,13 @@ const WIZARD_LOG_VALUE_EVENT_BY_TYPE = {
 // always sets the line (no toggle/remove - there's no "unchecked" state
 // for a value), prefixed with the control's own name as a plain, editable
 // starting point (e.g. "TextBox1: ") since there's no reliable label to
-// pull from otherwise (see the comment on WIZARD_LOG_VALUE_EXPR_BY_TYPE).
+// pull from otherwise (see the comment on WIZARD_LOG_VALUE_BY_TYPE).
 function wizardAutoWireValueLog(ctrl, wizardCtrl) {
-  const evtName = WIZARD_LOG_VALUE_EVENT_BY_TYPE[ctrl.type];
-  const valueExpr = WIZARD_LOG_VALUE_EXPR_BY_TYPE[ctrl.type];
-  if (!evtName || ctrl.events[evtName]) return;
+  const cfg = WIZARD_LOG_VALUE_BY_TYPE[ctrl.type];
+  if (!cfg || ctrl.events[cfg.event]) return;
   const prefix = wizardEscapePsText(`${ctrl.name}: `);
-  const code = `$script:${wizardCtrl.name}_LogEntries['${ctrl.name}'] = "${prefix}" + ${valueExpr}`;
-  ctrl.events[evtName] = { code, actions: [{ code, snippetId: null, params: {} }] };
+  const code = `$script:${wizardCtrl.name}_LogEntries['${ctrl.name}'] = "${prefix}" + ${cfg.expr}`;
+  ctrl.events[cfg.event] = { code, actions: [{ code, snippetId: null, params: {} }] };
 }
 
 // CheckedListBox: "essentially a couple of checkboxes" - logs whichever
@@ -1005,7 +1009,7 @@ function getWizardCustomExprOverlay() {
         <button class="btn icon-btn btn-ghost" id="wizardCustomExprClose">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="items-hint" style="margin-bottom:8px;">Click items and operators below to build a boolean expression, e.g. (A AND B) OR C. Drag a chip by its handle to reorder; use the &times; on a chip to remove it.</div>
+        <div class="items-hint" style="margin-bottom:8px;">Click items and operators below to build a boolean expression, e.g. (A AND B AND NOT C) OR (J AND NOT B) OR C. Drag a chip by its handle to reorder; use the &times; on a chip to remove it.</div>
         <div class="wizard-custom-expr-chips" id="wizardCustomExprChips"></div>
         <div class="wizard-custom-expr-error" id="wizardCustomExprError"></div>
         <div class="wizard-custom-expr-palette-heading">Operators</div>
@@ -1067,6 +1071,7 @@ function openWizardCustomExprModal(wizardCtrl, page) {
 function wizardCustomExprTokenLabel(token, items) {
   if (token.type === 'and') return 'AND';
   if (token.type === 'or') return 'OR';
+  if (token.type === 'not') return 'NOT';
   if (token.type === 'lparen') return '(';
   if (token.type === 'rparen') return ')';
   const item = items.find(it => it.key === token.key);
@@ -1130,7 +1135,7 @@ function renderWizardCustomExprModal() {
 
   const opPalette = document.getElementById('wizardCustomExprOpPalette');
   opPalette.innerHTML = '';
-  [['lparen', '('], ['rparen', ')'], ['and', 'AND'], ['or', 'OR']].forEach(([type, label]) => {
+  [['lparen', '('], ['rparen', ')'], ['and', 'AND'], ['or', 'OR'], ['not', 'NOT']].forEach(([type, label]) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn btn-ghost wizard-expr-palette-btn';
@@ -1168,32 +1173,39 @@ function renderWizardCustomExprModal() {
 }
 
 // Stack-based structural check: balanced parentheses, no two operands or
-// two operators back to back, doesn't start/end on AND/OR, no empty
-// parentheses. A missing-item token (its control got deleted since the
-// expression was built) isn't flagged here - wizardCustomExprToPs below
-// substitutes $true for it rather than breaking codegen outright.
+// two operators back to back, doesn't start/end on AND/OR/NOT, no empty
+// parentheses. NOT is a prefix - it consumes an "operand expected" slot
+// without resolving it, so it can be chained before "(" or an item (e.g.
+// "AND NOT CheckBox3") but never right after an item or ")" (write
+// "AND NOT" there, not a floating "NOT" with nothing before it). A
+// missing-item token (its control got deleted since the expression was
+// built) isn't flagged here - wizardCustomExprToPs below substitutes
+// $true for it rather than breaking codegen outright.
 function wizardCustomExprValidity(tokens) {
   if (!tokens.length) return { valid: false, message: 'Add at least one item.' };
   let depth = 0;
-  let expectOperand = true; // true: an item or "(" is valid next
+  let expectOperand = true; // true: an item, "(", or "NOT" is valid next
   for (const t of tokens) {
     if (t.type === 'lparen') {
       if (!expectOperand) return { valid: false, message: 'A "(" can\'t follow an item or ")".' };
       depth++;
     } else if (t.type === 'rparen') {
-      if (expectOperand) return { valid: false, message: 'A ")" can\'t follow an operator or "(".' };
+      if (expectOperand) return { valid: false, message: 'A ")" can\'t follow an operator, "(", or "NOT".' };
       depth--;
       if (depth < 0) return { valid: false, message: 'Unmatched ")".' };
     } else if (t.type === 'and' || t.type === 'or') {
-      if (expectOperand) return { valid: false, message: 'AND/OR can\'t follow another operator or "(".' };
+      if (expectOperand) return { valid: false, message: 'AND/OR can\'t follow another operator, "(", or "NOT".' };
       expectOperand = true;
+    } else if (t.type === 'not') {
+      if (!expectOperand) return { valid: false, message: 'NOT needs an AND/OR before it - it can\'t follow an item or ")" directly.' };
+      // NOT doesn't resolve the operand itself - still expecting one next.
     } else if (t.type === 'item') {
       if (!expectOperand) return { valid: false, message: 'Two items in a row need AND/OR between them.' };
       expectOperand = false;
     }
   }
   if (depth !== 0) return { valid: false, message: 'Unmatched "(".' };
-  if (expectOperand) return { valid: false, message: 'Expression can\'t end with an operator or "(".' };
+  if (expectOperand) return { valid: false, message: 'Expression can\'t end with an operator, "(", or "NOT".' };
   return { valid: true, message: '' };
 }
 
@@ -1209,6 +1221,7 @@ function wizardCustomExprToPs(tokens, items) {
     if (t.type === 'item') return byKey[t.key] !== undefined ? `(${byKey[t.key]})` : '$true';
     if (t.type === 'and') return '-and';
     if (t.type === 'or') return '-or';
+    if (t.type === 'not') return '-not';
     if (t.type === 'lparen') return '(';
     if (t.type === 'rparen') return ')';
     return '';
@@ -1228,6 +1241,7 @@ function wizardCustomExprToHumanText(tokens, items) {
     if (t.type === 'item') return byKey[t.key] || '(removed control)';
     if (t.type === 'and') return 'and';
     if (t.type === 'or') return 'or';
+    if (t.type === 'not') return 'not';
     if (t.type === 'lparen') return '(';
     if (t.type === 'rparen') return ')';
     return '';
@@ -1380,7 +1394,7 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
   if (totalCount > 1) {
     const modeRow = document.createElement('div');
     modeRow.className = 'wizard-requirements-mode-row';
-    modeRow.title = 'How every requirement on this page combines - a control\'s own "Required before Next" toggle and a detected event handler included, not just the manual list below. "All": every one must hold. "Any": at least one of them must hold. "Custom": a boolean expression built with the button below, e.g. "(A AND B) OR C".';
+    modeRow.title = 'How every requirement on this page combines - a control\'s own "Required before Next" toggle and a detected event handler included, not just the manual list below. "All": every one must hold. "Any": at least one of them must hold. "Custom": a boolean expression built with the button below, e.g. "(A AND B AND NOT C) OR C".';
     const mode = page.requirementsMode || 'all';
     const hasCustom = !!(page.customExpr && page.customExpr.length);
     modeRow.innerHTML = `<label>Combine as</label>
@@ -1396,7 +1410,7 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
     customBtn.type = 'button';
     customBtn.className = 'btn btn-ghost wizard-custom-expr-btn';
     customBtn.textContent = hasCustom ? 'Edit Custom Expression\u2026' : 'Build Custom Expression\u2026';
-    customBtn.title = 'Opens a builder for grouped AND/OR logic, e.g. "(A AND B) OR C", instead of the flat All/Any above. Reopening keeps whatever you built last time - it never wipes on open.';
+    customBtn.title = 'Opens a builder for grouped AND/OR/NOT logic, e.g. "(A AND B AND NOT C) OR C", instead of the flat All/Any above. Reopening keeps whatever you built last time - it never wipes on open.';
     customBtn.addEventListener('click', () => openWizardCustomExprModal(ctrl, page));
     reqWrap.appendChild(customBtn);
   }
@@ -2254,7 +2268,7 @@ function wizardUnmetMessageFunctionLines(c) {
   if (!anyClause) lines.push(`        default { }`);
   lines.push(`    }`);
   lines.push(`    if ($customText) {`);
-  lines.push(`        return "The following must be satisfied to continue:" + [Environment]::NewLine + [Environment]::NewLine + $customText`);
+  lines.push(`        return "The following must be selected to continue:" + [Environment]::NewLine + [Environment]::NewLine + $customText`);
   lines.push(`    }`);
   lines.push(`    if ($labels.Count -eq 0) { return $null }`);
   lines.push(`    $header = switch ($Index) {`);
