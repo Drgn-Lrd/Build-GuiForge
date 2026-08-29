@@ -1,13 +1,13 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.38
+    Version 1.39
 
     Revision:
 
-    1. .wizard-expr-chip-andnot added alongside the operator-chip
-    selector, for the Custom Requirement Logic builder's folded "AND NOT"
-    chip (Wizard-Builder.js).
+    1. New .wizard-expr-chip-value-input - the small inline text box that
+    lives directly on a "fieldcompare" chip (Wizard-Boolean-Builder.js)
+    for typing its comparison value.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -453,6 +453,14 @@
   padding: 2px 3px;
 }
 .wizard-expr-chip-remove:hover { color: var(--bp-danger, #d9534f); }
+.wizard-expr-chip-value-input {
+  width: 60px;
+  font-size: 10.5px;
+  padding: 2px 4px;
+  border: 1px solid var(--bp-border);
+  border-radius: var(--radius-sm);
+  background: var(--bp-panel);
+}
 .wizard-requirement-group { display: flex; flex-direction: column; gap: 3px; }
 .wizard-requirement-message-row {
   display: flex;
@@ -561,7 +569,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.38';
+  --stylesheet-version: '1.39';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
