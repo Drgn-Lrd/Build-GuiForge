@@ -1,26 +1,22 @@
 /*
     Control-Copy.js
     Written by: Johnathon Largent
-    Version 1.4
+    Version 1.5
 
     Revision:
 
-    1. renamePageCopyChildren now also tries the SINGULAR of the old
-    page label as a second, lower-priority prefix match (Options ->
-    Option) - the Options template names its checkboxes off that
-    singular form (OptionA, not OptionsA), which the exact-prefix check
-    alone couldn't see, so a page copy previously left them to fall
-    back to a generic smart-incremented name that just continued the
-    original page's own A..Z..AA sequence. A match now keeps the same
-    trailing letters/digits but moves onto the new page's own
-    (similarly singularized + numbered) prefix instead - copying
-    "Options" to "Options2" now renames its OptionA/OptionB/.../OptionAA
-    to Option2A/Option2B/.../Option2AA, restarting the sequence per
-    page and reflecting the new page number, rather than continuing a
-    global A-Z-AA-AB... run across every copy.
+    1. renamePageCopyChildren now also mirrors its Name prefix swap onto
+    the control's visible Text when the Text starts with the same base
+    word (OptionAX's Text "Option AX" both start with "Option") - it
+    previously only touched .name, leaving .props.text set by the
+    earlier plain-clone step (applyMatchingTextSuffix), which had no
+    idea a page-copy-specific rename was about to happen and used the
+    OLD global A..Z..AA sequence instead of the new page's restarted
+    one. Name and Text now both correctly read Option2AX / "Option2 AX"
+    instead of Name jumping ahead while Text stayed on the old scheme.
 */
 
-const CONTROL_COPY_VERSION = '1.4';
+const CONTROL_COPY_VERSION = '1.5';
 
 /* =========================================================================
    Shared naming helpers
@@ -411,14 +407,15 @@ function renamePageCopyChildren(oldLabel, newLabel, idMap, newControls) {
     const newCtrl = newControls.find(c => c.id === newId);
     if (!newCtrl) return;
 
-    let base = null;
+    let matchedOldBase = null, matchedNewBase = null;
     if (oldCtrl.name.startsWith(oldLabel)) {
-      base = newLabel + oldCtrl.name.slice(oldLabel.length);
+      matchedOldBase = oldLabel; matchedNewBase = newLabel;
     } else if (singularNew && oldCtrl.name.startsWith(singularOld)) {
-      base = singularNew + oldCtrl.name.slice(singularOld.length);
+      matchedOldBase = singularOld; matchedNewBase = singularNew;
     }
-    if (base == null) return;
+    if (matchedOldBase == null) return;
 
+    const base = matchedNewBase + oldCtrl.name.slice(matchedOldBase.length);
     let candidate = base;
     let n = 2;
     const taken = (name) => name !== newCtrl.name && (
@@ -427,6 +424,17 @@ function renamePageCopyChildren(oldLabel, newLabel, idMap, newControls) {
     );
     while (taken(candidate)) { candidate = base + n; n++; }
     newCtrl.name = candidate;
+
+    // Mirror the same prefix swap onto the visible Text when it happens
+    // to start with the same base word (OptionA's Text "Option A" both
+    // start with "Option") - this bypasses applyMatchingTextSuffix (that
+    // ran earlier, during the plain clone, using the ORIGINAL global
+    // A..Z..AA sequence rather than this page-copy's restarted one), so
+    // without this the Name would correctly read "Option2AX" while the
+    // Text was left behind still reading "Option AX".
+    if (oldCtrl.props && typeof oldCtrl.props.text === 'string' && oldCtrl.props.text.startsWith(matchedOldBase)) {
+      newCtrl.props.text = matchedNewBase + oldCtrl.props.text.slice(matchedOldBase.length);
+    }
   });
 }
 
