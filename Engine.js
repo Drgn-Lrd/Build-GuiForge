@@ -1,18 +1,18 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.38
+    Version 1.39
 
     Revision:
 
-    1. createControl now calls wizardAutoWireOptionsLog (Wizard-Builder.js)
-    right after adding a new control - auto-wires the Summary of Tasks
-    log toggle onto a CheckBox/RadioButton the moment it lands on a
-    Wizard "Options" page, covering both the template's starter controls
-    and anything dropped there by hand afterward.
+    1. About modal: new Wizard-Boolean-Builder.js row (the Custom
+    Requirement Logic builder split out of Wizard-Builder.js). The Copy
+    Versions button's row list also reordered to put index.html last,
+    matching GitHub's case-sensitive file-browser sort - it had drifted
+    from that convention.
 */
 
-const ENGINE_VERSION = '1.38';
+const ENGINE_VERSION = '1.39';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -1022,6 +1022,7 @@ function initAboutModal() {
     document.getElementById('aboutControlCopyVersion').textContent = typeof CONTROL_COPY_VERSION !== 'undefined' ? CONTROL_COPY_VERSION : 'n/a';
     document.getElementById('aboutControlDataVersion').textContent = typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a';
     document.getElementById('aboutWizardBuilderVersion').textContent = typeof WIZARD_BUILDER_VERSION !== 'undefined' ? WIZARD_BUILDER_VERSION : 'n/a';
+    document.getElementById('aboutWizardBooleanBuilderVersion').textContent = typeof WIZARD_BOOLEAN_BUILDER_VERSION !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_VERSION : 'n/a';
     document.getElementById('aboutCodegenVersion').textContent = typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a';
     document.getElementById('aboutCodegenHtmlVersion').textContent = typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a';
     document.getElementById('aboutCodegenWinFormsVersion').textContent = typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a';
@@ -1046,11 +1047,12 @@ function initAboutModal() {
       ['Control-Copy.js', 'aboutControlCopyVersion'],
       ['Control-Data.js', 'aboutControlDataVersion'],
       ['Engine.js', 'aboutEngineVersion'],
-      ['index.html', 'aboutPageVersion'],
       ['Properties-Pane.js', 'aboutPropsPaneVersion'],
       ['Render.js', 'aboutRenderVersion'],
       ['Styles.css', 'aboutStyleVersion'],
-      ['Wizard-Builder.js', 'aboutWizardBuilderVersion']
+      ['Wizard-Boolean-Builder.js', 'aboutWizardBooleanBuilderVersion'],
+      ['Wizard-Builder.js', 'aboutWizardBuilderVersion'],
+      ['index.html', 'aboutPageVersion']
     ];
     const text = rows.map(([name, id]) => `${name} version - ${document.getElementById(id).textContent}`).join('\n');
     try {
