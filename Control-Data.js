@@ -1,18 +1,19 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.10
+    Version 1.11
 
     Revision:
 
-    1. Label's Text Align is now a real two-axis alignment control
-    (contentAlignEditor, Properties-Pane.js) - the full 9-point
-    Top/Middle/Bottom x Left/Center/Right grid, same spirit as the
-    Anchor editor - instead of a Left/Center/Right-only dropdown that
-    silently assumed Top vertically. Default is MiddleLeft.
+    1. CheckBox's defaultH: 22 -> 25, Button's defaultH: 26 -> 25 - both
+    now land on the app's 5px grid instead of an odd height that only
+    left a 3px real gap when stacked 25px apart (the Options template's
+    OptionA/OptionB, and the Copy feature's row spacing). Only these two
+    types changed; other defaults (RadioButton, ComboBox, etc. at 22)
+    are untouched for now.
 */
 
-const CONTROL_DATA_VERSION = '1.10';
+const CONTROL_DATA_VERSION = '1.11';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -164,7 +165,7 @@ const DEFAULT_WIZARD_PAGES = [
 
 const CONTROL_DEFS = {
   Button: {
-    label: 'Button', glyph: 'Bt', defaultW: 90, defaultH: 26,
+    label: 'Button', glyph: 'Bt', defaultW: 90, defaultH: 25,
     props: [['text', 'Text', 'text', 'Button']],
     events: ['Click', 'ClickToClose'],
   },
@@ -188,7 +189,7 @@ const CONTROL_DEFS = {
     events: ['TextChanged', 'Enter', 'Leave', 'KeyDown'],
   },
   CheckBox: {
-    label: 'CheckBox', glyph: 'Ck', defaultW: 110, defaultH: 22,
+    label: 'CheckBox', glyph: 'Ck', defaultW: 110, defaultH: 25,
     props: [
       ['text', 'Text', 'text', 'CheckBox'],
       ['checked', 'Checked', 'checkbox', false],
