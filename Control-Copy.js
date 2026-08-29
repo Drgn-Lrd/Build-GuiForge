@@ -1,32 +1,26 @@
 /*
     Control-Copy.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.4
 
     Revision:
 
-    1. Fixed incrementSuffix only bumping the FIRST character of a
-    multi-letter suffix (OptionZ -> OptionAA correctly, but the next
-    copy's OptionAA -> "OptionB" instead of "OptionAB" - silently
-    collapsing back to a single letter, colliding with names already
-    taken, and burning through the retry guard until it gave up on
-    whatever letter it landed on, producing duplicates). Replaced with
-    a proper base-26 "spreadsheet column" increment (incrementLetterSuffix:
-    A -> B -> ... -> Z -> AA -> AB -> ... ). splitTrailingSuffix's letter
-    pattern also widened to match a whole trailing run of uppercase
-    letters, not just one.
-
-    2. Copying an entire tab/page (performCopyTabPage) now renames its
-    children to match the new page label the same way the page itself
-    does, instead of falling back to a generic name - a starter
-    template's SummaryTitle/SummaryLog become Summary2Title/Summary2Log
-    when "Summary" is copied to "Summary2" (renamePageCopyChildren: any
-    cloned child whose ORIGINAL name started with the exact old page
-    label gets that prefix swapped for the new label; anything else
-    keeps whatever nextSmartName already gave it).
+    1. renamePageCopyChildren now also tries the SINGULAR of the old
+    page label as a second, lower-priority prefix match (Options ->
+    Option) - the Options template names its checkboxes off that
+    singular form (OptionA, not OptionsA), which the exact-prefix check
+    alone couldn't see, so a page copy previously left them to fall
+    back to a generic smart-incremented name that just continued the
+    original page's own A..Z..AA sequence. A match now keeps the same
+    trailing letters/digits but moves onto the new page's own
+    (similarly singularized + numbered) prefix instead - copying
+    "Options" to "Options2" now renames its OptionA/OptionB/.../OptionAA
+    to Option2A/Option2B/.../Option2AA, restarting the sequence per
+    page and reflecting the new page number, rather than continuing a
+    global A-Z-AA-AB... run across every copy.
 */
 
-const CONTROL_COPY_VERSION = '1.2';
+const CONTROL_COPY_VERSION = '1.4';
 
 /* =========================================================================
    Shared naming helpers
@@ -88,10 +82,23 @@ function incrementSuffix(parsed) {
 // counter its own name already ends in (skipping any that are already
 // taken) rather than jumping straight to a generic type+counter name.
 // Falls back to the normal nextName(type) when the source's name doesn't
-// end in a recognizable counter at all.
-function nextSmartName(sourceCtrl) {
+// end in a recognizable counter at all. reservedNames is a Set shared
+// across an entire batch (one Copy press, however many controls it
+// clones) - checking state.controls alone isn't enough, since a batch
+// clones every control up front and only pushes them into state.controls
+// at the very end, so two siblings cloned back-to-back (e.g. copying a
+// whole page full of checkboxes) would otherwise both see the same "next
+// free" name and collide. The chosen name is added to reservedNames
+// before returning so the next call in the same batch sees it.
+function nextSmartName(sourceCtrl, reservedNames) {
+  const taken = (name) => state.controls.some(c => c.name === name) || reservedNames.has(name);
   const parsed = splitTrailingSuffix(sourceCtrl.name);
-  if (!parsed) return { name: nextName(sourceCtrl.type), suffixInfo: null };
+  if (!parsed) {
+    let name = nextName(sourceCtrl.type);
+    while (reservedNames.has(name)) name = nextName(sourceCtrl.type);
+    reservedNames.add(name);
+    return { name, suffixInfo: null };
+  }
   let suffix = parsed.suffix;
   let candidate;
   let guard = 0;
@@ -99,7 +106,8 @@ function nextSmartName(sourceCtrl) {
     suffix = incrementSuffix({ kind: parsed.kind, suffix });
     candidate = parsed.base + parsed.sep.replace(' ', '') + suffix;
     guard++;
-  } while (state.controls.some(c => c.name === candidate) && guard < 1000);
+  } while (taken(candidate) && guard < 1000);
+  reservedNames.add(candidate);
   return { name: candidate, suffixInfo: { base: parsed.base, sep: parsed.sep, suffix, kind: parsed.kind } };
 }
 
@@ -130,10 +138,10 @@ function applyMatchingTextSuffix(clonedCtrl, suffixInfo) {
 // (returned as pageMap, old id -> new id) so the caller can remap each
 // child's tabPage and - for a Wizard - each page's
 // `requirements[].targetId` once the whole tree has been cloned.
-function cloneControlDeep(oldCtrl, newParentId, newTabPage) {
+function cloneControlDeep(oldCtrl, newParentId, newTabPage, reservedNames) {
   const def = CONTROL_DEFS[oldCtrl.type];
   const cloned = JSON.parse(JSON.stringify(oldCtrl));
-  const { name, suffixInfo } = nextSmartName(oldCtrl);
+  const { name, suffixInfo } = nextSmartName(oldCtrl, reservedNames);
   cloned.id = 'c' + Math.random().toString(36).slice(2, 10);
   cloned.name = name;
   cloned.parentId = newParentId;
@@ -175,15 +183,15 @@ function cloneControlDeep(oldCtrl, newParentId, newTabPage) {
 // containers pass null, which correctly forces their grandchildren's
 // tabPage to null too (only a direct TabControl/Wizard child ever has a
 // real tabPage).
-function cloneChildrenDeep(oldParentId, newParentId, pageMap) {
+function cloneChildrenDeep(oldParentId, newParentId, pageMap, reservedNames) {
   const idMap = {};
   const newControls = [];
   state.controls.filter(c => c.parentId === oldParentId).forEach(child => {
     const childNewTabPage = (child.tabPage != null && pageMap) ? (pageMap[child.tabPage] || null) : null;
-    const result = cloneControlDeep(child, newParentId, childNewTabPage);
+    const result = cloneControlDeep(child, newParentId, childNewTabPage, reservedNames);
     idMap[child.id] = result.ctrl.id;
     newControls.push(result.ctrl);
-    const nested = cloneChildrenDeep(child.id, result.ctrl.id, result.pageMap);
+    const nested = cloneChildrenDeep(child.id, result.ctrl.id, result.pageMap, reservedNames);
     newControls.push(...nested.newControls);
     Object.assign(idMap, nested.idMap);
   });
@@ -210,11 +218,12 @@ function remapWizardRequirements(newControls, idMap) {
 // new controls (root first, then children) and the full old-id -> new-id
 // map.
 function deepCopyControlTree(sourceCtrl, newParentId, newTabPage) {
-  const rootResult = cloneControlDeep(sourceCtrl, newParentId, newTabPage);
+  const reservedNames = new Set();
+  const rootResult = cloneControlDeep(sourceCtrl, newParentId, newTabPage, reservedNames);
   const idMap = { [sourceCtrl.id]: rootResult.ctrl.id };
   const newControls = [rootResult.ctrl];
 
-  const nested = cloneChildrenDeep(sourceCtrl.id, rootResult.ctrl.id, rootResult.pageMap);
+  const nested = cloneChildrenDeep(sourceCtrl.id, rootResult.ctrl.id, rootResult.pageMap, reservedNames);
   newControls.push(...nested.newControls);
   Object.assign(idMap, nested.idMap);
 
@@ -376,16 +385,40 @@ function performCopy(sourceCtrl) {
 // just-cloned subtree and, for any clone whose ORIGINAL name started
 // with the exact old page label, swaps that prefix for the new page
 // label instead (SummaryLog -> Summary2Log), leaving the rest of the
-// name untouched. Anything that doesn't start with the old label keeps
-// whatever nextSmartName already gave it.
+// name untouched.
+//
+// The Options template specifically names its checkboxes off the
+// SINGULAR of the plural page label (page "Options", children
+// "OptionA"/"OptionB" - not "OptionsA") - "OptionA".startsWith("Options")
+// is false, so the exact-prefix check above would miss these entirely
+// and they'd fall back to a generic smart-incremented name (continuing
+// the ORIGINAL page's own A..Z..AA sequence rather than restarting for
+// the copy). If the old label ends in "s", its singular form is also
+// tried as a second, lower-priority prefix - a match there gets the
+// SAME trailing letters/digits it already had, just moved onto the new
+// page's own (also singularized) prefix: OptionA -> Option2A, OptionAA
+// -> Option2AA, restarting the sequence per page instead of continuing
+// a global one, and picking up the new page number in the process.
 function renamePageCopyChildren(oldLabel, newLabel, idMap, newControls) {
   if (!oldLabel) return;
+  const numericSuffix = newLabel.startsWith(oldLabel) ? newLabel.slice(oldLabel.length) : '';
+  const singularOld = oldLabel.replace(/s$/, '');
+  const singularNew = (numericSuffix && singularOld !== oldLabel) ? singularOld + numericSuffix : null;
+
   Object.entries(idMap).forEach(([oldId, newId]) => {
     const oldCtrl = getControl(oldId);
-    if (!oldCtrl || !oldCtrl.name.startsWith(oldLabel)) return;
+    if (!oldCtrl) return;
     const newCtrl = newControls.find(c => c.id === newId);
     if (!newCtrl) return;
-    const base = newLabel + oldCtrl.name.slice(oldLabel.length);
+
+    let base = null;
+    if (oldCtrl.name.startsWith(oldLabel)) {
+      base = newLabel + oldCtrl.name.slice(oldLabel.length);
+    } else if (singularNew && oldCtrl.name.startsWith(singularOld)) {
+      base = singularNew + oldCtrl.name.slice(singularOld.length);
+    }
+    if (base == null) return;
+
     let candidate = base;
     let n = 2;
     const taken = (name) => name !== newCtrl.name && (
@@ -414,13 +447,14 @@ function performCopyTabPage(containerCtrl, isWizard, activePageId) {
 
   const idMap = {};
   const newControls = [];
+  const reservedNames = new Set();
   state.controls
     .filter(c => c.parentId === containerCtrl.id && c.tabPage === activePageId && !c.wizardFooter)
     .forEach(child => {
-      const result = cloneControlDeep(child, containerCtrl.id, newId);
+      const result = cloneControlDeep(child, containerCtrl.id, newId, reservedNames);
       idMap[child.id] = result.ctrl.id;
       newControls.push(result.ctrl);
-      const nested = cloneChildrenDeep(child.id, result.ctrl.id, result.pageMap);
+      const nested = cloneChildrenDeep(child.id, result.ctrl.id, result.pageMap, reservedNames);
       newControls.push(...nested.newControls);
       Object.assign(idMap, nested.idMap);
     });
