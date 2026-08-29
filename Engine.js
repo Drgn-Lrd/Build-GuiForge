@@ -1,22 +1,19 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.43
+    Version 1.44
 
     Revision:
 
-    1. File Versions modal: filled in GITHUB_REPO_OWNER (Drgn-Lrd) and
-    GITHUB_REPO_NAME (Build-GuiForge) so the commit-date lookup is
-    live. Swapped the in-memory commit-date cache for a localStorage-
-    backed one (FILE_VERSIONS_CACHE_KEY/_TTL_MS, readFileVersionsCache/
-    writeFileVersionsCache) with a 90-minute TTL, so repeated page
-    reloads during testing don't re-spend the 60/hour unauthenticated
-    API rate limit the way an in-memory cache (which resets on reload)
-    would have.
+    1. File Versions modal: removed the hardcoded fallback LAST_UPDATED
+    constants (ENGINE_LAST_UPDATED here, plus the matching ones in
+    index.html and Styles.css) now that the GitHub API commit-date
+    lookup is confirmed working. Last Updated cells show "Loading…"
+    until the lookup resolves, then either the commit date or "n/a" if
+    it fails - no more constant to fall back to.
 */
 
-const ENGINE_VERSION = '1.43';
-const ENGINE_LAST_UPDATED = '29Aug2026 @ 12:00:00';
+const ENGINE_VERSION = '1.44';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -1102,35 +1099,34 @@ async function fetchLastCommitDateForFileVersions(fileName) {
 function initAboutModal() {
   const overlay = document.getElementById('aboutModalOverlay');
 
-  // [file name, version cell id, last-updated cell id, version value, last-updated value]
+  // [file name, version cell id, last-updated cell id, version value]
   function fileVersionsRows() {
     const stylesheetVersion = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-version').trim().replace(/'/g, '') || 'n/a';
-    const stylesheetLastUpdated = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-last-updated').trim().replace(/'/g, '') || 'n/a';
     return [
-      ['CodeGen-HTML.js', 'aboutCodegenHtmlVersion', 'aboutCodegenHtmlLastUpdated', typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a', typeof CODEGEN_HTML_LAST_UPDATED !== 'undefined' ? CODEGEN_HTML_LAST_UPDATED : 'n/a'],
-      ['CodeGen-WinForms.js', 'aboutCodegenWinFormsVersion', 'aboutCodegenWinFormsLastUpdated', typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a', typeof CODEGEN_WINFORMS_LAST_UPDATED !== 'undefined' ? CODEGEN_WINFORMS_LAST_UPDATED : 'n/a'],
-      ['CodeGen-WinUI.js', 'aboutCodegenWinUiVersion', 'aboutCodegenWinUiLastUpdated', typeof CODEGEN_WINUI_VERSION !== 'undefined' ? CODEGEN_WINUI_VERSION : 'n/a', typeof CODEGEN_WINUI_LAST_UPDATED !== 'undefined' ? CODEGEN_WINUI_LAST_UPDATED : 'n/a'],
-      ['CodeGen-WPF.js', 'aboutCodegenWpfVersion', 'aboutCodegenWpfLastUpdated', typeof CODEGEN_WPF_VERSION !== 'undefined' ? CODEGEN_WPF_VERSION : 'n/a', typeof CODEGEN_WPF_LAST_UPDATED !== 'undefined' ? CODEGEN_WPF_LAST_UPDATED : 'n/a'],
-      ['CodeGen.js', 'aboutCodegenVersion', 'aboutCodegenLastUpdated', typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a', typeof CODEGEN_LAST_UPDATED !== 'undefined' ? CODEGEN_LAST_UPDATED : 'n/a'],
-      ['Control-Copy.js', 'aboutControlCopyVersion', 'aboutControlCopyLastUpdated', typeof CONTROL_COPY_VERSION !== 'undefined' ? CONTROL_COPY_VERSION : 'n/a', typeof CONTROL_COPY_LAST_UPDATED !== 'undefined' ? CONTROL_COPY_LAST_UPDATED : 'n/a'],
-      ['Control-Data.js', 'aboutControlDataVersion', 'aboutControlDataLastUpdated', typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a', typeof CONTROL_DATA_LAST_UPDATED !== 'undefined' ? CONTROL_DATA_LAST_UPDATED : 'n/a'],
-      ['Engine.js', 'aboutEngineVersion', 'aboutEngineLastUpdated', ENGINE_VERSION, typeof ENGINE_LAST_UPDATED !== 'undefined' ? ENGINE_LAST_UPDATED : 'n/a'],
-      ['Properties-Pane.js', 'aboutPropsPaneVersion', 'aboutPropsPaneLastUpdated', typeof PROPERTIES_PANE_VERSION !== 'undefined' ? PROPERTIES_PANE_VERSION : 'n/a', typeof PROPERTIES_PANE_LAST_UPDATED !== 'undefined' ? PROPERTIES_PANE_LAST_UPDATED : 'n/a'],
-      ['Render.js', 'aboutRenderVersion', 'aboutRenderLastUpdated', typeof RENDER_VERSION !== 'undefined' ? RENDER_VERSION : 'n/a', typeof RENDER_LAST_UPDATED !== 'undefined' ? RENDER_LAST_UPDATED : 'n/a'],
-      ['Styles.css', 'aboutStyleVersion', 'aboutStyleLastUpdated', stylesheetVersion, stylesheetLastUpdated],
-      ['Wizard-Boolean-Builder.js', 'aboutWizardBooleanBuilderVersion', 'aboutWizardBooleanBuilderLastUpdated', typeof WIZARD_BOOLEAN_BUILDER_VERSION !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_VERSION : 'n/a', typeof WIZARD_BOOLEAN_BUILDER_LAST_UPDATED !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_LAST_UPDATED : 'n/a'],
-      ['Wizard-Builder.js', 'aboutWizardBuilderVersion', 'aboutWizardBuilderLastUpdated', typeof WIZARD_BUILDER_VERSION !== 'undefined' ? WIZARD_BUILDER_VERSION : 'n/a', typeof WIZARD_BUILDER_LAST_UPDATED !== 'undefined' ? WIZARD_BUILDER_LAST_UPDATED : 'n/a'],
-      ['index.html', 'aboutPageVersion', 'aboutPageLastUpdated', window.PAGE_VERSION || 'n/a', window.PAGE_LAST_UPDATED || 'n/a']
+      ['CodeGen-HTML.js', 'aboutCodegenHtmlVersion', 'aboutCodegenHtmlLastUpdated', typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a'],
+      ['CodeGen-WinForms.js', 'aboutCodegenWinFormsVersion', 'aboutCodegenWinFormsLastUpdated', typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a'],
+      ['CodeGen-WinUI.js', 'aboutCodegenWinUiVersion', 'aboutCodegenWinUiLastUpdated', typeof CODEGEN_WINUI_VERSION !== 'undefined' ? CODEGEN_WINUI_VERSION : 'n/a'],
+      ['CodeGen-WPF.js', 'aboutCodegenWpfVersion', 'aboutCodegenWpfLastUpdated', typeof CODEGEN_WPF_VERSION !== 'undefined' ? CODEGEN_WPF_VERSION : 'n/a'],
+      ['CodeGen.js', 'aboutCodegenVersion', 'aboutCodegenLastUpdated', typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a'],
+      ['Control-Copy.js', 'aboutControlCopyVersion', 'aboutControlCopyLastUpdated', typeof CONTROL_COPY_VERSION !== 'undefined' ? CONTROL_COPY_VERSION : 'n/a'],
+      ['Control-Data.js', 'aboutControlDataVersion', 'aboutControlDataLastUpdated', typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a'],
+      ['Engine.js', 'aboutEngineVersion', 'aboutEngineLastUpdated', ENGINE_VERSION],
+      ['Properties-Pane.js', 'aboutPropsPaneVersion', 'aboutPropsPaneLastUpdated', typeof PROPERTIES_PANE_VERSION !== 'undefined' ? PROPERTIES_PANE_VERSION : 'n/a'],
+      ['Render.js', 'aboutRenderVersion', 'aboutRenderLastUpdated', typeof RENDER_VERSION !== 'undefined' ? RENDER_VERSION : 'n/a'],
+      ['Styles.css', 'aboutStyleVersion', 'aboutStyleLastUpdated', stylesheetVersion],
+      ['Wizard-Boolean-Builder.js', 'aboutWizardBooleanBuilderVersion', 'aboutWizardBooleanBuilderLastUpdated', typeof WIZARD_BOOLEAN_BUILDER_VERSION !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_VERSION : 'n/a'],
+      ['Wizard-Builder.js', 'aboutWizardBuilderVersion', 'aboutWizardBuilderLastUpdated', typeof WIZARD_BUILDER_VERSION !== 'undefined' ? WIZARD_BUILDER_VERSION : 'n/a'],
+      ['index.html', 'aboutPageVersion', 'aboutPageLastUpdated', window.PAGE_VERSION || 'n/a']
     ];
   }
 
   document.getElementById('btnAbout').addEventListener('click', () => {
     const rows = fileVersionsRows();
-    rows.forEach(([fileName, verId, updId, verVal, fallbackUpdVal]) => {
+    rows.forEach(([fileName, verId, updId, verVal]) => {
       document.getElementById(verId).textContent = verVal;
-      document.getElementById(updId).textContent = fallbackUpdVal;
-      fetchLastCommitDateForFileVersions(fileName).then((headerVal) => {
-        if (headerVal) document.getElementById(updId).textContent = headerVal;
+      document.getElementById(updId).textContent = 'Loading…';
+      fetchLastCommitDateForFileVersions(fileName).then((commitDate) => {
+        document.getElementById(updId).textContent = commitDate || 'n/a';
       });
     });
     overlay.classList.add('open');
