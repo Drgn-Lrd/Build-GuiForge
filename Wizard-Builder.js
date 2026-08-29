@@ -1,31 +1,34 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.18
+    Version 1.19
 
     Revision:
 
-    1. Reworked the summaryAfter fallback into a real runtime if/else
-    instead of a Properties-pane-only note (which never showed up in the
-    actual exported/running wizard). New Get-<Name>SummaryAfterEntries is
-    a deliberate stub - always returns $null for now - standing in for
-    real console/log-file capture (a separate, not-yet-built feature).
-    Update-<Name>SummaryAfterLog (split out of wizardSummaryLogFunctionLines
-    into its own wizardSummaryAfterLogFunctionLines) calls that stub
-    first; when it's empty (always, today), it falls through to a visible
-    "[Fallback - showing Summary of Tasks log entries, not live output]"
-    line followed by the Summary log's entries, under summaryAfter's own
-    authored base text - so exporting and running the script now actually
-    shows the fallback happening on the summaryAfter page, testable
-    before real capture exists. wizardSummaryLogFunctionLines reverted to
-    Summary-only (no more fnSuffix/baseVarName parameterization, since
-    the two functions' bodies now genuinely diverge). The old
-    Properties-pane warning row in buildWizardChildRows is removed - it
-    was invisible to anyone actually running the exported code, so it
-    didn't serve the purpose it was added for.
+    1. Starter template controls now get specific default Names
+    (WelcomeTitle/WelcomeBody, OptionsTitle/OptionA/OptionB,
+    SummaryTitle/SummaryLog, SummaryAfterTitle/SummaryAfterLog,
+    PageTitle for Blank) instead of the generic Label1/CheckBox2 counter -
+    new wizardUniqueControlName appends a numeric suffix (starting at 2)
+    if a template is applied twice and its default name is already taken.
+    2. The Setup modal now defaults to all 4 templates (added a Final/
+    summaryAfter page) instead of 3, built by new wizardBuildDefaultSetupPages.
+    3. New WIZARD_TEMPLATE_DEFAULT_LABEL gives summaryAfter a short default
+    page tab title ("Final") separate from its WIZARD_TEMPLATE_LABELS
+    picker name ("Summary of Actions Taken"). New wizardDefaultLabelForTemplate
+    auto-numbers a repeated template's page title (second Options page ->
+    "Options2"), reusing the same numbering helper (wizardNextAvailableDefault)
+    as the control-naming collision avoidance above. Wired into both the
+    Setup modal's and Pages editor's "+ Add page" buttons and Template
+    dropdowns (new wizardLooksLikeDefaultLabel guards the dropdown case so
+    a page the person already renamed by hand is never overwritten).
+    4. New wizardNextButtonLabelForActivePage mirrors wizardShowFunctionLines'
+    Run/Finish label logic for the canvas - Render.js now shows the
+    Next button as "Run" on a Summary-of-Tasks page (unless it's also the
+    last page) and "Finish" on whichever page actually is last.
 */
 
-const WIZARD_BUILDER_VERSION = '1.18';
+const WIZARD_BUILDER_VERSION = '1.19';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -59,42 +62,99 @@ const WIZARD_TITLE_LABEL_PROPS = { fontSize: 14, fontBold: true };
 
 const WIZARD_TEMPLATES = {
   blank: [
-    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Enter Page title here', ...WIZARD_TITLE_LABEL_PROPS } },
+    { type: 'Label', name: 'PageTitle', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Enter Page title here', ...WIZARD_TITLE_LABEL_PROPS } },
   ],
   welcome: [
-    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Welcome to Setup', ...WIZARD_TITLE_LABEL_PROPS } },
+    { type: 'Label', name: 'WelcomeTitle', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Welcome to Setup', ...WIZARD_TITLE_LABEL_PROPS } },
     // centerX/centerY: resolved in populateWizardPageTemplate against the
     // page's actual usable area (content width, and height above the
     // footer), so this fixed-size box stays truly centered - both axes,
     // not just horizontal - even if the wizard gets resized or gains a
     // Contents nav strip.
-    { type: 'Label', x: 20, y: 69, w: 350, h: 80, centerX: true, centerY: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'MiddleCenter' } },
+    { type: 'Label', name: 'WelcomeBody', x: 20, y: 69, w: 350, h: 80, centerX: true, centerY: true, props: { text: 'This wizard will guide you through the setup process. Click Next to continue.', textAlign: 'MiddleCenter' } },
   ],
   options: [
-    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
-    { type: 'CheckBox', x: 20, y: 71, w: 200, h: 22, props: { text: 'Option A' } },
-    { type: 'CheckBox', x: 20, y: 97, w: 200, h: 22, props: { text: 'Option B' } },
+    { type: 'Label', name: 'OptionsTitle', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
+    { type: 'CheckBox', name: 'OptionA', x: 20, y: 71, w: 200, h: 22, props: { text: 'Option A' } },
+    { type: 'CheckBox', name: 'OptionB', x: 20, y: 97, w: 200, h: 22, props: { text: 'Option B' } },
   ],
   summary: [
     // Text stays button-agnostic on purpose - whether Next reads "Run" or
     // "Finish" at this page depends on whether a summaryAfter page follows
     // it (see wizardShowFunctionLines), so the label can't safely name one.
-    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Review your choices before continuing.', ...WIZARD_TITLE_LABEL_PROPS } },
+    { type: 'Label', name: 'SummaryTitle', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Review your choices before continuing.', ...WIZARD_TITLE_LABEL_PROPS } },
     // ReadOnly: this box is meant to be filled by "Add to Summary of Tasks
     // log" event actions on earlier-page controls, not typed into directly.
-    { type: 'RichTextBox', x: 20, y: 69, w: 380, h: 140, props: { text: '', readOnly: true } },
+    { type: 'RichTextBox', name: 'SummaryLog', x: 20, y: 69, w: 380, h: 140, props: { text: '', readOnly: true } },
   ],
   // Unwired placeholder for now (per John: template it now, wire up actual
   // PowerShell log capture / success-failure flags later) - same shape as
   // summary, a read-only box meant to eventually show what the Run step
   // actually did.
   summaryAfter: [
-    { type: 'Label', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Here is what was done:', ...WIZARD_TITLE_LABEL_PROPS } },
-    { type: 'RichTextBox', x: 20, y: 69, w: 380, h: 140, props: { text: '', readOnly: true } },
+    { type: 'Label', name: 'SummaryAfterTitle', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Here is what was done:', ...WIZARD_TITLE_LABEL_PROPS } },
+    { type: 'RichTextBox', name: 'SummaryAfterLog', x: 20, y: 69, w: 380, h: 140, props: { text: '', readOnly: true } },
   ],
 };
 
 const WIZARD_TEMPLATE_LABELS = { blank: 'Blank', welcome: 'Welcome', options: 'Options', summary: 'Summary of Tasks', summaryAfter: 'Summary of Actions Taken' };
+
+// Short default PAGE TAB TITLE per template - deliberately separate from
+// WIZARD_TEMPLATE_LABELS above (which names the template in the picker
+// dropdown): summaryAfter's picker entry stays the descriptive "Summary of
+// Actions Taken", but a page actually built from it defaults to the much
+// shorter "Final" as its own tab title. Used by wizardDefaultLabelForTemplate.
+const WIZARD_TEMPLATE_DEFAULT_LABEL = { blank: 'Page', welcome: 'Welcome', options: 'Options', summary: 'Summary', summaryAfter: 'Final' };
+
+// Shared numbering helper: returns `base` if it's not taken, otherwise
+// base+2, base+3, ... (never base+1 - the first, unsuffixed instance IS
+// "1"). One algorithm reused for both default control names (a template
+// applied twice on one page) and default page tab titles (a second page
+// using the same template) - see wizardUniqueControlName and
+// wizardDefaultLabelForTemplate below.
+function wizardNextAvailableDefault(base, isTaken) {
+  if (!isTaken(base)) return base;
+  let n = 2;
+  while (isTaken(base + n)) n++;
+  return base + n;
+}
+
+// A template's starter control default name (e.g. "OptionA"), collision-
+// avoided against every control in the whole project (names are global,
+// not just per-page) - covers both the same template being applied twice
+// to one page, and the same template appearing on two different pages.
+function wizardUniqueControlName(base) {
+  return wizardNextAvailableDefault(base, (name) => !!getControlByName(name));
+}
+
+// A new page's default tab title for a given template, collision-avoided
+// against `existingLabels` (the other pages' current labels) - "Options"
+// the first time, "Options2" the second, etc.
+function wizardDefaultLabelForTemplate(template, existingLabels) {
+  const base = WIZARD_TEMPLATE_DEFAULT_LABEL[template] || 'Page';
+  return wizardNextAvailableDefault(base, (label) => existingLabels.includes(label));
+}
+
+// True if `label` still looks like an untouched default (any template's
+// default base, or "Page", each with an optional trailing number) rather
+// than something the person typed themselves - used to decide whether
+// switching a page's Template dropdown is allowed to relabel it too.
+function wizardLooksLikeDefaultLabel(label) {
+  const bases = Object.values(WIZARD_TEMPLATE_DEFAULT_LABEL).concat(['Page']);
+  return bases.some(base => new RegExp('^' + base + '\\d*$').test(label));
+}
+
+// The Setup modal's default page list - Welcome, Options, Summary, Final -
+// built through wizardDefaultLabelForTemplate so it stays in sync with
+// WIZARD_TEMPLATE_DEFAULT_LABEL rather than hardcoding labels twice.
+function wizardBuildDefaultSetupPages() {
+  const pages = [];
+  ['welcome', 'options', 'summary', 'summaryAfter'].forEach(template => {
+    const label = wizardDefaultLabelForTemplate(template, pages.map(p => p.label));
+    pages.push({ label, template });
+  });
+  return pages;
+}
 
 function populateWizardPageTemplate(wizardCtrl, page) {
   const specs = WIZARD_TEMPLATES[page.template] || [];
@@ -115,6 +175,7 @@ function populateWizardPageTemplate(wizardCtrl, page) {
     const child = createControl(spec.type, x, y, wizardCtrl.id, page.id);
     child.w = spec.w;
     child.h = spec.h;
+    if (spec.name) child.name = wizardUniqueControlName(spec.name);
     Object.entries(spec.props || {}).forEach(([k, v]) => { child.props[k] = v; });
   });
 }
@@ -573,7 +634,8 @@ function getWizardSetupOverlay() {
   document.getElementById('wizardSetupAddBtn').addEventListener('click', () => {
     // Template is chosen per-row (the dropdown built in renderWizardSetupList)
     // rather than here - one editable place for it instead of two.
-    wizardSetupDraftPages.push({ label: 'Page' + (wizardSetupDraftPages.length + 1), template: 'blank' });
+    const label = wizardDefaultLabelForTemplate('blank', wizardSetupDraftPages.map(p => p.label));
+    wizardSetupDraftPages.push({ label, template: 'blank' });
     renderWizardSetupList();
   });
   document.getElementById('wizardSetupCreate').addEventListener('click', () => {
@@ -647,7 +709,18 @@ function renderWizardSetupList() {
       if (k === page.template) opt.selected = true;
       tplSelect.appendChild(opt);
     });
-    tplSelect.addEventListener('change', (e) => { page.template = e.target.value; });
+    tplSelect.addEventListener('change', (e) => {
+      const newTemplate = e.target.value;
+      // Only auto-relabel a title that still looks untouched - once the
+      // person has typed their own page name, switching templates must
+      // never clobber it.
+      if (wizardLooksLikeDefaultLabel(page.label)) {
+        const others = wizardSetupDraftPages.filter(p => p !== page).map(p => p.label);
+        page.label = wizardDefaultLabelForTemplate(newTemplate, others);
+      }
+      page.template = newTemplate;
+      renderWizardSetupList();
+    });
     tplRow.appendChild(tplSelect);
     row.appendChild(tplRow);
 
@@ -657,11 +730,7 @@ function renderWizardSetupList() {
 
 function openWizardSetupModal(x, y, parentId, tabPage) {
   wizardSetupPending = { x, y, parentId, tabPage };
-  wizardSetupDraftPages = [
-    { label: 'Welcome', template: 'welcome' },
-    { label: 'Options', template: 'options' },
-    { label: 'Summary', template: 'summary' },
-  ];
+  wizardSetupDraftPages = wizardBuildDefaultSetupPages();
   const overlay = getWizardSetupOverlay();
 
   // Only worth showing a dropdown if there's an actual choice to make -
@@ -728,7 +797,7 @@ function buildWizardPagesEditorRow(ctrl, key, label) {
   addBtn.textContent = '+ Add page';
   addBtn.title = 'Add a new wizard page (starts on the Blank template) - switch its Template dropdown afterward for Welcome/Options/Summary starter content instead.';
   addBtn.addEventListener('click', () => {
-    const label = 'Page' + (pages.length + 1);
+    const label = wizardDefaultLabelForTemplate('blank', pages.map(p => p.label));
     const id = wizardGeneratePageId(label, pages.map(p => p.id));
     const newPage = { id, label, template: 'blank', requirements: [] };
     pages.push(newPage);
@@ -812,7 +881,14 @@ function buildWizardPageEditorItem(ctrl, pages, page, pi) {
     tplSelect.appendChild(opt);
   });
   tplSelect.addEventListener('change', (e) => {
-    page.template = e.target.value;
+    const newTemplate = e.target.value;
+    // Same untouched-default guard as the Setup modal's row - a page the
+    // person already renamed by hand keeps its name across a template switch.
+    if (wizardLooksLikeDefaultLabel(page.label)) {
+      const others = pages.filter(p => p !== page).map(p => p.label);
+      page.label = wizardDefaultLabelForTemplate(newTemplate, others);
+    }
+    page.template = newTemplate;
     populateWizardPageTemplate(ctrl, page);
     render();
   });
@@ -1326,6 +1402,18 @@ function wizardRequiredCheckExpr(ctrl) {
 // tracks the current index in a script-scope variable, updates the Next
 // button's label and the Back button's Enabled state (if present), and
 // bolds the active page's label in the Contents nav strip (if any).
+// Design-time mirror of the "Run"/"Finish"/"Next" label logic below (used
+// by Render.js for the canvas's Next button preview) - same rule, just
+// evaluated for whichever page is currently active in the designer instead
+// of emitted as PowerShell for every page up front.
+function wizardNextButtonLabelForActivePage(c) {
+  const pages = c.props.pages || [];
+  const idx = pages.findIndex(p => p.id === c.activeTabId);
+  if (idx === -1) return 'Next';
+  if (idx === pages.length - 1) return 'Finish';
+  return pages[idx].template === 'summary' ? 'Run' : 'Next';
+}
+
 function wizardShowFunctionLines(c, pageVarNames, navVarNames) {
   const name = c.name;
   const pages = c.props.pages || [];
