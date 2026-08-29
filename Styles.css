@@ -1,12 +1,13 @@
 /*
     Styles.css
     Written by: Johnathon Largent
-    Version 1.42
+    Version 1.43
 
     Revision:
 
-    1. File Versions modal: removed the now-unused .file-versions-app-
-    name rule (that line was folded into the header title instead).
+    1. Removed --stylesheet-last-updated (the hardcoded fallback
+    timestamp) now that the File Versions modal's GitHub API
+    commit-date lookup is confirmed working and no longer needs it.
 */
 
 /* Single-row sections (auto-flattened, no collapse toggle) */
@@ -568,8 +569,7 @@
 .menu-add-item-btn { width: auto; }
 
 :root {
-  --stylesheet-version: '1.42';
-  --stylesheet-last-updated: '29Aug2026 @ 12:00:00';
+  --stylesheet-version: '1.43';
 
   /* Blueprint theme tokens */
   --bp-bg: #0f1216;
