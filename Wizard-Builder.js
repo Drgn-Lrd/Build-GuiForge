@@ -1,20 +1,19 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.20
+    Version 1.21
 
     Revision:
 
-    1. Wizard footer buttons now get their own default Names (Back, Next,
-    Cancel) via wizardUniqueControlName instead of falling through to the
-    generic Button1/Button2/Button3 counter - missed in the previous
-    starter-control naming pass, which only touched populateWizardPageTemplate
-    and left createWizardFooterButtons untouched. Renamed before
-    events.Click.fn is built, so the auto-generated Click handler name
-    (e.g. Next_Click) matches the button's real Name.
+    1. Options template's OptionA/OptionB moved to y:70/y:100 (was
+    71/97) and h:25 (was 22), matching CheckBox's new default height
+    (Control-Data.js 1.11) - lands on the 5px grid with a real 5px gap
+    between them (25 height + 5 gap = 30 top-to-top) instead of the old
+    odd 22-tall/26px-apart pairing that only left 3px of actual
+    clearance.
 */
 
-const WIZARD_BUILDER_VERSION = '1.20';
+const WIZARD_BUILDER_VERSION = '1.21';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -61,8 +60,8 @@ const WIZARD_TEMPLATES = {
   ],
   options: [
     { type: 'Label', name: 'OptionsTitle', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
-    { type: 'CheckBox', name: 'OptionA', x: 20, y: 71, w: 200, h: 22, props: { text: 'Option A' } },
-    { type: 'CheckBox', name: 'OptionB', x: 20, y: 97, w: 200, h: 22, props: { text: 'Option B' } },
+    { type: 'CheckBox', name: 'OptionA', x: 20, y: 70, w: 200, h: 25, props: { text: 'Option A' } },
+    { type: 'CheckBox', name: 'OptionB', x: 20, y: 100, w: 200, h: 25, props: { text: 'Option B' } },
   ],
   summary: [
     // Text stays button-agnostic on purpose - whether Next reads "Run" or
