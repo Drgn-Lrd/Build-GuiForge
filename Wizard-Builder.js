@@ -1,20 +1,17 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.23
+    Version 1.24
 
     Revision:
 
-    1. WIZARD_FOOTER_HEIGHT: 46 -> 45 (5px-grid friendly, matches
-    Control-Data.js 1.12's CheckBox/Button height cleanup). Footer
-    buttons now vertically CENTER in that 45px strip - y is footer-top
-    + 10, so 10px above the 25-tall button, 25 for the button, 10 below
-    (10 + 25 + 10 = 45) - instead of sitting flush against the top of
-    the strip. Both createWizardFooterButtons and addWizardFooterButton
-    updated the same way.
+    1. Options template's OptionA/OptionB width: 200 -> 195 - 200 was
+    just wide enough to overlap into a 3rd Copy-wrapped column; 195
+    leaves no visible difference in the checkbox itself but clears that
+    overlap.
 */
 
-const WIZARD_BUILDER_VERSION = '1.23';
+const WIZARD_BUILDER_VERSION = '1.24';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -61,8 +58,8 @@ const WIZARD_TEMPLATES = {
   ],
   options: [
     { type: 'Label', name: 'OptionsTitle', x: 20, y: WIZARD_TITLE_LABEL_Y, w: 380, h: 26, props: { text: 'Choose options', ...WIZARD_TITLE_LABEL_PROPS } },
-    { type: 'CheckBox', name: 'OptionA', x: 20, y: 70, w: 200, h: 25, props: { text: 'Option A' } },
-    { type: 'CheckBox', name: 'OptionB', x: 20, y: 100, w: 200, h: 25, props: { text: 'Option B' } },
+    { type: 'CheckBox', name: 'OptionA', x: 20, y: 70, w: 195, h: 25, props: { text: 'Option A' } },
+    { type: 'CheckBox', name: 'OptionB', x: 20, y: 100, w: 195, h: 25, props: { text: 'Option B' } },
   ],
   summary: [
     // Text stays button-agnostic on purpose - whether Next reads "Run" or
