@@ -1,22 +1,21 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.27
+    Version 1.28
 
     Revision:
 
-    1. Fixed Get-<n>UnmetRequirementMessage for 'custom' combine mode:
-    it was listing EVERY item marked "Required before Next" on the page
-    that was currently unmet, regardless of whether the built expression
-    even referenced it - a page with 10 required options but a formula
-    only using 3 of them showed all 10. It now renders the built
-    expression itself as plain English (new wizardCustomExprToHumanText,
-    e.g. "Option A and Option B or Option J") instead of a per-item
-    unmet check - the only thing that stays accurate no matter which
-    OR-branch the person is going for.
+    1. Get-<n>UnmetRequirementMessage header wording: "All" mode now
+    reads "All the following must be selected to continue:", "Any" mode
+    now reads "1 of the following must be selected to continue:" -
+    replacing the old "The following options are required to continue."
+    / "Complete at least one of the following:" text. The item list
+    itself was already limited to whatever's actually marked "Required
+    before Next" on that page (wizardRequirementItemsForPage) - no change
+    needed there.
 */
 
-const WIZARD_BUILDER_VERSION = '1.27';
+const WIZARD_BUILDER_VERSION = '1.28';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -2158,9 +2157,9 @@ function wizardUnmetMessageFunctionLines(c) {
   lines.push(`    if ($labels.Count -eq 0) { return $null }`);
   lines.push(`    $header = switch ($Index) {`);
   pages.forEach((page, i) => {
-    if (page.requirementsMode === 'any') lines.push(`        ${i} { "Complete at least one of the following:" }`);
+    if (page.requirementsMode === 'any') lines.push(`        ${i} { "1 of the following must be selected to continue:" }`);
   });
-  lines.push(`        default { "The following options are required to continue." }`);
+  lines.push(`        default { "All the following must be selected to continue:" }`);
   lines.push(`    }`);
   lines.push(`    return $header + [Environment]::NewLine + [Environment]::NewLine + "- " + ($labels -join ([Environment]::NewLine + "- "))`);
   lines.push(`}`);
