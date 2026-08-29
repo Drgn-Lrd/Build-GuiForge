@@ -1,17 +1,17 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.33
+    Version 1.34
 
     Revision:
 
-    1. Wired up the new #btnWizards toolbar button (openWizardPickerModal,
-    Wizard-Builder.js) and removed the now-dead Wizard-specific branches
-    from the toolbox's dblclick/drop handlers - Wizard isn't in the
-    toolbox anymore (Control-Data.js), so those paths could never fire.
+    1. About modal's copy handler (aboutCopyVersions) now copies all
+    file versions to the clipboard as "<Filename> version - <#>" lines,
+    one per file, ordered alphabetically by filename to match the
+    reordered About modal rows in index.html.
 */
 
-const ENGINE_VERSION = '1.33';
+const ENGINE_VERSION = '1.34';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -1029,6 +1029,32 @@ function initAboutModal() {
   });
   document.getElementById('aboutModalClose').addEventListener('click', () => overlay.classList.remove('open'));
   document.getElementById('aboutModalClose2').addEventListener('click', () => overlay.classList.remove('open'));
+
+  document.getElementById('aboutCopyVersions').addEventListener('click', async () => {
+    const rows = [
+      ['CodeGen-HTML.js', 'aboutCodegenHtmlVersion'],
+      ['CodeGen-WinForms.js', 'aboutCodegenWinFormsVersion'],
+      ['CodeGen-WinUI.js', 'aboutCodegenWinUiVersion'],
+      ['CodeGen-WPF.js', 'aboutCodegenWpfVersion'],
+      ['CodeGen.js', 'aboutCodegenVersion'],
+      ['Control-Data.js', 'aboutControlDataVersion'],
+      ['Engine.js', 'aboutEngineVersion'],
+      ['index.html', 'aboutPageVersion'],
+      ['Properties-Pane.js', 'aboutPropsPaneVersion'],
+      ['Render.js', 'aboutRenderVersion'],
+      ['Styles.css', 'aboutStyleVersion'],
+      ['Wizard-Builder.js', 'aboutWizardBuilderVersion']
+    ];
+    const text = rows.map(([name, id]) => `${name} version - ${document.getElementById(id).textContent}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById('aboutCopyVersions');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1200);
+    } catch (err) { /* clipboard may be unavailable in this context */ }
+  });
+
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
 }
 
