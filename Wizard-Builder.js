@@ -1,34 +1,20 @@
 /*
     Wizard-Builder.js
     Written by: Johnathon Largent
-    Version 1.19
+    Version 1.20
 
     Revision:
 
-    1. Starter template controls now get specific default Names
-    (WelcomeTitle/WelcomeBody, OptionsTitle/OptionA/OptionB,
-    SummaryTitle/SummaryLog, SummaryAfterTitle/SummaryAfterLog,
-    PageTitle for Blank) instead of the generic Label1/CheckBox2 counter -
-    new wizardUniqueControlName appends a numeric suffix (starting at 2)
-    if a template is applied twice and its default name is already taken.
-    2. The Setup modal now defaults to all 4 templates (added a Final/
-    summaryAfter page) instead of 3, built by new wizardBuildDefaultSetupPages.
-    3. New WIZARD_TEMPLATE_DEFAULT_LABEL gives summaryAfter a short default
-    page tab title ("Final") separate from its WIZARD_TEMPLATE_LABELS
-    picker name ("Summary of Actions Taken"). New wizardDefaultLabelForTemplate
-    auto-numbers a repeated template's page title (second Options page ->
-    "Options2"), reusing the same numbering helper (wizardNextAvailableDefault)
-    as the control-naming collision avoidance above. Wired into both the
-    Setup modal's and Pages editor's "+ Add page" buttons and Template
-    dropdowns (new wizardLooksLikeDefaultLabel guards the dropdown case so
-    a page the person already renamed by hand is never overwritten).
-    4. New wizardNextButtonLabelForActivePage mirrors wizardShowFunctionLines'
-    Run/Finish label logic for the canvas - Render.js now shows the
-    Next button as "Run" on a Summary-of-Tasks page (unless it's also the
-    last page) and "Finish" on whichever page actually is last.
+    1. Wizard footer buttons now get their own default Names (Back, Next,
+    Cancel) via wizardUniqueControlName instead of falling through to the
+    generic Button1/Button2/Button3 counter - missed in the previous
+    starter-control naming pass, which only touched populateWizardPageTemplate
+    and left createWizardFooterButtons untouched. Renamed before
+    events.Click.fn is built, so the auto-generated Click handler name
+    (e.g. Next_Click) matches the button's real Name.
 */
 
-const WIZARD_BUILDER_VERSION = '1.19';
+const WIZARD_BUILDER_VERSION = '1.20';
 
 const WIZARD_HORIZONTAL_CONTENTS_HEIGHT = 32;
 const WIZARD_VERTICAL_CONTENTS_WIDTH = 140;
@@ -203,6 +189,7 @@ function createWizardFooterButtons(wizardCtrl) {
   ];
   specs.forEach(spec => {
     const btn = createControl('Button', spec.x, y, wizardCtrl.id, null);
+    btn.name = wizardUniqueControlName(spec.text);
     btn.w = btnW;
     btn.props.text = spec.text;
     btn.props.anchor = spec.anchor;
