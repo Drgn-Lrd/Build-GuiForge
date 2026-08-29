@@ -1,35 +1,22 @@
 /*
     Control-Copy.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
     Revision:
 
-    1. New file - split out of Engine.js 1.35's Copy feature (which had
-    grown into its own self-contained chunk of logic, same as
-    Wizard-Builder.js was split out earlier) plus fixes found while
-    testing:
-    - Y-spacing was wrongly measured from the lowest control's BOTTOM
-    edge + 25; the app's own controls (e.g. the Options template's
-    OptionA/OptionB, 25px apart) space top-to-top, so a control's own
-    height no longer throws off the 5px-grid snap and every row lands
-    exactly 25px below the last regardless of that control's height.
-    - Name/Text now smart-increment from the source control's own
-    trailing letter (OptionA -> OptionC, skipping the already-used
-    OptionB) or trailing digit (CheckBox3 -> CheckBox4), instead of
-    always falling back to a generic type+counter name; Text mirrors
-    the same suffix only when it already ends the same way (e.g.
-    "Option B" -> "Option C").
-    - Selecting a TabControl or a Wizard now opens a picker (same
-    look as the Objects modal, scoped to just that control) offering
-    the whole container or any one of its tabs/pages, instead of
-    silently assuming "the active one" every time.
-    - A copied tab/page's label now follows the same base+2,3,4...
-    numbering the app already uses when a page name collides
-    (wizardGeneratePageId), instead of appending " Copy".
+    1. calcCopyPosition's row spacing changed from a fixed "25px below
+    the previous control's TOP" to "a real 5px gap below the previous
+    control's BOTTOM edge" - now that CheckBox/Button default to a
+    5px-grid-friendly height (25, Control-Data.js 1.11), bottom-edge
+    math no longer needs a top-based workaround to avoid snap drift,
+    and it correctly scales to whatever height the copied control
+    actually has instead of assuming a magic constant. Matches the
+    Options template's own OptionA/OptionB spacing (25 height + 5 gap =
+    30 top-to-top, Wizard-Builder.js 1.21).
 */
 
-const CONTROL_COPY_VERSION = '1.0';
+const CONTROL_COPY_VERSION = '1.1';
 
 /* =========================================================================
    Shared naming helpers
@@ -216,10 +203,13 @@ function deepCopyControlTree(sourceCtrl, newParentId, newTabPage) {
 // Where a freshly-copied (non-docked) control lands: siblings in the same
 // container (form root, Panel, a TabControl/Wizard page - whichever
 // containerClientRect resolves) are grouped into "columns" by shared x;
-// the copy's Y is 25px below the TOP (not bottom edge - see the file
-// header) of the bottommost control in the right-most column, matching
-// how the app's own template rows are spaced regardless of their actual
-// height. Only once that no longer fits in the container's usable area
+// the copy's Y is a real 5px gap below the bottom edge of the bottommost
+// control in the right-most column - matching the app's own template
+// spacing (e.g. the Options template's OptionA/OptionB, both 25px tall,
+// 30px apart top-to-top: 25 + 5). Using the actual bottom edge (rather
+// than a fixed top-to-top increment) means this scales correctly for any
+// control height, not just the ones that happen to already sit on the
+// 5px grid. Only once that no longer fits in the container's usable area
 // (already excludes a Wizard's Contents nav strip / a docked status bar
 // via containerClientRect, plus the Wizard footer strip which
 // containerClientRect does NOT account for - see footerReserve below)
@@ -256,14 +246,13 @@ function calcCopyPosition(sourceCtrl) {
 
   const columns = {};
   siblings.forEach(c => {
-    const col = columns[c.x] || (columns[c.x] = { x: c.x, maxY: -Infinity, bottom: -Infinity, right: -Infinity });
-    if (c.y > col.maxY) col.maxY = c.y;
+    const col = columns[c.x] || (columns[c.x] = { x: c.x, bottom: -Infinity, right: -Infinity });
     col.bottom = Math.max(col.bottom, c.y + c.h);
     col.right = Math.max(col.right, c.x + c.w);
   });
   const rightmost = Object.values(columns).reduce((a, b) => (b.x > a.x ? b : a));
 
-  const proposedY = snap(rightmost.maxY + 25);
+  const proposedY = snap(rightmost.bottom + 5);
   if (proposedY + sourceCtrl.h <= usableBottom) {
     return { x: rightmost.x, y: proposedY };
   }
