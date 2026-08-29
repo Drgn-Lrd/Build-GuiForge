@@ -1,28 +1,19 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.9
+    Version 1.10
 
     Revision:
 
-    1. summaryLogAdd/summaryLogToggle rewritten from direct
-    AppendText/Text.Replace calls into the state-based rebuild
-    architecture (Wizard-Builder.js/CodeGen-WinForms.js): they now just
-    set or delete this control's own key in $script:<WizardName>_LogEntries
-    - the RichTextBox itself is never touched here. The Target Control
-    param is gone entirely (a wizard has exactly one Summary log, so
-    there's nothing left to pick); computeSnippetCode takes a new ctrl
-    argument (every call site updated) purely to resolve the template's
-    {ownerName}/{wizardName} placeholders automatically - not a
-    user-editable param. "+ Add log" no longer pre-sets a target param.
-
-    Note: any "+ Add log" actions placed before this change keep their
-    OLD AppendText-based code as a snapshot until touched again (e.g.
-    re-editing the Log Message) - .code is computed once, not derived
-    live on load.
+    1. "+ Add log" now gates on findWizardAnyLogDisplayBox
+    (Wizard-Builder.js) instead of the removed findWizardSummaryLogTarget
+    - a wizard with only a summaryAfter page (no Summary page at all)
+    now correctly still offers logging, since summaryAfter can display
+    the log's entries as a fallback on its own. No change to
+    summaryLogAdd/summaryLogToggle themselves.
 */
 
-const PROPERTIES_PANE_VERSION = '1.9';
+const PROPERTIES_PANE_VERSION = '1.10';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -1807,17 +1798,19 @@ function buildActionsEditor(ctrl, evtName, data) {
   // "+ Add log" - a shortcut onto the same actions list, pre-bound to a
   // summary-log snippet (summaryLogAdd/summaryLogToggle) so all that's
   // left to fill in is the message text - there's no Target Control to
-  // pick anymore, since a wizard has exactly one Summary log and the
-  // snippet resolves it automatically (via {wizardName} in the template,
-  // computeSnippetCode) from whichever wizard this control lives inside
-  // (findAncestorWizard, Wizard-Builder.js). On CheckedChanged this binds
-  // the toggle variant (adds while checked, removes again when unchecked)
-  // rather than the plain always-set one, since a checkbox is a state a
-  // person can flip back. Only appears (enabled) when ctrl is actually
-  // inside a wizard that has a Summary-template page with a RichTextBox
-  // on it to target.
+  // pick anymore, since a wizard has one shared entries dictionary and
+  // the snippet resolves it automatically (via {wizardName} in the
+  // template, computeSnippetCode) from whichever wizard this control
+  // lives inside (findAncestorWizard, Wizard-Builder.js). On
+  // CheckedChanged this binds the toggle variant (adds while checked,
+  // removes again when unchecked) rather than the plain always-set one,
+  // since a checkbox is a state a person can flip back. Only appears
+  // (enabled) when ctrl is inside a wizard that has a Summary and/or
+  // summaryAfter page with a RichTextBox to display the entries on
+  // (findWizardAnyLogDisplayBox, Wizard-Builder.js) - summaryAfter
+  // counts too, as a fallback display, even without a Summary page.
   const wizardCtrl = findAncestorWizard(ctrl);
-  const logTarget = wizardCtrl ? findWizardSummaryLogTarget(wizardCtrl) : null;
+  const logTarget = wizardCtrl ? findWizardAnyLogDisplayBox(wizardCtrl) : null;
   const logSnippetId = evtName === 'CheckedChanged' ? 'summaryLogToggle' : 'summaryLogAdd';
   const logBtn = document.createElement('button');
   logBtn.type = 'button';
@@ -1825,8 +1818,8 @@ function buildActionsEditor(ctrl, evtName, data) {
   logBtn.textContent = '+ Add log';
   logBtn.disabled = !logTarget;
   logBtn.title = logTarget
-    ? `Add a line to ${logTarget.name} (the wizard's Summary of Tasks log) when this event fires - just write the message.${evtName === 'CheckedChanged' ? ' Removes the line again if unchecked, so toggling doesn\'t duplicate it.' : ''}`
-    : 'This control isn\'t inside a wizard with a Summary page, so there\'s no log to add to yet.';
+    ? `Add a line to the wizard's Summary of Tasks log when this event fires - just write the message.${evtName === 'CheckedChanged' ? ' Removes the line again if unchecked, so toggling doesn\'t duplicate it.' : ''}`
+    : 'This control isn\'t inside a wizard with a Summary or summaryAfter page to show a log on yet.';
   logBtn.addEventListener('click', () => {
     if (!logTarget) return;
     const snippet = EVENT_SNIPPETS.find(s => s.id === logSnippetId);
