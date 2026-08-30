@@ -1,18 +1,17 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.14
+    Version 1.15
 
     Revision:
 
-    1. Every action card (buildActionBlock, both snippet-bound and raw/
-    freeform modes) now appends a CLI tag sub-editor - "Also contributes
-    to CLI command preview" - so any action on any control's event can
-    be tagged as a CLI Command Preview/Run contributor without touching
-    the event-snippet system itself (Cli-Preview-Builder.js).
+    1. One-way Name -> Text sync (Control-Data.js TEXT_SYNCS_WITH_NAME_
+    TYPES, Engine.js ctrl.textAutoSynced): renaming a control keeps its
+    Text matching until Text is edited directly, which breaks the sync
+    permanently for that control.
 */
 
-const PROPERTIES_PANE_VERSION = '1.14';
+const PROPERTIES_PANE_VERSION = '1.15';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -812,7 +811,14 @@ function buildLayoutRows(ctrl) {
   nameRow.className = 'prop-row';
   nameRow.innerHTML = `<label title="${escapeHtml(tt('name'))}">Name</label><input type="text" value="${escapeHtml(ctrl.name)}">`;
   nameRow.querySelector('input').addEventListener('change', (e) => {
-    ctrl.name = e.target.value.trim() || ctrl.name;
+    const newName = e.target.value.trim() || ctrl.name;
+    ctrl.name = newName;
+    // One-way sync (Control-Data.js TEXT_SYNCS_WITH_NAME_TYPES,
+    // Engine.js createControl): only while the person hasn't yet
+    // customized Text themselves, so a caption-style control's Text
+    // starts out matching its Name without extra typing, but never
+    // clobbers wording they've already gone and changed.
+    if (ctrl.textAutoSynced && ctrl.props.text !== undefined) ctrl.props.text = newName;
     render();
   });
   frag.appendChild(nameRow);
@@ -1180,7 +1186,14 @@ function buildPropRows(ctrl, propDefs) {
       row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = Number(e.target.value) || 0; render(); });
     } else {
       row.innerHTML = `<label title="${tipAttr}">${label}</label><input type="text" value="${escapeHtml(val)}">`;
-      row.querySelector('input').addEventListener('change', (e) => { ctrl.props[key] = e.target.value; render(); });
+      row.querySelector('input').addEventListener('change', (e) => {
+        ctrl.props[key] = e.target.value;
+        // Editing Text directly breaks the one-way Name -> Text sync
+        // permanently (TEXT_SYNCS_WITH_NAME_TYPES, Control-Data.js) -
+        // never re-synced afterward, even if Name changes again later.
+        if (key === 'text') ctrl.textAutoSynced = false;
+        render();
+      });
     }
     frag.appendChild(row);
   });
