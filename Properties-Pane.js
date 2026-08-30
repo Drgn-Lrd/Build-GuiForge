@@ -5,15 +5,11 @@
 
     Revision:
 
-    1. New cliPipeEditor prop type dispatch, for the CLI Command
-    Preview control's own "Pipe Output To" property (Cli-Preview-
-    Builder.js).
-
-    2. Every action card (buildActionBlock, both snippet-bound and raw/
+    1. Every action card (buildActionBlock, both snippet-bound and raw/
     freeform modes) now appends a CLI tag sub-editor - "Also contributes
     to CLI command preview" - so any action on any control's event can
-    be tagged as a CLI Command Preview contributor without touching the
-    event-snippet system itself (Cli-Preview-Builder.js).
+    be tagged as a CLI Command Preview/Run contributor without touching
+    the event-snippet system itself (Cli-Preview-Builder.js).
 */
 
 const PROPERTIES_PANE_VERSION = '1.14';
@@ -1122,10 +1118,6 @@ function buildPropRows(ctrl, propDefs) {
     }
     if (type === 'itemsListEditor') {
       frag.appendChild(buildItemsListEditorRow(ctrl, key, label));
-      return;
-    }
-    if (type === 'cliPipeEditor') {
-      frag.appendChild(buildCliPipeEditorRow(ctrl, key, label));
       return;
     }
     if (type === 'toolStripItemsEditor') {
