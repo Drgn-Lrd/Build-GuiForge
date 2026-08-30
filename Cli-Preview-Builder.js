@@ -1,41 +1,50 @@
 /*
     Cli-Preview-Builder.js
     Written by: Johnathon Largent
-    Version 1.3
+    Version 1.4
 
     Revision:
 
-    1. New "Only When" field on any tagged action (any Kind, not just
-    orList): an optional reference to a SEPARATE control (picked via the
-    same Select Control flow used elsewhere) whose own Checked state
-    gates this whole contribution, independent of whatever the tagged
-    control itself contributes. Needed because a general-purpose toggle
-    (e.g. "enable this filter at all") and a specific contribution body
-    (e.g. a status CheckedListBox's List (OR'd) clause) are naturally
-    two different controls with two different jobs - without this, a
-    checked status item would always attach regardless of whether the
-    person had actually turned filtering on.
+    1. Fixed orList reading stale state: WinForms fires ItemCheck BEFORE
+    the clicked item's own check state actually updates, so reading
+    CheckedItems directly inside that event was PERSISTENTLY one click
+    behind (every check/uncheck, not just the first) - visible as "the
+    first item doesn't attach until a second one is checked" and
+    unchecking never removing anything. Fixed the same way the existing
+    itemCheckedSetProp snippet already does: when the injection's target
+    event is ItemCheck, compute the up-to-date checked set directly from
+    $e.Index/$e.NewValue for the just-toggled item plus GetItemChecked
+    for every other item, instead of trusting CheckedItems. Elsewhere
+    (e.g. a gate's CheckedChanged, via Only When) CheckedItems is used
+    as before, since there's no pending click on that list to account
+    for there. cliArgAssignmentLines takes the injection's target event
+    name now, to tell which case applies.
 
-    2. cliArgAssignmentLines now always references the tagged control by
-    its own explicit $<Name> instead of $ThisControl, since Only When
-    means this same block of lines can be injected into a DIFFERENT
-    control's event (the gate's CheckedChanged) - $ThisControl there
-    would incorrectly mean the gate, not the originally-tagged control.
-    Wraps the whole per-Kind body in one more `if ($<Gate>.Checked) {...}
-    else { Remove }` layer when a gate is set.
+    2. Split the old single "Switch" Kind into "Command / Literal"
+    (unchanged behavior, exact text) and a new "Parameter" Kind that
+    auto-prefixes the typed Flag with '-' if missing - clearer tooltip
+    on the Kind select explaining what each is for, with examples
+    (Get-Service/tool.ps1 for Command, DisplayName for Parameter).
+
+    3. Value Kind gained "Use $cliValue from this action's own code
+    (advanced)" - when checked, the contribution reads a $cliValue
+    variable the person's own action code is expected to set, instead of
+    automatically reading a fixed property off the tagged control, so a
+    computation they've already written doesn't need to be duplicated.
 */
 
-const CLI_PREVIEW_BUILDER_VERSION = '1.3';
+const CLI_PREVIEW_BUILDER_VERSION = '1.4';
 
 // ---- Design-time helpers (used by Properties-Pane.js) ---------------
 
 // Every cli-tagged action on a control, across all of its events, in a
 // stable (event, then action index) order - each entry becomes one
-// dictionary key at codegen time. Validity depends on kind: Switch
-// requires a Flag (the flag IS the whole contribution); Value is always
-// valid (a blank Flag there is a deliberate way to contribute just a
-// control's own raw value with nothing prepended); List (OR'd) requires
-// an Item Template (Prefix/Joiner/Suffix are optional).
+// dictionary key at codegen time. Validity depends on kind: Command/
+// Literal (switch) and Parameter both require a Flag (the flag IS the
+// whole contribution); Value is always valid (a blank Flag there is a
+// deliberate way to contribute just a control's own raw value with
+// nothing prepended); List (OR'd) requires an Item Template (Prefix/
+// Joiner/Suffix are optional).
 function cliTaggedActionEntries(ctrl) {
   const entries = [];
   if (!ctrl.events) return entries;
@@ -45,7 +54,7 @@ function cliTaggedActionEntries(ctrl) {
       if (!action.cli || !action.cli.enabled) return;
       const cli = action.cli;
       const valid = cli.kind === 'value'
-        || (cli.kind === 'switch' && cli.flag)
+        || ((cli.kind === 'switch' || cli.kind === 'parameter') && cli.flag)
         || (cli.kind === 'orList' && cli.itemTemplate);
       if (valid) entries.push({ evtName, actionIndex, action });
     });
@@ -80,9 +89,9 @@ function buildCliActionTagEditor(ctrl, action, sync) {
   if (action.cli.enabled) {
     const kindRow = document.createElement('div');
     kindRow.className = 'prop-row';
-    kindRow.innerHTML = `<label title="Switch: the Flag text appears alone, only while THIS control's own boolean state (Checked) is true - use for a command verb, a bare flag, or any other literal fragment. Value: the Flag text (if any) plus this control's own value (Text/Value/etc, based on its type) - leave Flag blank to contribute just the raw value on its own; blank VALUES are omitted entirely. List (OR'd): CheckedListBox only - wraps and OR-joins every checked item into one self-contained clause.">Kind</label>`;
+    kindRow.innerHTML = `<label title="Command / Literal: the Flag text appears exactly as typed, only while THIS control's own boolean state (Checked) is true - use for a command or script name (Get-Service, tool.ps1) or any other literal syntax fragment (| Where-Object, {, }). Parameter: same idea, but a leading '-' is added automatically if you don't type one - use for a bare parameter/switch (type DisplayName, get -DisplayName). Value: the Flag text (if any) plus this control's own value (Text/Value/etc, based on its type) - leave Flag blank to contribute just the raw value on its own; blank VALUES are omitted entirely. List (OR'd): CheckedListBox only - wraps and OR-joins every checked item into one self-contained clause.">Kind</label>`;
     const kindSel = document.createElement('select');
-    const kindOptions = [['switch', 'Switch'], ['value', 'Value']];
+    const kindOptions = [['switch', 'Command / Literal'], ['parameter', 'Parameter'], ['value', 'Value']];
     if (ctrl.type === 'CheckedListBox') kindOptions.push(['orList', 'List (OR\'d)']);
     kindOptions.forEach(([k, kLabel]) => {
       const o = document.createElement('option');
@@ -127,15 +136,43 @@ function buildCliActionTagEditor(ctrl, action, sync) {
         fieldRow.appendChild(input);
         wrap.appendChild(fieldRow);
       });
-    } else {
+    } else if (action.cli.kind === 'value') {
       const flagRow = document.createElement('div');
       flagRow.className = 'prop-row';
-      flagRow.innerHTML = `<label>Flag${action.cli.kind === 'value' ? ' (optional)' : ''}</label>`;
+      flagRow.innerHTML = `<label>Flag (optional)</label>`;
       const flagInput = document.createElement('input');
       flagInput.type = 'text';
-      flagInput.placeholder = action.cli.kind === 'value' ? '-Name (leave blank for a bare value)' : '-Full';
+      flagInput.placeholder = '-Name (leave blank for a bare value)';
       flagInput.value = action.cli.flag || '';
       flagInput.addEventListener('change', () => { action.cli.flag = flagInput.value; sync(); });
+      flagRow.appendChild(flagInput);
+      wrap.appendChild(flagRow);
+
+      const useOwnRow = document.createElement('div');
+      useOwnRow.className = 'prop-row';
+      useOwnRow.innerHTML = `<label title="Instead of automatically reading this control's own property (Text/Value/etc), use a variable named $cliValue - set that variable yourself in this SAME action's own code above (e.g. $cliValue = $ThisControl.Text.ToUpper()) and this contribution will use whatever it computes, so you don't have to write the same logic twice.">Use $cliValue from this action's own code (advanced)</label>`;
+      const useOwnCheck = document.createElement('input');
+      useOwnCheck.type = 'checkbox';
+      useOwnCheck.checked = !!action.cli.useOwnCode;
+      useOwnCheck.addEventListener('change', () => { action.cli.useOwnCode = useOwnCheck.checked; sync(); });
+      useOwnRow.appendChild(useOwnCheck);
+      wrap.appendChild(useOwnRow);
+    } else {
+      // switch or parameter
+      const flagRow = document.createElement('div');
+      flagRow.className = 'prop-row';
+      flagRow.innerHTML = `<label>Flag</label>`;
+      const flagInput = document.createElement('input');
+      flagInput.type = 'text';
+      flagInput.placeholder = action.cli.kind === 'parameter' ? 'DisplayName (dash added automatically)' : 'Get-Service, tool.ps1, | Where-Object';
+      flagInput.value = action.cli.flag || '';
+      flagInput.addEventListener('change', () => {
+        let v = flagInput.value.trim();
+        if (action.cli.kind === 'parameter' && v && !v.startsWith('-')) v = '-' + v;
+        action.cli.flag = v;
+        flagInput.value = v;
+        sync();
+      });
       flagRow.appendChild(flagInput);
       wrap.appendChild(flagRow);
     }
@@ -287,10 +324,10 @@ function cliEscapePsDoubleQuoted(s) {
 // contained clause from every currently-checked item. When Only When
 // (cli.gateControlName) is set, the whole thing is additionally gated
 // behind that other control's own Checked state.
-function cliArgAssignmentLines(ctrl, cli, key, previewVar) {
+function cliArgAssignmentLines(ctrl, cli, key, previewVar, evtName) {
   const ref = `$${ctrl.name}`;
   let bodyLines;
-  if (cli.kind === 'switch') {
+  if (cli.kind === 'switch' || cli.kind === 'parameter') {
     const escapedFlag = cliEscapePsDoubleQuoted(cli.flag);
     bodyLines = [
       `if (${ref}.Checked) {`,
@@ -319,37 +356,75 @@ function cliArgAssignmentLines(ctrl, cli, key, previewVar) {
     const escPrefix = cliEscapePsDoubleQuoted(cli.prefix);
     const escJoiner = cliEscapePsDoubleQuoted(cli.joiner);
     const escSuffix = cliEscapePsDoubleQuoted(cli.suffix);
-    // NOTE: WinForms fires ItemCheck BEFORE the clicked item's own check
-    // state actually updates, so CheckedItems here reflects the state as
-    // of the PREVIOUS click, not including the one that just fired - by
-    // design the Preview dialog is only ever read on a later, separate
-    // click, so this has settled by the time it matters, but it is
-    // worth knowing if this dictionary is ever read synchronously
-    // within this same handler in the future.
-    bodyLines = [
-      `if (${ref}.CheckedItems.Count -gt 0) {`,
-      `    $cliItems = @()`,
-      `    foreach ($cliItem in ${ref}.CheckedItems) { $cliItems += ("${escBefore}" + $cliItem + "${escAfter}") }`,
-      `    $script:${previewVar}_Args['${key}'] = "${escPrefix}" + ($cliItems -join "${escJoiner}") + "${escSuffix}"`,
-      `} else {`,
-      `    $script:${previewVar}_Args.Remove('${key}')`,
-      `}`,
-    ];
-  } else {
-    // Value kind
-    const escapedFlag = cliEscapePsDoubleQuoted(cli.flag);
-    const prop = cliValuePropertyForType(ctrl.type);
-    const prefix = escapedFlag ? `"${escapedFlag} " + ` : '';
-    if (prop === 'Text') {
+    if (evtName === 'ItemCheck') {
+      // WinForms fires ItemCheck BEFORE the clicked item's own check
+      // state actually updates, so ${ref}.CheckedItems here reflects
+      // the state as of the PREVIOUS click, not including the one that
+      // just fired - PERSISTENTLY (every future click reads stale state
+      // at that same instant too, it never catches up), not just
+      // momentarily. Fixed the same way the existing itemCheckedSetProp
+      // snippet already does: compute the up-to-date state directly from
+      // $e.Index/$e.NewValue for the just-toggled item, GetItemChecked
+      // for every other item.
       bodyLines = [
-        `if ([string]::IsNullOrWhiteSpace(${ref}.Text)) {`,
-        `    $script:${previewVar}_Args.Remove('${key}')`,
+        `$cliChecked = @()`,
+        `for ($cliI = 0; $cliI -lt ${ref}.Items.Count; $cliI++) {`,
+        `    $cliIsChecked = if ($cliI -eq $e.Index) { $e.NewValue -eq [System.Windows.Forms.CheckState]::Checked } else { ${ref}.GetItemChecked($cliI) }`,
+        `    if ($cliIsChecked) { $cliChecked += ${ref}.Items[$cliI] }`,
+        `}`,
+        `if ($cliChecked.Count -gt 0) {`,
+        `    $cliItems = @()`,
+        `    foreach ($cliItem in $cliChecked) { $cliItems += ("${escBefore}" + $cliItem + "${escAfter}") }`,
+        `    $script:${previewVar}_Args['${key}'] = "${escPrefix}" + ($cliItems -join "${escJoiner}") + "${escSuffix}"`,
         `} else {`,
-        `    $script:${previewVar}_Args['${key}'] = ${prefix}${ref}.Text`,
+        `    $script:${previewVar}_Args.Remove('${key}')`,
         `}`,
       ];
     } else {
-      bodyLines = [`$script:${previewVar}_Args['${key}'] = ${prefix}${ref}.${prop}`];
+      // Injected elsewhere (e.g. a gate control's CheckedChanged, via
+      // Only When) - there's no pending click on THIS list to account
+      // for here, so its own already-committed CheckedItems is accurate.
+      bodyLines = [
+        `if (${ref}.CheckedItems.Count -gt 0) {`,
+        `    $cliItems = @()`,
+        `    foreach ($cliItem in ${ref}.CheckedItems) { $cliItems += ("${escBefore}" + $cliItem + "${escAfter}") }`,
+        `    $script:${previewVar}_Args['${key}'] = "${escPrefix}" + ($cliItems -join "${escJoiner}") + "${escSuffix}"`,
+        `} else {`,
+        `    $script:${previewVar}_Args.Remove('${key}')`,
+        `}`,
+      ];
+    }
+  } else {
+    // Value kind
+    const escapedFlag = cliEscapePsDoubleQuoted(cli.flag);
+    const prefix = escapedFlag ? `"${escapedFlag} " + ` : '';
+    if (cli.useOwnCode) {
+      // Uses $cliValue, a variable the person's OWN code (typed into
+      // this same action, above this injected block - see the
+      // "purely additive... appended after" convention in CodeGen-
+      // WinForms.js) is expected to set, instead of automatically
+      // reading a fixed property off the tagged control. Avoids asking
+      // for the same computation twice when they've already written it.
+      bodyLines = [
+        `if ([string]::IsNullOrWhiteSpace($cliValue)) {`,
+        `    $script:${previewVar}_Args.Remove('${key}')`,
+        `} else {`,
+        `    $script:${previewVar}_Args['${key}'] = ${prefix}$cliValue`,
+        `}`,
+      ];
+    } else {
+      const prop = cliValuePropertyForType(ctrl.type);
+      if (prop === 'Text') {
+        bodyLines = [
+          `if ([string]::IsNullOrWhiteSpace(${ref}.Text)) {`,
+          `    $script:${previewVar}_Args.Remove('${key}')`,
+          `} else {`,
+          `    $script:${previewVar}_Args['${key}'] = ${prefix}${ref}.Text`,
+          `}`,
+        ];
+      } else {
+        bodyLines = [`$script:${previewVar}_Args['${key}'] = ${prefix}${ref}.${prop}`];
+      }
     }
   }
 
