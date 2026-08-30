@@ -1,22 +1,18 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.16
+    Version 1.17
 
     Revision:
 
-    1. New CLI Command Preview support. Each CliPreview control gets its
-    own $script:<Name>_Args / $script:<Name>_ArgsOrder pair (ordering
-    from cliOrderedContributors, Cli-Preview-Builder.js - spans a host
-    Wizard's pages when nested inside one, otherwise the whole Form) and
-    a generated Click handler that assembles and pops the command
-    string. Every contributing control's own event handler gets extra,
-    purely-additive lines (cliArgAssignmentLines) keeping its Args entry
-    in sync, the same non-destructive convention as the Wizard's
-    "Disable Next" gate injection just above it.
+    1. Removed Run CLI Command on Click support entirely (the 1.16
+    entry below) - CliPreview is meant to stay a pure display, the same
+    role as the Wizard's Summary-of-Tasks log, not a trigger for
+    actually running anything. Back to a single, simple aggregator
+    (CliPreview only).
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.16';
+const CODEGEN_WINFORMS_VERSION = '1.17';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -403,7 +399,7 @@ function generateWinForms() {
       // is no user-editable Click here (CliPreview has no entries in
       // CONTROL_DEFS.events), the assembled-command popout IS the click
       // behavior.
-      lines.push(...cliPreviewClickHandlerLines(c, p));
+      lines.push(...cliPreviewClickHandlerLines(c));
     } else {
       // If this control needs the gate wired in but has no handler on that
       // event at all yet, synthesize an empty one so the loop below still
