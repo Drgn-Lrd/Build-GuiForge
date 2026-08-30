@@ -1,18 +1,22 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.15
+    Version 1.16
 
     Revision:
 
-    1. Wizard "Disable Next" gate injection now passes the page object
-    itself (not just its index) into wizardUnmetListUpdateLines
-    (Wizard-Builder.js), so a required control on a 'custom' combine-mode
-    page gets a direct Update-<n>NextEnabled call instead of the
-    incremental unmet-list add/remove used by All/Any.
+    1. New CLI Command Preview support. Each CliPreview control gets its
+    own $script:<Name>_Args / $script:<Name>_ArgsOrder pair (ordering
+    from cliOrderedContributors, Cli-Preview-Builder.js - spans a host
+    Wizard's pages when nested inside one, otherwise the whole Form) and
+    a generated Click handler that assembles and pops the command
+    string. Every contributing control's own event handler gets extra,
+    purely-additive lines (cliArgAssignmentLines) keeping its Args entry
+    in sync, the same non-destructive convention as the Wizard's
+    "Disable Next" gate injection just above it.
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.15';
+const CODEGEN_WINFORMS_VERSION = '1.16';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -62,6 +66,26 @@ function generateWinForms() {
   const wizardPageVarFor = {}; // `${wizardId}::${pageId}` -> generated $variable name
   const wizardInitCalls = []; // wizard names needing a final `Show-<Name>Page 0` once every control exists
 
+  // CLI Command Preview: precompute, once, every Preview control's
+  // ordered contributor list (cliOrderedContributors, Cli-Preview-
+  // Builder.js) and a reverse lookup by contributing control+event, so
+  // each contributing control's own event handler (built further below)
+  // can append its "update the Args dict" lines without re-deriving
+  // order per-control - same reasoning as the Wizard's own ordered-name
+  // precompute for its Summary log.
+  const cliContributorsByPreview = {}; // previewCtrl.id -> ordered [{ctrl, evtName, actionIndex, action}]
+  const cliByControlEvent = {}; // `${ctrlId}::${evtName}` -> [{ previewVar, key, flag, kind }]
+  ctrls.filter(c => c.type === 'CliPreview').forEach(cp => {
+    const contributors = cliOrderedContributors(cp);
+    cliContributorsByPreview[cp.id] = contributors;
+    contributors.forEach(entry => {
+      const key = `${entry.ctrl.name}_${entry.actionIndex}`;
+      const mapKey = `${entry.ctrl.id}::${entry.evtName}`;
+      if (!cliByControlEvent[mapKey]) cliByControlEvent[mapKey] = [];
+      cliByControlEvent[mapKey].push({ previewVar: cp.name, key, flag: entry.action.cli.flag, kind: entry.action.cli.kind });
+    });
+  });
+
   ctrls.forEach(c => {
     const p = c.props;
     const wfType = {
@@ -74,6 +98,7 @@ function generateWinForms() {
       FlowLayoutPanel: 'FlowLayoutPanel', TableLayoutPanel: 'TableLayoutPanel',
       StatusStrip: 'StatusStrip', ToolStrip: 'ToolStrip',
       Wizard: 'Panel', // a Wizard is design-time only - it generates as a plain Panel holding one Panel per page
+      CliPreview: 'Button', // a real Button whose Click is fully generated (see case 'CliPreview' below)
     }[c.type];
 
     lines.push(`# ${c.name} (${c.type})`);
@@ -199,6 +224,20 @@ function generateWinForms() {
         lines.push(`$${c.name}.Format = [System.Windows.Forms.DateTimePickerFormat]::${p.format}`);
         if (p.format === 'Custom' && p.customFormat) lines.push(`$${c.name}.CustomFormat = "${p.customFormat.replace(/"/g, '""')}"`);
         break;
+      case 'CliPreview': {
+        lines.push(`$${c.name}.Text = "${(p.text || '').replace(/"/g, '""')}"`);
+        // Args/ArgsOrder are this control's own $script:-scoped state -
+        // ArgsOrder is baked in fixed at build time (same reasoning as
+        // the Wizard Summary log's LogOrder: a PowerShell hashtable has
+        // no reliable enumeration order of its own), Args itself starts
+        // empty and is populated live as contributing controls fire
+        // their own tagged events.
+        const contributors = cliContributorsByPreview[c.id] || [];
+        const orderKeys = contributors.map(e => `${e.ctrl.name}_${e.actionIndex}`);
+        lines.push(`$script:${c.name}_Args = @{}`);
+        lines.push(`$script:${c.name}_ArgsOrder = @(${orderKeys.map(k => `'${k}'`).join(', ')})`);
+        break;
+      }
       case 'MenuStrip': {
         const menus = (p.menuItems || []).filter(m => m.enabled);
         menus.forEach(m => {
@@ -359,6 +398,12 @@ function generateWinForms() {
       // autoAbout items regenerating rather than trusting stored text.
       const body = wizardNavClickBody(c, wizardParent);
       lines.push(`$${c.name}.Add_Click({\n    param($sender, $e)\n    ${body}\n})`);
+    } else if (c.type === 'CliPreview') {
+      // Fully generated, same reasoning as isWizardNavBtn above - there
+      // is no user-editable Click here (CliPreview has no entries in
+      // CONTROL_DEFS.events), the assembled-command popout IS the click
+      // behavior.
+      lines.push(...cliPreviewClickHandlerLines(c, p));
     } else {
       // If this control needs the gate wired in but has no handler on that
       // event at all yet, synthesize an empty one so the loop below still
@@ -377,6 +422,20 @@ function generateWinForms() {
         if (isGateEvt) {
           const gateLines = wizardUnmetListUpdateLines(wizardParent, wizardGatePage, wizardGateItems).split('\n').join('\n    ');
           body = body ? `${body}\n    ${gateLines}` : gateLines;
+        }
+        // CLI Command Preview: purely additive, same non-destructive
+        // convention as the gate injection just above - appended after
+        // whatever the person authored on this same event, never
+        // replacing it. A control can carry more than one tagged action
+        // on the same event (e.g. two different CLI Preview controls, or
+        // two separate flags), so every matching entry is applied.
+        const cliEntries = cliByControlEvent[`${c.id}::${evtName}`];
+        if (cliEntries && cliEntries.length) {
+          const cliLines = cliEntries
+            .map(e => cliArgAssignmentLines(c, e.flag, e.key, e.kind, e.previewVar))
+            .join('\n')
+            .split('\n').join('\n    ');
+          body = body ? `${body}\n    ${cliLines}` : cliLines;
         }
         // ClickToClose is a designer-only convenience label, not a real
         // .NET event - it wires up to the actual Click event underneath.
