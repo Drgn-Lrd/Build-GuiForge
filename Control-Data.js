@@ -1,19 +1,19 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.12
+    Version 1.13
 
     Revision:
 
-    1. Wizard's props gained a third entry, footerOptions (default
-    { border: false, stepCounter: false }) - backs the new Footer
-    Options editor (Wizard-Builder.js) under the Wizard-specific
-    section: a Footer Border divider line and an auto-updating "Step X
-    of N" counter, both live in the canvas preview (Render.js) and in
-    generated WinForms code.
+    1. New CliPreview control type: a button that opens a popout showing
+    a live-assembled command-line string built from other controls'
+    event Actions tagged as CLI contributors (Properties-Pane.js,
+    Cli-Preview-Builder.js). Props: Button Text, Base Command, and Pipe
+    Output To (a cliPipeEditor dropdown of common cmdlets plus Custom).
+    No user-editable events - its Click is fully generated.
 */
 
-const CONTROL_DATA_VERSION = '1.12';
+const CONTROL_DATA_VERSION = '1.13';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -373,6 +373,15 @@ const CONTROL_DEFS = {
     isContainer: true,
     isWizard: true,
   },
+  CliPreview: {
+    label: 'CLI Command Preview', glyph: 'Cl', defaultW: 150, defaultH: 25,
+    props: [
+      ['text', 'Button Text', 'text', 'Preview Command'],
+      ['baseCommand', 'Base Command', 'text', 'script.ps1'],
+      ['pipeCmdlet', 'Pipe Output To', 'cliPipeEditor', { mode: 'None', custom: '' }],
+    ],
+    events: [],
+  },
 };
 
 // Real vector icons for the toolbox, one per control type - replaces the
@@ -405,6 +414,7 @@ const TOOL_ICONS = {
   StatusStrip: `<rect x="1.5" y="10.5" width="13" height="4" rx="0.7"/><path d="M4 12.5h4"/>`,
   ToolStrip: `<rect x="1.5" y="3.3" width="13" height="4.4" rx="0.7"/><rect x="3" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="6.2" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="9.4" y="4.3" width="2.2" height="2.4" rx="0.4"/>`,
   Wizard: `<rect x="1.5" y="2" width="13" height="9" rx="1"/><path d="M4 5.7h5M4 8h3.3"/><path d="M2 13.5h12M9.8 11l2.2 2-2.2 2" transform="translate(0,-1.2)"/>`,
+  CliPreview: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 6.3l2 1.7-2 1.7"/><path d="M7.6 10h3.2"/>`,
 };
 
 function toolIconSvg(type) {
@@ -441,13 +451,14 @@ const TOOL_DESCRIPTIONS = {
   ToolStrip: 'A horizontal bar of buttons (usually docked to the top) for quick-access actions - New/Open/Save style toolbars.',
   TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
   Wizard: 'A multi-page installer-style wizard. Dropping this opens a setup dialog to choose your pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically. Use the Pages editor to add/rename/reorder/remove pages afterward.',
+  CliPreview: 'A button that pops a small window showing a live-assembled command-line string, built from other controls\' event Actions tagged as CLI contributors ("Also contributes to CLI command preview", on any Action). Set Base Command to the command/script name; optionally pipe the result into a cmdlet like Out-GridView. Placed inside a Wizard, it reaches across all of that wizard\'s pages - otherwise it covers the whole Form.',
 };
 
 const TOOLBOX_GROUPS = [
   { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'MaskedTextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
   { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'CheckedListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
   { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl', 'FlowLayoutPanel', 'TableLayoutPanel'] },
-  { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox'] },
+  { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox', 'CliPreview'] },
   { heading: 'Menus & Bars', types: ['MenuStrip', 'ToolStrip', 'StatusStrip'] },
 ];
 // Wizard is intentionally NOT in the toolbox above - it doesn't behave
