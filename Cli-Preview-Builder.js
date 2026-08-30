@@ -1,42 +1,31 @@
 /*
     Cli-Preview-Builder.js
     Written by: Johnathon Largent
-    Version 1.2
+    Version 1.3
 
     Revision:
 
-    1. New "List (OR'd)" Kind, offered only when the tagged control is a
-    CheckedListBox: four fields (Prefix, Item Template with a {item}
-    placeholder, Joiner, Suffix) that wrap and OR-join every currently-
-    checked item into one self-contained clause, e.g. checking "Running"
-    and "Stopped" with the defaults produces
-    "| Where-Object {$_.Status -eq 'Running' -or $_.Status -eq 'Stopped'}"
-    as a single fragment. Replaces the earlier approach of splitting a
-    clause like that across two independent checkboxes, which had no
-    way to express OR - fragments only ever space-join.
+    1. New "Only When" field on any tagged action (any Kind, not just
+    orList): an optional reference to a SEPARATE control (picked via the
+    same Select Control flow used elsewhere) whose own Checked state
+    gates this whole contribution, independent of whatever the tagged
+    control itself contributes. Needed because a general-purpose toggle
+    (e.g. "enable this filter at all") and a specific contribution body
+    (e.g. a status CheckedListBox's List (OR'd) clause) are naturally
+    two different controls with two different jobs - without this, a
+    checked status item would always attach regardless of whether the
+    person had actually turned filtering on.
 
-    2. cliArgAssignmentLines now takes the whole action.cli object
-    instead of separate flag/kind parameters, since orList needs four
-    fields instead of one; cliTaggedActionEntries' validity check moved
-    to match (Switch needs Flag, Value is always valid, orList needs
-    Item Template).
-
-    3. Every literal fragment (Flag, and orList's Prefix/Item Template
-    halves/Joiner/Suffix) is escaped and wrapped as a double-quoted,
-    backtick-escaped PowerShell string (new cliEscapePsDoubleQuoted)
-    instead of single-quote-doubled. Single-quote escaping breaks when a
-    fragment's content ends in a literal quote character right against
-    the wrapper's own closing quote - three quote characters in a row
-    don't parse as "escaped quote then close" in PowerShell, they stay
-    open and swallow everything after them (including a +$cliItem+
-    concatenation) until some later quote happens to close things,
-    silently producing one corrupted string instead of the intended
-    concatenation. Exactly the shape of the default Item Template,
-    "$_.Status -eq '{item}'" - caught before this ever shipped.
-    Backtick-escaping has no such adjacency ambiguity for any content.
+    2. cliArgAssignmentLines now always references the tagged control by
+    its own explicit $<Name> instead of $ThisControl, since Only When
+    means this same block of lines can be injected into a DIFFERENT
+    control's event (the gate's CheckedChanged) - $ThisControl there
+    would incorrectly mean the gate, not the originally-tagged control.
+    Wraps the whole per-Kind body in one more `if ($<Gate>.Checked) {...}
+    else { Remove }` layer when a gate is set.
 */
 
-const CLI_PREVIEW_BUILDER_VERSION = '1.2';
+const CLI_PREVIEW_BUILDER_VERSION = '1.3';
 
 // ---- Design-time helpers (used by Properties-Pane.js) ---------------
 
@@ -150,6 +139,46 @@ function buildCliActionTagEditor(ctrl, action, sync) {
       flagRow.appendChild(flagInput);
       wrap.appendChild(flagRow);
     }
+
+    // Only When (optional, any Kind): gates this whole contribution
+    // behind a SEPARATE control's own Checked state, independent of
+    // whatever THIS control contributes - e.g. a general "enable
+    // filtering" checkbox/radio button that some other, more specific
+    // contribution (like a status CheckedListBox's List (OR'd) clause)
+    // should only attach behind, without that other checkbox needing to
+    // know or care what kind of filter it happens to be gating.
+    const gateRow = document.createElement('div');
+    gateRow.className = 'prop-row';
+    gateRow.innerHTML = `<label title="Only add this contribution while the picked control is also Checked - leave unset to always contribute based purely on this control's own state. Toggling either control refreshes the preview.">Only When (optional)</label>`;
+    const gateWrap = document.createElement('div');
+    gateWrap.className = 'snippet-param-control';
+    const gateDisplay = document.createElement('span');
+    gateDisplay.className = 'snippet-param-control-name';
+    gateDisplay.textContent = action.cli.gateControlName ? `$${action.cli.gateControlName}.Checked` : '(none)';
+    const gatePickBtn = document.createElement('button');
+    gatePickBtn.type = 'button';
+    gatePickBtn.className = 'btn btn-ghost pick-control-btn';
+    gatePickBtn.innerHTML = '\u2316 Select Control';
+    gatePickBtn.title = 'Pick another control (a CheckBox or RadioButton) whose own Checked state must also be true for this contribution to apply.';
+    gatePickBtn.addEventListener('click', () => {
+      startControlPick((pickedCtrl) => {
+        action.cli.gateControlName = pickedCtrl.name;
+        sync();
+        render();
+      });
+    });
+    gateWrap.appendChild(gateDisplay);
+    gateWrap.appendChild(gatePickBtn);
+    if (action.cli.gateControlName) {
+      const gateClearBtn = document.createElement('button');
+      gateClearBtn.type = 'button';
+      gateClearBtn.className = 'btn btn-ghost';
+      gateClearBtn.textContent = 'Clear';
+      gateClearBtn.addEventListener('click', () => { delete action.cli.gateControlName; sync(); render(); });
+      gateWrap.appendChild(gateClearBtn);
+    }
+    gateRow.appendChild(gateWrap);
+    wrap.appendChild(gateRow);
   }
 
   return wrap;
@@ -243,25 +272,34 @@ function cliEscapePsDoubleQuoted(s) {
 }
 
 // The PowerShell lines that keep one $script:<Preview>_Args entry in
-// sync with this control's current state for a single cli-tagged
-// action. Switch sets/removes a bare flag based on $ThisControl.Checked;
-// Value sets/removes "flag value" (or just "value" when Flag is blank)
-// based on whether the control's own value property is blank
-// (numeric/date properties are never blank, so those are always
-// included once the control exists); List (OR'd) - CheckedListBox only -
-// rebuilds one self-contained clause from every currently-checked item.
+// sync with a tagged control's current state for a single cli-tagged
+// action. Always references the tagged control by its OWN explicit
+// variable name ($<ctrl.name>), never $ThisControl - this same block of
+// lines can be injected into either the tagged control's own event
+// (the normal case) OR a separate gate control's event (when Only When
+// is set, so toggling the gate alone also refreshes things), and only
+// the tagged control's own name is guaranteed correct in both places.
+// Switch sets/removes a bare flag based on Checked; Value sets/removes
+// "flag value" (or just "value" when Flag is blank) based on whether
+// the control's own value property is blank (numeric/date properties
+// are never blank, so those are always included once the control
+// exists); List (OR'd) - CheckedListBox only - rebuilds one self-
+// contained clause from every currently-checked item. When Only When
+// (cli.gateControlName) is set, the whole thing is additionally gated
+// behind that other control's own Checked state.
 function cliArgAssignmentLines(ctrl, cli, key, previewVar) {
+  const ref = `$${ctrl.name}`;
+  let bodyLines;
   if (cli.kind === 'switch') {
     const escapedFlag = cliEscapePsDoubleQuoted(cli.flag);
-    return [
-      `if ($ThisControl.Checked) {`,
+    bodyLines = [
+      `if (${ref}.Checked) {`,
       `    $script:${previewVar}_Args['${key}'] = "${escapedFlag}"`,
       `} else {`,
       `    $script:${previewVar}_Args.Remove('${key}')`,
       `}`,
-    ].join('\n');
-  }
-  if (cli.kind === 'orList') {
+    ];
+  } else if (cli.kind === 'orList') {
     // {item} marks where each checked item's own text is spliced in -
     // split the template around it once, escape both literal halves and
     // concatenate with the item text at run time ("<before>" + $cliItem
@@ -282,36 +320,49 @@ function cliArgAssignmentLines(ctrl, cli, key, previewVar) {
     const escJoiner = cliEscapePsDoubleQuoted(cli.joiner);
     const escSuffix = cliEscapePsDoubleQuoted(cli.suffix);
     // NOTE: WinForms fires ItemCheck BEFORE the clicked item's own check
-    // state actually updates, so $ThisControl.CheckedItems here reflects
-    // the state as of the PREVIOUS click, not including the one that just
-    // fired - by design the Preview dialog is only ever read on a later,
-    // separate click, so this has settled by the time it matters, but it
-    // is worth knowing if this dictionary is ever read synchronously
+    // state actually updates, so CheckedItems here reflects the state as
+    // of the PREVIOUS click, not including the one that just fired - by
+    // design the Preview dialog is only ever read on a later, separate
+    // click, so this has settled by the time it matters, but it is
+    // worth knowing if this dictionary is ever read synchronously
     // within this same handler in the future.
-    return [
-      `if ($ThisControl.CheckedItems.Count -gt 0) {`,
+    bodyLines = [
+      `if (${ref}.CheckedItems.Count -gt 0) {`,
       `    $cliItems = @()`,
-      `    foreach ($cliItem in $ThisControl.CheckedItems) { $cliItems += ("${escBefore}" + $cliItem + "${escAfter}") }`,
+      `    foreach ($cliItem in ${ref}.CheckedItems) { $cliItems += ("${escBefore}" + $cliItem + "${escAfter}") }`,
       `    $script:${previewVar}_Args['${key}'] = "${escPrefix}" + ($cliItems -join "${escJoiner}") + "${escSuffix}"`,
       `} else {`,
       `    $script:${previewVar}_Args.Remove('${key}')`,
       `}`,
-    ].join('\n');
+    ];
+  } else {
+    // Value kind
+    const escapedFlag = cliEscapePsDoubleQuoted(cli.flag);
+    const prop = cliValuePropertyForType(ctrl.type);
+    const prefix = escapedFlag ? `"${escapedFlag} " + ` : '';
+    if (prop === 'Text') {
+      bodyLines = [
+        `if ([string]::IsNullOrWhiteSpace(${ref}.Text)) {`,
+        `    $script:${previewVar}_Args.Remove('${key}')`,
+        `} else {`,
+        `    $script:${previewVar}_Args['${key}'] = ${prefix}${ref}.Text`,
+        `}`,
+      ];
+    } else {
+      bodyLines = [`$script:${previewVar}_Args['${key}'] = ${prefix}${ref}.${prop}`];
+    }
   }
-  // Value kind
-  const escapedFlag = cliEscapePsDoubleQuoted(cli.flag);
-  const prop = cliValuePropertyForType(ctrl.type);
-  const prefix = escapedFlag ? `"${escapedFlag} " + ` : '';
-  if (prop === 'Text') {
+
+  if (cli.gateControlName) {
     return [
-      `if ([string]::IsNullOrWhiteSpace($ThisControl.Text)) {`,
-      `    $script:${previewVar}_Args.Remove('${key}')`,
+      `if ($${cli.gateControlName}.Checked) {`,
+      ...bodyLines.map(l => `    ${l}`),
       `} else {`,
-      `    $script:${previewVar}_Args['${key}'] = ${prefix}$ThisControl.Text`,
+      `    $script:${previewVar}_Args.Remove('${key}')`,
       `}`,
     ].join('\n');
   }
-  return `$script:${previewVar}_Args['${key}'] = ${prefix}$ThisControl.${prop}`;
+  return bodyLines.join('\n');
 }
 
 // The CLI Preview control's own Click handler: rebuilds the command
