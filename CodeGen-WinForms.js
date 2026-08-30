@@ -1,17 +1,25 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.18
+    Version 1.19
 
     Revision:
 
-    1. cliArgAssignmentLines call site updated to pass the whole
-    action.cli object (Cli-Preview-Builder.js 1.2) instead of separate
-    flag/kind arguments, to support the new "List (OR'd)" Kind's extra
-    fields (Prefix/Item Template/Joiner/Suffix).
+    1. Precompute now also registers a CLI arg-sync injection against a
+    gate control's own CheckedChanged event whenever a tagged action
+    sets Only When (Cli-Preview-Builder.js 1.3), so toggling the gate
+    alone (without touching the originally-tagged control) still
+    refreshes the assembled command. The "which events need a synthetic
+    empty entry so they're visited even if the person never authored
+    anything there" check is now general (any event cliByControlEvent
+    references for this control, not just the wizard gate's one specific
+    event), and the call to cliArgAssignmentLines passes each entry's
+    own sourceCtrl rather than always the current control, since that
+    can now legitimately differ (c is the gate, sourceCtrl is the
+    control that was actually tagged).
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.18';
+const CODEGEN_WINFORMS_VERSION = '1.19';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -69,15 +77,30 @@ function generateWinForms() {
   // order per-control - same reasoning as the Wizard's own ordered-name
   // precompute for its Summary log.
   const cliContributorsByPreview = {}; // previewCtrl.id -> ordered [{ctrl, evtName, actionIndex, action}]
-  const cliByControlEvent = {}; // `${ctrlId}::${evtName}` -> [{ previewVar, key, cli }]
+  const cliByControlEvent = {}; // `${ctrlId}::${evtName}` -> [{ previewVar, key, cli, sourceCtrl }]
+  const addCliInjection = (mapKey, entry) => {
+    if (!cliByControlEvent[mapKey]) cliByControlEvent[mapKey] = [];
+    cliByControlEvent[mapKey].push(entry);
+  };
   ctrls.filter(c => c.type === 'CliPreview').forEach(cp => {
     const contributors = cliOrderedContributors(cp);
     cliContributorsByPreview[cp.id] = contributors;
     contributors.forEach(entry => {
       const key = `${entry.ctrl.name}_${entry.actionIndex}`;
-      const mapKey = `${entry.ctrl.id}::${entry.evtName}`;
-      if (!cliByControlEvent[mapKey]) cliByControlEvent[mapKey] = [];
-      cliByControlEvent[mapKey].push({ previewVar: cp.name, key, cli: entry.action.cli });
+      const injection = { previewVar: cp.name, key, cli: entry.action.cli, sourceCtrl: entry.ctrl };
+      addCliInjection(`${entry.ctrl.id}::${entry.evtName}`, injection);
+      // Only When (action.cli.gateControlName): this same key ALSO needs
+      // refreshing whenever the gate control's own Checked state toggles
+      // on its own, without the tagged control itself being touched -
+      // e.g. flipping a general "enable filtering" checkbox should
+      // immediately reflect in the assembled command even if the status
+      // list underneath it isn't re-clicked. The gate is expected to be
+      // a CheckBox/RadioButton-style control, so CheckedChanged is the
+      // event that matters.
+      if (entry.action.cli.gateControlName) {
+        const gateCtrl = getControlByName(entry.action.cli.gateControlName);
+        if (gateCtrl) addCliInjection(`${gateCtrl.id}::CheckedChanged`, injection);
+      }
     });
   });
 
@@ -400,16 +423,27 @@ function generateWinForms() {
       // behavior.
       lines.push(...cliPreviewClickHandlerLines(c));
     } else {
-      // If this control needs the gate wired in but has no handler on that
-      // event at all yet, synthesize an empty one so the loop below still
-      // visits it - same reasoning as isWizardNavBtn above: the gate must
-      // fire regardless of whether the person happened to open that event.
+      // If this control needs the wizard gate wired in, or needs to run
+      // CLI arg-sync lines (either its own tagged action's event, or -
+      // when it's being used as another action's Only When gate -
+      // CheckedChanged), but has no handler on that event at all yet,
+      // synthesize an empty one so the loop below still visits it -
+      // these must fire regardless of whether the person happened to
+      // open that event themselves.
       const eventsForCodegen = { ...c.events };
       if (wizardGateEvtName && !eventsForCodegen[wizardGateEvtName]) eventsForCodegen[wizardGateEvtName] = { code: '' };
+      Object.keys(cliByControlEvent).forEach(mapKey => {
+        const [ctrlId, evtName] = mapKey.split('::');
+        if (ctrlId === c.id && !eventsForCodegen[evtName]) eventsForCodegen[evtName] = { code: '' };
+      });
       Object.entries(eventsForCodegen).forEach(([evtName, data]) => {
         if (!data) return;
         const isGateEvt = evtName === wizardGateEvtName;
-        const isSynthetic = isGateEvt && !c.events[evtName];
+        // Anything in eventsForCodegen that ISN'T in the control's own,
+        // real c.events must have come from one of the synthesize steps
+        // just above - covers the wizard gate and both CLI sync cases
+        // uniformly, so there's nothing further to special-case here.
+        const isSynthetic = !c.events[evtName];
         let body;
         if (data.ps1) body = `. "${data.ps1}"; ${data.fn}`;
         else if (data.code && data.code.trim()) body = data.code.split('\n').join('\n    ');
@@ -423,11 +457,14 @@ function generateWinForms() {
         // whatever the person authored on this same event, never
         // replacing it. A control can carry more than one tagged action
         // on the same event (e.g. two different CLI Preview controls, or
-        // two separate flags), so every matching entry is applied.
+        // two separate flags), so every matching entry is applied. Each
+        // entry's sourceCtrl is the ORIGINALLY tagged control, which may
+        // differ from c when this event only exists here because c is
+        // acting as that entry's Only When gate.
         const cliEntries = cliByControlEvent[`${c.id}::${evtName}`];
         if (cliEntries && cliEntries.length) {
           const cliLines = cliEntries
-            .map(e => cliArgAssignmentLines(c, e.cli, e.key, e.previewVar))
+            .map(e => cliArgAssignmentLines(e.sourceCtrl, e.cli, e.key, e.previewVar))
             .join('\n')
             .split('\n').join('\n    ');
           body = body ? `${body}\n    ${cliLines}` : cliLines;
