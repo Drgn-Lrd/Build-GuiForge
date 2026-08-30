@@ -1,477 +1,1368 @@
 /*
-    Control-Data.js
+    Engine.js
     Written by: Johnathon Largent
-    Version 1.15
+    Version 1.46
 
     Revision:
 
-    1. New TEXT_SYNCS_WITH_NAME_TYPES list (Button, Label, CheckBox,
-    RadioButton, GroupBox, LinkLabel, CliPreview) - drives a one-way
-    Name -> Text sync in Properties-Pane.js/Engine.js: a freshly-created
-    control of one of these types has its Text kept in sync with Name
-    until the person edits Text directly, at which point the sync breaks
-    permanently for that control.
+    1. createControl initializes textAutoSynced (true only for
+    TEXT_SYNCS_WITH_NAME_TYPES, Control-Data.js) - backs the new
+    one-way Name -> Text sync (Properties-Pane.js).
 */
 
-const CONTROL_DATA_VERSION = '1.15';
+const ENGINE_VERSION = '1.46';
 
-// Which properties make sense to SET on another control from event action
-// code, per control type - used by the "Set another control's property"
-// snippet so the Property dropdown only ever shows options that control
-// type actually has (fixes picking e.g. SelectedIndex on a NumericUpDown,
-// which has no such property and would error at runtime).
-const SETTABLE_PROPS_BY_TYPE = {
-  Button: ['Text', 'Enabled', 'Visible'],
-  Label: ['Text', 'Enabled', 'Visible'],
-  TextBox: ['Text', 'Enabled', 'Visible', 'ReadOnly'],
-  MaskedTextBox: ['Text', 'Enabled', 'Visible'],
-  CheckBox: ['Checked', 'Text', 'Enabled', 'Visible'],
-  RadioButton: ['Checked', 'Text', 'Enabled', 'Visible'],
-  ComboBox: ['SelectedIndex', 'Text', 'Enabled', 'Visible'],
-  ListBox: ['SelectedIndex', 'Enabled', 'Visible'],
-  CheckedListBox: ['Enabled', 'Visible'],
-  Panel: ['Enabled', 'Visible'],
-  GroupBox: ['Text', 'Enabled', 'Visible'],
-  PictureBox: ['Enabled', 'Visible'],
-  ProgressBar: ['Value', 'Enabled', 'Visible'],
-  TrackBar: ['Value', 'Enabled', 'Visible'],
-  NumericUpDown: ['Value', 'Enabled', 'Visible'],
-  DateTimePicker: ['Value', 'Enabled', 'Visible'],
-  RichTextBox: ['Text', 'Enabled', 'Visible', 'ReadOnly'],
-  LinkLabel: ['Text', 'Enabled', 'Visible'],
+/* =========================================================================
+   Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
+   defaults - moved to Control-Data.js (loaded before this file).
+   ========================================================================= */
+
+/* =========================================================================
+   State
+   ========================================================================= */
+
+const state = {
+  controls: [],          // flat list, parentId links containment
+  selectedId: null,
+  counters: {},
+  gridSize: 5,
+  snapEnabled: true,
+  nudgeStep: 5,
+  currentFormat: 'winforms',
+  sectionOpen: {},       // title -> bool, persists collapse state across re-renders
+  undoStack: [],
+  redoStack: [],
+  suppressUndoCheckpoint: false, // true during a continuous drag/resize gesture
+  dockOrderSeq: 0,
+  pickingCallback: null, // set while "Select Control" pick mode is active
+  form: {
+    text: 'MyForm',
+    width: 640,
+    height: 420,
+    backColor: '#F0F0F0',
+    minimizeBox: true,
+    maximizeBox: true,
+    closeBox: true,
+    formBorderStyle: 'Sizable', // real WinForms enum - replaces a plain true/false "resizable" toggle
+    startPosition: 'CenterScreen',
+    topMost: true,
+    events: { Load: { fn: 'Form_Load', code: '', ps1: '' } },
+    help: {
+      synopsis: { enabled: true, text: 'Creating a test GUI form' },
+      description: { enabled: false, text: '' },
+      parameters: [],
+      examples: [{ enabled: false, text: '' }],
+      notes: { enabled: true, author: 'Johnathon Largent', filename: 'TestGUI.ps1', notes: 'Requires PowerShell 5.1+ and the .NET Windows Forms assembly' },
+    },
+  },
 };
-const DEFAULT_SETTABLE_PROPS = ['Enabled', 'Visible'];
 
-function getSettableProps(type) {
-  return SETTABLE_PROPS_BY_TYPE[type] || DEFAULT_SETTABLE_PROPS;
+function nextName(type) {
+  state.counters[type] = (state.counters[type] || 0) + 1;
+  return type + state.counters[type];
 }
 
-// What kind of widget the Value field should be, given the target
-// control's type and which property was picked - e.g. a real date input
-// for DateTimePicker.Value, a dropdown of the target's own item labels
-// for ComboBox/ListBox.SelectedIndex, a toggle for boolean properties.
-function resolveValueWidgetKind(targetType, property) {
-  if (property === 'Checked' || property === 'Enabled' || property === 'Visible' || property === 'ReadOnly') return 'boolean';
-  if (property === 'Value' && targetType === 'DateTimePicker') return 'date';
-  if (property === 'Value' && (targetType === 'NumericUpDown' || targetType === 'TrackBar' || targetType === 'ProgressBar')) return 'number';
-  if (property === 'SelectedIndex' && (targetType === 'ComboBox' || targetType === 'ListBox')) return 'targetItemIndex';
-  return 'text';
+function getControl(id) { return state.controls.find(c => c.id === id); }
+function getControlByName(name) { return state.controls.find(c => c.name === name); }
+
+function createControl(type, x, y, parentId, tabPage) {
+  const def = CONTROL_DEFS[type];
+  const name = nextName(type);
+  const props = {};
+  const cloneDefault = (v) => (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+  def.props.forEach(([key, , , def0]) => { props[key] = cloneDefault(def0); });
+  COMMON_APPEARANCE_PROPS.forEach(([key, , , def0]) => { props[key] = cloneDefault(def0); });
+  COMMON_BEHAVIOR_PROPS.forEach(([key, , , def0]) => { props[key] = cloneDefault(def0); });
+  if (TYPE_BACKCOLOR_OVERRIDES[type]) props.backColor = TYPE_BACKCOLOR_OVERRIDES[type];
+  const events = {};
+  def.events.forEach(evt => { events[evt] = null; }); // null = not wired up yet
+
+  const parentZ = parentId ? ((getControl(parentId) && getControl(parentId).z) || 0) : 0;
+  const ctrl = {
+    id: 'c' + Math.random().toString(36).slice(2, 10),
+    type, name,
+    parentId: parentId || null,
+    tabPage: tabPage || null, // which tab page of a TabControl parent this belongs to, if any
+    x: snap(x), y: snap(y),
+    w: def.defaultW, h: def.defaultH,
+    z: parentZ + 1, // stays at parent.z + 1 until the user changes it manually
+    dockOrder: null, // set when Dock is turned on; docking priority, NOT z, decides stacking order
+    interact: false,
+    // One-way Name -> Text sync (Properties-Pane.js): true only for
+    // caption-style control types (TEXT_SYNCS_WITH_NAME_TYPES, Control-
+    // Data.js), and only until the person edits Text directly themselves
+    // - never re-enabled after that, so a later Name change won't
+    // clobber wording they've since customized.
+    textAutoSynced: TEXT_SYNCS_WITH_NAME_TYPES.includes(type),
+    props, events,
+  };
+  if (def.isTabControl) {
+    // Design-time-only state (like `interact`): which tab is currently
+    // showing in the designer. Not a "prop" because it's not part of the
+    // generated output, just which page you're looking at while building.
+    ctrl.activeTabId = (props.tabs[0] && props.tabs[0].id) || null;
+  }
+  if (def.isWizard) {
+    // Same design-time-only role as TabControl's activeTabId above, just
+    // reusing the field name - which wizard page is currently showing.
+    ctrl.activeTabId = (props.pages[0] && props.pages[0].id) || null;
+  }
+
+  // Menu/tool/status bars conventionally dock themselves - no reason to
+  // make the user manually flip Dock every time. MenuStrip always forces
+  // itself to sort before any already-docked Top sibling (real apps
+  // always put the menu above the toolbar, whichever was added first);
+  // ToolStrip slots in right after a MenuStrip sibling if one exists.
+  const sameGroup = (c) => (c.parentId || null) === (ctrl.parentId || null) && (c.tabPage || null) === (ctrl.tabPage || null);
+  if (type === 'MenuStrip') {
+    ctrl.props.dock = 'Top';
+    const topSiblings = state.controls.filter(c => sameGroup(c) && c.props.dock && c.props.dock !== 'None' && c.dockOrder != null);
+    ctrl.dockOrder = topSiblings.length ? Math.min(...topSiblings.map(c => c.dockOrder)) - 1 : ++state.dockOrderSeq;
+  } else if (type === 'ToolStrip') {
+    ctrl.props.dock = 'Top';
+    const menuSibling = state.controls.find(c => c.type === 'MenuStrip' && sameGroup(c) && c.dockOrder != null);
+    ctrl.dockOrder = menuSibling ? menuSibling.dockOrder + 1 : ++state.dockOrderSeq;
+  } else if (type === 'StatusStrip') {
+    ctrl.props.dock = 'Bottom';
+    ctrl.dockOrder = ++state.dockOrderSeq;
+  }
+
+  state.controls.push(ctrl);
+  // A CheckBox/RadioButton landing on a Wizard "Options" page defaults to
+  // logging itself to the Summary of Tasks (Wizard-Builder.js) - covers
+  // both the template's own starter controls and one dropped there later.
+  wizardAutoWireOptionsLog(ctrl);
+  return ctrl;
 }
 
-// Small starter icon library for ToolStrip buttons - a real icon system
-// (browsable library, custom uploads) is a bigger future feature; this is
-// just enough to make New/Open/Save look like actual toolbar buttons
-// instead of plain text. 16x16 line-art, same style as the toolbox icons.
-const TOOLSTRIP_ICONS = {
-  none: '',
-  new: '<path d="M4 1.5h5l3 3v10h-8v-13z"/><path d="M9 1.5v3h3"/>',
-  open: '<path d="M1.5 4.5v9a1 1 0 001 1h11a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H2.5a1 1 0 00-1 1z"/>',
-  save: '<rect x="2" y="2" width="12" height="12" rx="1"/><rect x="4.7" y="2" width="4.6" height="3.8"/><rect x="4.2" y="9" width="7.6" height="5"/>',
-};
-
-function toolStripIconSvg(key) {
-  const inner = TOOLSTRIP_ICONS[key] || '';
-  return `<svg class="tool-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+function snap(v) {
+  if (!state.snapEnabled) return Math.round(v);
+  return Math.round(v / state.gridSize) * state.gridSize;
 }
 
-const DEFAULT_TOOLSTRIP_ITEMS = [
-  { id: 'new', label: 'New', icon: 'new' },
-  { id: 'open', label: 'Open', icon: 'open' },
-  { id: 'save', label: 'Save', icon: 'save' },
-];
+/* =========================================================================
+   Rendering
+   ========================================================================= */
 
-// Property field shorthand: [key, label, type, default, extra]
-// type: text | number | px | checkbox | color | select | textarea
-const COMMON_APPEARANCE_PROPS = [
-  ['backColor', 'Back Color', 'color', '#F0F0F0'],
-  ['foreColor', 'Fore Color', 'color', '#000000'],
-  ['fontFamily', 'Font Family', 'select', 'Segoe UI', { options: ['Segoe UI', 'Arial', 'Tahoma', 'Consolas', 'Verdana', 'Times New Roman'] }],
-  ['fontSize', 'Font Size', 'px', 9],
-  ['fontBold', 'Bold', 'checkbox', false],
-  ['fontItalic', 'Italic', 'checkbox', false],
-  ['borderStyle', 'Border Style', 'select', 'FixedSingle', { options: ['None', 'FixedSingle', 'Fixed3D'] }],
-];
+const surfaceEl = () => document.getElementById('designSurface');
 
-const COMMON_BEHAVIOR_PROPS = [
-  ['visible', 'Visible', 'checkbox', true],
-  ['enabled', 'Enabled', 'checkbox', true],
-  ['tabIndex', 'Tab Index', 'number', 0],
-  ['toolTip', 'Tool Tip', 'text', ''],
-  ['dock', 'Dock', 'select', 'None', { options: ['None', 'Top', 'Bottom', 'Left', 'Right', 'Fill', 'TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'] }],
-  ['anchor', 'Anchor', 'anchorEditor', 'Top, Left'],
-  ['cursor', 'Cursor', 'select', 'Default', { options: ['Default', 'Hand', 'IBeam', 'Wait', 'Cross', 'SizeAll'] }],
-];
+const TAB_HEADER_HEIGHT = 26; // must match .rc-tabcontrol-header / .tabcontrol-content CSS
 
-// System-color-ish defaults per control type, applied on top of the common
-// grey (#F0F0F0) default so text-entry surfaces read as white like a real
-// Windows install rather than every control sharing one flat grey.
-const TYPE_BACKCOLOR_OVERRIDES = {
-  TextBox: '#FFFFFF', ComboBox: '#FFFFFF', ListBox: '#FFFFFF',
-  RichTextBox: '#FFFFFF', NumericUpDown: '#FFFFFF', DateTimePicker: '#FFFFFF',
-};
+// Real compound docking: controls docked to the same parent claim space in
+// z-order (lowest z first), each shrinking the remaining "client rect" for
+// the next one - exactly like a MenuStrip docked Top followed by a
+// TabControl also docked Top: the menu claims the top strip first, and the
+// tab control docks into whatever's left below it, rather than both
+// independently snapping to y=0 and overlapping. Fill-docked controls
+// always resolve last (after every edge-dock), taking whatever remains,
+// regardless of dock-order among themselves and the edge-docked controls.
+// Sorted by dockOrder (the sequence Dock was actually turned on for each
+// control), NOT z - so a control docked first keeps its claim even if a
+// later-docked sibling happens to have a lower z-index.
+function applyDockStack(rawSiblings, bounds) {
+  const siblings = rawSiblings.slice().sort((a, b) => (a.dockOrder ?? Infinity) - (b.dockOrder ?? Infinity));
+  let rect = { x: 0, y: 0, w: bounds.w, h: bounds.h };
+  const fillCtrls = [];
 
-// Default MenuStrip content: preset top-level menus (checkbox-enabled), each
-// with its own preset sub-items (also checkbox-enabled) plus room for the
-// user to add fully custom top-level menus and custom sub-items. Every
-// non-separator item ships with real default code (editable per-item),
-// not just a label - so File > Exit, Help > About, etc. actually do
-// something out of the box instead of being empty stubs.
-const PRESET_MENU_DEFAULT = [
-  {
-    id: 'file', label: 'File', enabled: true, preset: true,
-    items: [
-      { id: 'file_new', label: 'New', enabled: true, preset: true, code: '# TODO: reset the form/document to a blank state' },
-      { id: 'file_open', label: 'Open...', enabled: true, preset: true, code: '$dlg = New-Object System.Windows.Forms.OpenFileDialog\nif ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {\n    # TODO: load $($dlg.FileName)\n}' },
-      { id: 'file_save', label: 'Save', enabled: true, preset: true, code: '$dlg = New-Object System.Windows.Forms.SaveFileDialog\nif ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {\n    # TODO: save to $($dlg.FileName)\n}' },
-      { id: 'file_sep1', label: '-', enabled: true, preset: true, code: '' },
-      { id: 'file_exit', label: 'Exit', enabled: true, preset: true, code: '$Form.Close()' },
-    ],
-  },
-  {
-    id: 'view', label: 'View', enabled: true, preset: true,
-    items: [
-      { id: 'view_zoomin', label: 'Zoom In', enabled: true, preset: true, code: '$script:ZoomLevel = [Math]::Min(200, $script:ZoomLevel + 10)\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
-      { id: 'view_zoomout', label: 'Zoom Out', enabled: true, preset: true, code: '$script:ZoomLevel = [Math]::Max(50, $script:ZoomLevel - 10)\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
-      { id: 'view_reset', label: 'Reset Zoom', enabled: true, preset: true, code: '$script:ZoomLevel = 100\n[System.Windows.Forms.MessageBox]::Show("Zoom: $script:ZoomLevel%")' },
-    ],
-  },
-  {
-    id: 'help', label: 'Help', enabled: true, preset: true,
-    items: [
-      { id: 'help_docs', label: 'Documentation', enabled: true, preset: true, code: 'Start-Process "https://example.com/docs"' },
-      { id: 'help_about', label: 'About', enabled: true, preset: true, code: '', autoAbout: true },
-    ],
-  },
-];
+  siblings.forEach(ctrl => {
+    const dockVal = ctrl.props.dock || 'None';
+    if (dockVal === 'None') return;
+    if (dockVal === 'Fill') { fillCtrls.push(ctrl); return; }
+    switch (dockVal) {
+      case 'Top':
+        ctrl.x = rect.x; ctrl.y = rect.y; ctrl.w = Math.max(1, rect.w);
+        rect = { x: rect.x, y: rect.y + ctrl.h, w: rect.w, h: Math.max(0, rect.h - ctrl.h) };
+        break;
+      case 'Bottom':
+        ctrl.x = rect.x; ctrl.y = rect.y + rect.h - ctrl.h; ctrl.w = Math.max(1, rect.w);
+        rect = { x: rect.x, y: rect.y, w: rect.w, h: Math.max(0, rect.h - ctrl.h) };
+        break;
+      case 'Left':
+        ctrl.x = rect.x; ctrl.y = rect.y; ctrl.h = Math.max(1, rect.h);
+        rect = { x: rect.x + ctrl.w, y: rect.y, w: Math.max(0, rect.w - ctrl.w), h: rect.h };
+        break;
+      case 'Right':
+        ctrl.x = rect.x + rect.w - ctrl.w; ctrl.y = rect.y; ctrl.h = Math.max(1, rect.h);
+        rect = { x: rect.x, y: rect.y, w: Math.max(0, rect.w - ctrl.w), h: rect.h };
+        break;
+      // Corner variants pin flush to a corner of whatever space remains,
+      // WITHOUT stretching or claiming exclusive space - so several of
+      // these can share the same strip (e.g. two images both pinned to
+      // the top, one Top-Left and one Top-Right, with open space between
+      // them). There's no automatic collision avoidance between corner
+      // docks sharing a strip - if they're wide enough to touch, that's
+      // on the layout, same as manually placing them would be.
+      case 'TopLeft': ctrl.x = rect.x; ctrl.y = rect.y; break;
+      case 'TopRight': ctrl.x = rect.x + rect.w - ctrl.w; ctrl.y = rect.y; break;
+      case 'BottomLeft': ctrl.x = rect.x; ctrl.y = rect.y + rect.h - ctrl.h; break;
+      case 'BottomRight': ctrl.x = rect.x + rect.w - ctrl.w; ctrl.y = rect.y + rect.h - ctrl.h; break;
+    }
+  });
 
-// Default TabControl content: two starter tab pages. Each tab page holds
-// its own separate set of children (tracked via each child's `tabPage`
-// field), so controls placed on Tab1 don't show up on Tab2.
-const DEFAULT_TABS = [
-  { id: 'tab1', label: 'Tab1' },
-  { id: 'tab2', label: 'Tab2' },
-];
-
-// Fallback page set for a Wizard control - only used if one is ever
-// created outside the guided setup modal (e.g. programmatically). Real
-// instances get their pages array overwritten by createWizardFromSetup()
-// in Wizard-Builder.js, which also populates each page's template content
-// and the Back/Next/Cancel footer buttons.
-const DEFAULT_WIZARD_PAGES = [
-  { id: 'PageWelcome', label: 'Welcome', template: 'welcome', requirements: [] },
-  { id: 'PageOptions', label: 'Options', template: 'options', requirements: [] },
-  { id: 'PageSummary', label: 'Summary', template: 'summary', requirements: [] },
-];
-
-const CONTROL_DEFS = {
-  Button: {
-    label: 'Button', glyph: 'Bt', defaultW: 90, defaultH: 25,
-    props: [['text', 'Text', 'text', 'Button']],
-    events: ['Click', 'ClickToClose'],
-  },
-  Label: {
-    label: 'Label', glyph: 'Ab', defaultW: 90, defaultH: 20,
-    props: [
-      ['text', 'Text', 'text', 'Label'],
-      ['textAlign', 'Text Align', 'contentAlignEditor', 'MiddleLeft'],
-    ],
-    events: ['Click'],
-  },
-  TextBox: {
-    label: 'TextBox', glyph: 'Tb', defaultW: 120, defaultH: 22,
-    props: [
-      ['text', 'Text', 'text', ''],
-      ['multiline', 'Multiline', 'checkbox', false],
-      ['readOnly', 'Read Only', 'checkbox', false],
-      ['passwordChar', 'Password Char', 'text', ''],
-      ['maxLength', 'Max Length', 'number', 0],
-    ],
-    events: ['TextChanged', 'Enter', 'Leave', 'KeyDown'],
-  },
-  CheckBox: {
-    label: 'CheckBox', glyph: 'Ck', defaultW: 110, defaultH: 25,
-    props: [
-      ['text', 'Text', 'text', 'CheckBox'],
-      ['checked', 'Checked', 'checkbox', false],
-    ],
-    events: ['CheckedChanged', 'Click'],
-  },
-  RadioButton: {
-    label: 'Radio Button', glyph: 'Rb', defaultW: 110, defaultH: 22,
-    props: [
-      ['text', 'Text', 'text', 'RadioButton'],
-      ['checked', 'Checked', 'checkbox', false],
-      ['groupName', 'Group Name', 'text', 'group1'],
-    ],
-    events: ['CheckedChanged', 'Click'],
-  },
-  ComboBox: {
-    label: 'ComboBox', glyph: 'Cb', defaultW: 130, defaultH: 22,
-    props: [
-      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
-      ['selectedIndex', 'Selected Index', 'number', -1],
-      ['dropDownStyle', 'DropDown Style', 'select', 'DropDown', { options: ['DropDown', 'DropDownList', 'Simple'] }],
-      ['text', 'Text (design-time)', 'hidden', ''],
-    ],
-    events: ['SelectedIndexChanged', 'TextChanged'],
-  },
-  ListBox: {
-    label: 'ListBox', glyph: 'Lb', defaultW: 130, defaultH: 90,
-    props: [
-      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
-      ['selectionMode', 'Selection Mode', 'select', 'One', { options: ['None', 'One', 'MultiSimple', 'MultiExtended'] }],
-      ['selectedIndices', 'Selected Indices (design-time)', 'hidden', []],
-    ],
-    events: ['SelectedIndexChanged'],
-  },
-  CheckedListBox: {
-    label: 'CheckedListBox', glyph: 'Cl', defaultW: 140, defaultH: 100,
-    props: [
-      ['items', 'Items', 'itemsListEditor', 'Item 1\nItem 2\nItem 3'],
-      ['checkOnClick', 'Check On Click', 'checkbox', true],
-      ['checkedIndices', 'Checked Indices (design-time)', 'hidden', []],
-    ],
-    events: ['ItemCheck'],
-  },
-  Panel: {
-    label: 'Panel', glyph: 'Pn', defaultW: 200, defaultH: 140,
-    props: [], events: ['Click'], isContainer: true,
-  },
-  GroupBox: {
-    label: 'GroupBox', glyph: 'Gb', defaultW: 200, defaultH: 140,
-    props: [['text', 'Text', 'text', 'GroupBox']],
-    events: [], isContainer: true,
-  },
-  PictureBox: {
-    label: 'PictureBox', glyph: 'Px', defaultW: 100, defaultH: 100,
-    props: [
-      ['imageSource', 'Image Source', 'text', ''],
-      ['sizeMode', 'Size Mode', 'select', 'Zoom', { options: ['Normal', 'StretchImage', 'AutoSize', 'CenterImage', 'Zoom'] }],
-    ],
-    events: ['Click'],
-  },
-  ProgressBar: {
-    label: 'ProgressBar', glyph: '%%', defaultW: 150, defaultH: 20,
-    props: [
-      ['min', 'Min', 'number', 0],
-      ['max', 'Max', 'number', 100],
-      ['value', 'Value', 'number', 40],
-    ],
-    events: [],
-  },
-  TrackBar: {
-    label: 'TrackBar', glyph: '/\\', defaultW: 150, defaultH: 30,
-    props: [
-      ['min', 'Min', 'number', 0],
-      ['max', 'Max', 'number', 10],
-      ['value', 'Value', 'number', 5],
-      ['tickFrequency', 'Tick Frequency', 'number', 1],
-    ],
-    events: ['ValueChanged', 'Scroll'],
-  },
-  NumericUpDown: {
-    label: 'NumericUpDown', glyph: '#u', defaultW: 80, defaultH: 22,
-    props: [
-      ['min', 'Min', 'number', 0],
-      ['max', 'Max', 'number', 100],
-      ['value', 'Value', 'number', 0],
-      ['increment', 'Increment', 'number', 1],
-      ['decimalPlaces', 'Decimal Places', 'number', 0],
-    ],
-    events: ['ValueChanged'],
-  },
-  DateTimePicker: {
-    label: 'DateTimePicker', glyph: 'Dt', defaultW: 130, defaultH: 22,
-    props: [
-      ['format', 'Format', 'select', 'Custom', { options: ['Custom', 'Long', 'Short', 'Time'] }],
-      ['customFormat', 'Custom Format', 'text', 'dd MMM yyyy'],
-      ['value', 'Value', 'text', ''],
-    ],
-    events: ['ValueChanged'],
-  },
-  RichTextBox: {
-    label: 'RichTextBox', glyph: 'Rt', defaultW: 180, defaultH: 100,
-    props: [
-      ['text', 'Text', 'textarea', ''],
-      ['readOnly', 'Read Only', 'checkbox', false],
-    ],
-    events: ['TextChanged'],
-  },
-  LinkLabel: {
-    label: 'LinkLabel', glyph: 'Ln', defaultW: 100, defaultH: 20,
-    props: [
-      ['text', 'Text', 'text', 'link'],
-      ['url', 'URL', 'text', 'https://'],
-    ],
-    events: ['LinkClicked'],
-  },
-  MenuStrip: {
-    label: 'MenuStrip', glyph: 'Mn', defaultW: 400, defaultH: 26,
-    props: [
-      ['menuItems', 'Menu Items', 'menuEditor', PRESET_MENU_DEFAULT],
-    ],
-    events: [],
-    isMenuStrip: true,
-  },
-  TabControl: {
-    label: 'TabControl', glyph: 'Tc', defaultW: 320, defaultH: 220,
-    props: [
-      ['tabs', 'Tabs', 'tabEditor', DEFAULT_TABS],
-    ],
-    events: [],
-    isContainer: true,
-    isTabControl: true,
-  },
-  MaskedTextBox: {
-    label: 'MaskedTextBox', glyph: 'Mt', defaultW: 130, defaultH: 22,
-    props: [
-      ['mask', 'Mask', 'text', '(000) 000-0000'],
-      ['text', 'Text', 'text', ''],
-    ],
-    events: ['TextChanged', 'MaskInputRejected'],
-  },
-  FlowLayoutPanel: {
-    label: 'FlowLayoutPanel', glyph: 'Fl', defaultW: 220, defaultH: 140,
-    props: [
-      ['flowDirection', 'Flow Direction', 'select', 'LeftToRight', { options: ['LeftToRight', 'TopDown', 'RightToLeft', 'BottomUp'] }],
-      ['wrapContents', 'Wrap Contents', 'checkbox', true],
-    ],
-    events: ['Click'],
-    isContainer: true,
-  },
-  TableLayoutPanel: {
-    label: 'TableLayoutPanel', glyph: 'Tl', defaultW: 220, defaultH: 140,
-    props: [
-      ['columnCount', 'Columns', 'number', 2],
-      ['rowCount', 'Rows', 'number', 2],
-    ],
-    events: ['Click'],
-    isContainer: true,
-  },
-  StatusStrip: {
-    label: 'StatusStrip', glyph: 'Ss', defaultW: 400, defaultH: 24,
-    props: [
-      ['text', 'Text', 'text', 'Ready'],
-    ],
-    events: [],
-  },
-  ToolStrip: {
-    label: 'ToolStrip', glyph: 'Ts', defaultW: 300, defaultH: 26,
-    props: [
-      ['items', 'Items', 'toolStripItemsEditor', DEFAULT_TOOLSTRIP_ITEMS],
-    ],
-    events: [],
-  },
-  Wizard: {
-    label: 'Multipage Wizard', glyph: 'Wz', defaultW: 460, defaultH: 320,
-    props: [
-      ['contentsStyle', 'Contents', 'select', 'None', { options: ['None', 'Horizontal', 'Horizontal Flat', 'Vertical', 'Vertical Flat'] }],
-      ['pages', 'Pages', 'wizardPagesEditor', DEFAULT_WIZARD_PAGES],
-      ['footerOptions', 'Footer Options', 'wizardFooterOptionsEditor', { border: false, stepCounter: false }],
-    ],
-    events: [],
-    isContainer: true,
-    isWizard: true,
-  },
-  CliPreview: {
-    label: 'CLI Command Preview', glyph: 'Cl', defaultW: 150, defaultH: 25,
-    props: [
-      ['text', 'Button Text', 'text', 'Preview Command'],
-    ],
-    events: [],
-  },
-};
-
-// Real vector icons for the toolbox, one per control type - replaces the
-// old two-letter glyph abbreviations (Bt/Tb/Ck/etc). Each entry is just
-// the inner SVG markup; toolIconSvg() wraps it in a shared 16x16 <svg>
-// using currentColor so it follows the theme automatically.
-const TOOL_ICONS = {
-  Button: `<rect x="1.5" y="4.5" width="13" height="7" rx="1.5"/>`,
-  Label: `<path d="M2 4.5h7M2 8h10M2 11.5h5"/>`,
-  TextBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M4.2 6.2v3.6"/>`,
-  CheckBox: `<rect x="3" y="3" width="10" height="10" rx="1.5"/><path d="M5.2 8.2l2 2 3.6-4.2"/>`,
-  RadioButton: `<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>`,
-  ComboBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M10.3 6.7l1.4 1.5 1.4-1.5"/>`,
-  ListBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h5"/>`,
-  CheckedListBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><rect x="3.3" y="4.3" width="2.6" height="2.6" rx="0.4"/><path d="M3.7 5.6l0.6 0.6 1.2-1.3"/><path d="M7.3 5.6h5.2"/><rect x="3.3" y="9" width="2.6" height="2.6" rx="0.4"/><path d="M7.3 10.3h5.2"/>`,
-  Panel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/>`,
-  GroupBox: `<path d="M1.5 4.6V13.5h13V4.6H8.3M1.5 4.6h2.3M6.3 4.6c0-1.15.9-2.1 2-2.1s2 .95 2 2.1"/>`,
-  PictureBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><circle cx="5.3" cy="6" r="1.2"/><path d="M2 12l3.7-3.8 2.5 2.3L12 6.8l2 2.4"/>`,
-  ProgressBar: `<rect x="1.5" y="6" width="13" height="4" rx="1"/><rect x="2.3" y="6.8" width="6.5" height="2.4" fill="currentColor" stroke="none"/>`,
-  TrackBar: `<path d="M1.5 8h13"/><circle cx="9.5" cy="8" r="2.1" fill="currentColor" stroke="none"/>`,
-  NumericUpDown: `<rect x="1.5" y="4" width="9" height="8" rx="1"/><path d="M12.3 6.3l1.2-1.3 1.2 1.3M12.3 9.7l1.2 1.3 1.2-1.3"/>`,
-  DateTimePicker: `<rect x="1.5" y="3.3" width="13" height="10.7" rx="1"/><path d="M1.5 6.4h13M4.7 1.8v2.9M11.3 1.8v2.9M4 9h1.3M7.4 9h1.3M10.7 9h1.3M4 11.3h1.3"/>`,
-  RichTextBox: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h6"/>`,
-  LinkLabel: `<path d="M6.6 9.4l2.8-2.8"/><path d="M5.3 8.3a1.9 1.9 0 010-2.7l1.3-1.3a1.9 1.9 0 012.7 2.7l-.6.6"/><path d="M10.7 7.7a1.9 1.9 0 010 2.7l-1.3 1.3a1.9 1.9 0 01-2.7-2.7l.6-.6"/>`,
-  MenuStrip: `<rect x="1.5" y="3.3" width="13" height="3.4" rx="0.7"/><path d="M5.3 3.3v3.4M9.5 3.3v3.4"/><path d="M2 10.2h12M2 12.7h8"/>`,
-  TabControl: `<path d="M1.5 5.3V4a1 1 0 011-1h4l1.3 1.6h6.2a1 1 0 011 1v.7"/><rect x="1.5" y="5.3" width="13" height="8.2" rx="1"/><path d="M5.8 5.3v8.2"/>`,
-  MaskedTextBox: `<rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M4 6.5h1.4M6.4 6.5h1.4M8.8 6.5h1.4M4 9.2h6.2"/>`,
-  FlowLayoutPanel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><rect x="3" y="3" width="4" height="3.2" rx="0.5"/><rect x="8" y="3" width="4" height="3.2" rx="0.5"/><rect x="3" y="7.2" width="4" height="3.2" rx="0.5"/>`,
-  TableLayoutPanel: `<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M8 1.5v13M1.5 8h13"/>`,
-  StatusStrip: `<rect x="1.5" y="10.5" width="13" height="4" rx="0.7"/><path d="M4 12.5h4"/>`,
-  ToolStrip: `<rect x="1.5" y="3.3" width="13" height="4.4" rx="0.7"/><rect x="3" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="6.2" y="4.3" width="2.2" height="2.4" rx="0.4"/><rect x="9.4" y="4.3" width="2.2" height="2.4" rx="0.4"/>`,
-  Wizard: `<rect x="1.5" y="2" width="13" height="9" rx="1"/><path d="M4 5.7h5M4 8h3.3"/><path d="M2 13.5h12M9.8 11l2.2 2-2.2 2" transform="translate(0,-1.2)"/>`,
-  CliPreview: `<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 6.3l2 1.7-2 1.7"/><path d="M7.6 10h3.2"/>`,
-};
-
-function toolIconSvg(type) {
-  const inner = TOOL_ICONS[type] || '';
-  return `<svg class="tool-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+  fillCtrls.forEach(ctrl => {
+    ctrl.x = rect.x; ctrl.y = rect.y; ctrl.w = Math.max(1, rect.w); ctrl.h = Math.max(1, rect.h);
+  });
 }
 
-// Short usage description shown as a tooltip on each toolbox item -
-// what the control is for, in plain terms, since the icon/label alone
-// doesn't explain behavior for less-common controls.
-const TOOL_DESCRIPTIONS = {
-  Button: 'A clickable button. Wire its Click event to run code when pressed.',
-  Label: 'Static, read-only text. Not interactive - use for captions and headings.',
-  TextBox: 'A single- or multi-line field the user can type into.',
-  CheckBox: 'An independent on/off toggle. Multiple can be checked at once.',
-  RadioButton: 'A mutually-exclusive choice. Give matching Group Name to radio buttons that should only allow one selection.',
-  ComboBox: 'A dropdown the user can pick from (or type into, depending on DropDown Style). Enter choices in Items, one per line.',
-  ListBox: 'A scrollable list of choices, optionally multi-select. Enter choices in Items, one per line.',
-  CheckedListBox: 'Like ListBox, but every item gets its own checkbox - always a visible list, NOT a dropdown. Good for "pick any of these" scenarios where you want every option visible at once, not collapsed.',
-  Panel: 'A plain, unlabeled container for grouping other controls. Drag controls onto it to make them children.',
-  GroupBox: 'A labeled, bordered container for grouping related controls - the border and title make the grouping visible to the user.',
-  PictureBox: 'Displays an image. Set Image Source to a file path or URL.',
-  ProgressBar: 'Shows progress toward completion. Set Min/Max to the range, and Value to the current position - the fill on screen is (Value-Min)/(Max-Min).',
-  TrackBar: 'A draggable slider for picking a numeric value within Min/Max, in steps of Tick Frequency.',
-  NumericUpDown: 'A number field with up/down spinner arrows, constrained to Min/Max in steps of Increment.',
-  DateTimePicker: 'Lets the user pick a date (or time, if Format is Time). The Format property controls how it displays.',
-  RichTextBox: 'A multi-line text area for longer content than a TextBox is meant for.',
-  LinkLabel: 'Text styled and behaving like a hyperlink. Set URL to where it should navigate.',
-  MenuStrip: 'A top menu bar (File/Edit/View/etc). Comes with preset File/View/Help menus you can check on/off, edit, or add custom ones to - each item can have its own click code.',
-  MaskedTextBox: 'A TextBox that enforces a fixed input pattern (Mask), like a phone number or date field - the user can only type where the mask allows it.',
-  FlowLayoutPanel: 'A container that auto-arranges its children in a row or column, wrapping to the next line when it runs out of space - like text wrapping, but for controls.',
-  TableLayoutPanel: 'A container that arranges its children in a grid of rows and columns, each cell sized to fit its content.',
-  StatusStrip: 'A thin bar (usually docked to the bottom) showing status text - "Ready", progress, or similar.',
-  ToolStrip: 'A horizontal bar of buttons (usually docked to the top) for quick-access actions - New/Open/Save style toolbars.',
-  TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
-  Wizard: 'A multi-page installer-style wizard. Dropping this opens a setup dialog to choose your pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically. Use the Pages editor to add/rename/reorder/remove pages afterward.',
-  CliPreview: 'A button that pops a small dialog showing the live-assembled command-line string built from other controls\' event Actions tagged as CLI contributors ("Also contributes to CLI command preview", on any Action - checkboxes/radio buttons for flags and switches, text boxes for raw values or pipe fragments). Purely a display, the same role as the Wizard\'s Summary-of-Tasks log - it never runs anything. Scoped to its own immediate container (the same Form, Panel/GroupBox, or TabControl page it sits on), EXCEPT inside a Wizard, where it spans all of that wizard\'s pages, since a wizard\'s pages are cumulative steps rather than independent views.',
+function recomputeAllDocking() {
+  applyDockStack(state.controls.filter(c => !c.parentId), { w: state.form.width, h: state.form.height });
+
+  state.controls.forEach(c => {
+    const def = CONTROL_DEFS[c.type];
+    if (!def || !def.isContainer) return;
+    if (def.isTabControl) {
+      (c.props.tabs || []).forEach(tab => {
+        const kids = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === tab.id);
+        applyDockStack(kids, { w: c.w, h: Math.max(1, c.h - TAB_HEADER_HEIGHT) });
+      });
+    } else if (def.isWizard) {
+      // Each page's content docks within the wizard's content area (full
+      // bounds, minus the optional Contents nav strip - wizardContentBounds,
+      // Wizard-Builder.js); footer children (Back/Next/Cancel and anything
+      // else marked "always visible") dock against the FULL bounds instead,
+      // since a real installer's footer bar spans under the nav strip too.
+      const contentBounds = wizardContentBounds(c);
+      (c.props.pages || []).forEach(page => {
+        const kids = state.controls.filter(ch => ch.parentId === c.id && ch.tabPage === page.id && !ch.wizardFooter);
+        applyDockStack(kids, contentBounds);
+      });
+      const footerKids = state.controls.filter(ch => ch.parentId === c.id && ch.wizardFooter);
+      applyDockStack(footerKids, { w: c.w, h: c.h });
+    } else {
+      const kids = state.controls.filter(ch => ch.parentId === c.id);
+      applyDockStack(kids, { w: c.w, h: c.h });
+    }
+  });
+
+  cascadeAnchorsOnSizeChange();
+}
+
+// Anchor repositioning previously only ran during a manual drag-resize
+// (startResize's onMove) - a container resized purely by Dock (e.g. the
+// user setting a Wizard's own Dock to Fill) never triggered it, so
+// Anchored children (like a wizard's footer buttons) stayed stuck at
+// their original pixel position instead of tracking the new bounds. This
+// compares each container's size against what it was last render pass and,
+// if it changed, cascades Anchor the same way a manual resize would.
+const containerLastSize = {};
+function cascadeAnchorsOnSizeChange() {
+  state.controls.forEach(c => {
+    const prev = containerLastSize[c.id];
+    if (prev && (prev.w !== c.w || prev.h !== c.h)) {
+      state.controls.filter(ch => ch.parentId === c.id).forEach(child => {
+        applyAnchorFromOrigin(child, { x: child.x, y: child.y, w: child.w, h: child.h }, prev.w, prev.h, c.w, c.h);
+      });
+    }
+    containerLastSize[c.id] = { w: c.w, h: c.h };
+  });
+}
+
+// Undo/redo: rather than instrument every single mutation site, checkpoint
+// centrally at the top of render() by comparing against the previous
+// render's snapshot - since virtually every mutation in this app already
+// ends in a render() call, this catches all of them for free. Continuous
+// gestures (drag/resize) set suppressUndoCheckpoint so the whole gesture
+// becomes one undo step instead of one per mousemove tick.
+let lastSnapshotString = null;
+
+function snapshotState() {
+  return JSON.stringify({ controls: state.controls, form: state.form });
+}
+
+function maybeCheckpointUndo() {
+  if (lastSnapshotString === null) { lastSnapshotString = snapshotState(); return; }
+  if (state.suppressUndoCheckpoint) return;
+  const newSnap = snapshotState();
+  if (newSnap === lastSnapshotString) return;
+  state.undoStack.push(lastSnapshotString);
+  if (state.undoStack.length > 60) state.undoStack.shift();
+  state.redoStack = [];
+  lastSnapshotString = newSnap;
+}
+
+function restoreSnapshot(snapStr) {
+  const data = JSON.parse(snapStr);
+  state.controls = data.controls;
+  state.form = data.form;
+  if (state.selectedId && !getControl(state.selectedId)) state.selectedId = null;
+  lastSnapshotString = snapStr; // this restore itself shouldn't create a new undo step
+  render();
+}
+
+function undo() {
+  if (!state.undoStack.length) return;
+  state.redoStack.push(snapshotState());
+  restoreSnapshot(state.undoStack.pop());
+}
+
+function redo() {
+  if (!state.redoStack.length) return;
+  state.undoStack.push(snapshotState());
+  restoreSnapshot(state.redoStack.pop());
+}
+
+// The rect a non-docked child is actually allowed to occupy: the parent's
+// full bounds, minus whatever space docked siblings have already claimed
+// (e.g. a MenuStrip docked Top becomes the new effective top boundary for
+// everything else in that parent). This mirrors applyDockStack's client-
+// rect shrinkage but as a read-only query, so drag/resize/nudge/quick-pin
+// actions can clamp against it without re-running the dock mutation pass.
+function containerClientRect(parentId, tabPage) {
+  let bounds;
+  if (parentId) {
+    const p = getControl(parentId);
+    if (!p) return { x: 0, y: 0, w: state.form.width, h: state.form.height };
+    let h = p.h, w = p.w;
+    if (CONTROL_DEFS[p.type].isTabControl) h = Math.max(1, h - TAB_HEADER_HEIGHT);
+    else if (CONTROL_DEFS[p.type].isWizard && tabPage) {
+      // Only page content (a real tabPage id, not a footer child's null)
+      // is shrunk for the Contents nav strip - a footer button still gets
+      // the full bounds, same as recomputeAllDocking treats it.
+      const cb = wizardContentBounds(p);
+      w = cb.w; h = cb.h;
+    }
+    bounds = { w, h };
+  } else {
+    bounds = { w: state.form.width, h: state.form.height };
+  }
+
+  const dockedSiblings = state.controls
+    .filter(c => (c.parentId || null) === (parentId || null) && (c.tabPage || null) === (tabPage || null))
+    .filter(c => c.props.dock && c.props.dock !== 'None' && c.props.dock !== 'Fill')
+    .sort((a, b) => (a.dockOrder ?? Infinity) - (b.dockOrder ?? Infinity));
+
+  let rect = { x: 0, y: 0, w: bounds.w, h: bounds.h };
+  dockedSiblings.forEach(ctrl => {
+    switch (ctrl.props.dock) {
+      case 'Top': rect = { x: rect.x, y: rect.y + ctrl.h, w: rect.w, h: Math.max(0, rect.h - ctrl.h) }; break;
+      case 'Bottom': rect = { x: rect.x, y: rect.y, w: rect.w, h: Math.max(0, rect.h - ctrl.h) }; break;
+      case 'Left': rect = { x: rect.x + ctrl.w, y: rect.y, w: Math.max(0, rect.w - ctrl.w), h: rect.h }; break;
+      case 'Right': rect = { x: rect.x, y: rect.y, w: Math.max(0, rect.w - ctrl.w), h: rect.h }; break;
+    }
+  });
+  return rect;
+}
+
+// Keeps every control within its parent's available space: a child can't
+// be dragged/resized/nudged outside its container, a container can't be
+// moved/resized outside its own parent, and a docked sibling's claimed
+// space (see containerClientRect) is respected as a hard boundary too.
+// Docked controls are skipped - their bounds are fully managed by the
+// dock engine, not manual placement. Processes parents before children so
+// a container's own clamped bounds are already final before its children
+// are checked against them.
+function clampAllToContainers() {
+  const byId = {};
+  state.controls.forEach(c => { byId[c.id] = c; });
+  const depthOf = (c) => {
+    let d = 0, p = c;
+    while (p.parentId && byId[p.parentId]) { p = byId[p.parentId]; d++; }
+    return d;
+  };
+  const ordered = state.controls.slice().sort((a, b) => depthOf(a) - depthOf(b));
+
+  ordered.forEach(ctrl => {
+    if (ctrl.props.dock && ctrl.props.dock !== 'None') return;
+    const rect = containerClientRect(ctrl.parentId, ctrl.tabPage);
+    ctrl.w = Math.min(ctrl.w, Math.max(12, rect.w));
+    ctrl.h = Math.min(ctrl.h, Math.max(12, rect.h));
+    ctrl.x = Math.max(rect.x, Math.min(ctrl.x, rect.x + rect.w - ctrl.w));
+    ctrl.y = Math.max(rect.y, Math.min(ctrl.y, rect.y + rect.h - ctrl.h));
+  });
+}
+
+function render() {
+  recomputeAllDocking();
+  clampAllToContainers();
+  maybeCheckpointUndo();
+
+  const surface = surfaceEl();
+  surface.innerHTML = '';
+  state.controls
+    .filter(c => !c.parentId)
+    .forEach(c => surface.appendChild(renderControl(c)));
+  renderFormChrome();
+  renderProps();
+  renderStatus();
+}
+
+function renderFormChrome() {
+  const formEl = document.getElementById('designForm');
+  const isHtml = state.currentFormat === 'html';
+  const fbs = state.form.formBorderStyle || 'Sizable';
+  const noTitlebar = isHtml || fbs === 'None';
+  const isToolWindow = fbs === 'FixedToolWindow' || fbs === 'SizableToolWindow';
+  const isResizable = fbs === 'Sizable' || fbs === 'SizableToolWindow';
+  const titlebarHeight = noTitlebar ? 0 : (isToolWindow ? 20 : 26);
+
+  formEl.style.width = state.form.width + 'px';
+  formEl.style.height = (state.form.height + (isHtml ? 0 : titlebarHeight)) + 'px';
+  formEl.className = 'design-form skin-' + state.currentFormat +
+    ' fbs-' + fbs.toLowerCase() +
+    (isHtml || noTitlebar ? ' no-titlebar' : '') +
+    (isToolWindow ? ' tool-window' : '') +
+    (!isResizable ? ' not-resizable' : '');
+  document.getElementById('designSurface').style.height = state.form.height + 'px';
+  document.getElementById('designSurface').style.background = state.form.backColor;
+  document.getElementById('formTitleText').textContent = isHtml ? state.form.text + ' \u2014 index.html' : state.form.text;
+
+  const btnWrap = document.getElementById('formTitleButtons');
+  btnWrap.innerHTML = '';
+  if (!isHtml && !noTitlebar) {
+    // Tool windows and dialog-style borders conventionally only show
+    // Close, never Minimize/Maximize, matching real Windows chrome.
+    if (state.form.minimizeBox && !isToolWindow && fbs !== 'FixedDialog') btnWrap.appendChild(titleGlyphBtn('\u2013'));
+    if (state.form.maximizeBox && !isToolWindow && fbs !== 'FixedDialog') btnWrap.appendChild(titleGlyphBtn('\u25a1'));
+    if (state.form.closeBox) btnWrap.appendChild(titleGlyphBtn('\u00d7', true));
+  }
+
+  ensureFormResizeHandles(formEl);
+}
+
+function titleGlyphBtn(glyph, isClose) {
+  const b = document.createElement('span');
+  b.className = 'title-glyph-btn' + (isClose ? ' close' : '');
+  b.textContent = glyph;
+  return b;
+}
+
+function ensureFormResizeHandles(formEl) {
+  if (formEl.querySelector('.form-resize-handle')) return;
+  ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].forEach(pos => {
+    const h = document.createElement('div');
+    h.className = 'form-resize-handle frh-' + pos;
+    h.dataset.handle = pos;
+    h.addEventListener('mousedown', startFormResize);
+    formEl.appendChild(h);
+  });
+}
+
+function applyAnchorFromOrigin(ctrl, orig, prevW, prevH, newW, newH) {
+  // Dock takes over entirely when active - Anchor is ignored, same as real
+  // WinForms behavior (and what the Anchor tooltip already tells the user).
+  if (ctrl.props.dock && ctrl.props.dock !== 'None') return;
+
+  const anchorStr = ctrl.props.anchor || 'Top, Left';
+  if (anchorStr === 'None') return;
+
+  const anchor = anchorStr.split(',').map(s => s.trim());
+  const hasLeft = anchor.includes('Left');
+  const hasRight = anchor.includes('Right');
+  const hasTop = anchor.includes('Top');
+  const hasBottom = anchor.includes('Bottom');
+
+  // Anchor keeps each checked edge's margin at a constant PERCENTAGE of the
+  // parent's size (not a fixed pixel count), computed from the control's
+  // bounds at the start of the resize. Checking all four edges means every
+  // margin scales proportionally together, so the control grows/shrinks
+  // and stays exactly as centered, relative to the parent, as it started.
+  if (hasLeft && hasRight) {
+    const leftPct = orig.x / prevW;
+    const rightPct = (prevW - orig.x - orig.w) / prevW;
+    const newLeft = leftPct * newW;
+    const newRight = rightPct * newW;
+    ctrl.x = Math.round(newLeft);
+    ctrl.w = Math.max(12, Math.round(newW - newLeft - newRight));
+  } else if (hasLeft) {
+    ctrl.x = Math.round((orig.x / prevW) * newW);
+  } else if (hasRight) {
+    const rightPct = (prevW - orig.x - orig.w) / prevW;
+    ctrl.x = Math.round(newW - rightPct * newW - orig.w);
+  }
+
+  if (hasTop && hasBottom) {
+    const topPct = orig.y / prevH;
+    const bottomPct = (prevH - orig.y - orig.h) / prevH;
+    const newTop = topPct * newH;
+    const newBottom = bottomPct * newH;
+    ctrl.y = Math.round(newTop);
+    ctrl.h = Math.max(12, Math.round(newH - newTop - newBottom));
+  } else if (hasTop) {
+    ctrl.y = Math.round((orig.y / prevH) * newH);
+  } else if (hasBottom) {
+    const bottomPct = (prevH - orig.y - orig.h) / prevH;
+    ctrl.y = Math.round(newH - bottomPct * newH - orig.h);
+  }
+}
+
+function startFormResize(e) {
+  e.stopPropagation();
+  e.preventDefault();
+  const handle = e.currentTarget.dataset.handle;
+  const startX = e.clientX, startY = e.clientY;
+  const orig = { w: state.form.width, h: state.form.height };
+  state.suppressUndoCheckpoint = true;
+  // Snapshot top-level controls' bounds so Anchor's percentages are always
+  // computed fresh from this origin (avoids compounding rounding drift
+  // across many small mousemove ticks).
+  const origCtrls = state.controls.filter(c => !c.parentId).map(c => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }));
+
+  function onMove(ev) {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (handle.includes('e')) state.form.width = Math.max(200, snap(orig.w + dx));
+    if (handle.includes('w')) state.form.width = Math.max(200, snap(orig.w - dx));
+    if (handle.includes('s')) state.form.height = Math.max(150, snap(orig.h + dy));
+    if (handle.includes('n')) state.form.height = Math.max(150, snap(orig.h - dy));
+
+    origCtrls.forEach(o => {
+      const ctrl = getControl(o.id);
+      if (!ctrl) return;
+      applyAnchorFromOrigin(ctrl, o, orig.w, orig.h, state.form.width, state.form.height);
+    });
+
+    render();
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    state.suppressUndoCheckpoint = false;
+    render();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+/* =========================================================================
+   renderControl / renderInner and the format-skin CSS-class rendering
+   logic (buildTabHeaderStrip, fontStyleFor, borderStyleFor, the
+   DateTimePicker .NET-format renderer, renderMenuStripPreview) - moved
+   to Render.js (loaded before this file). escapeHtml stays here since
+   it's a shared utility used by Render.js, Properties-Pane.js, and the
+   objects list below.
+   ========================================================================= */
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+function renderStatus() {
+  const sel = getControl(state.selectedId);
+  document.getElementById('statusSelection').textContent = sel
+    ? `${sel.name} (${sel.type})  x:${sel.x} y:${sel.y} w:${sel.w} h:${sel.h}`
+    : 'No selection';
+  document.getElementById('statusCount').textContent = `${state.controls.length} control(s)`;
+  document.getElementById('statusGrid').textContent = `grid ${state.gridSize}px \u00b7 ${state.snapEnabled ? 'snap on' : 'snap off'}`;
+  document.getElementById('statusVersion').textContent = `engine v${ENGINE_VERSION}`;
+}
+
+/* =========================================================================
+   Interaction: select / drag / resize
+   ========================================================================= */
+
+let dragCtx = null;
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function sameZSiblings(ctrl) {
+  return state.controls.filter(s =>
+    s.id !== ctrl.id &&
+    (s.parentId || null) === (ctrl.parentId || null) &&
+    (s.tabPage || null) === (ctrl.tabPage || null) &&
+    s.z === ctrl.z &&
+    !(s.props.dock && s.props.dock !== 'None')
+  );
+}
+
+function collidesAt(ctrl, x, y, w, h, siblings) {
+  const testRect = { x, y, w, h };
+  return siblings.some(s => rectsOverlap(testRect, { x: s.x, y: s.y, w: s.w, h: s.h }));
+}
+
+// Controls at the SAME z-index within the same parent can touch edges but
+// never overlap (real collision); different z-indexes can still stack
+// freely on top of each other, since that's the whole point of z-index.
+// Slides along whichever axis isn't blocked rather than freezing outright,
+// so dragging diagonally past a neighbor still feels natural.
+function resolveDragCollision(ctrl, proposedX, proposedY) {
+  const siblings = sameZSiblings(ctrl);
+  if (!siblings.length) return { x: proposedX, y: proposedY };
+  if (!collidesAt(ctrl, proposedX, proposedY, ctrl.w, ctrl.h, siblings)) return { x: proposedX, y: proposedY };
+  if (!collidesAt(ctrl, proposedX, ctrl.y, ctrl.w, ctrl.h, siblings)) return { x: proposedX, y: ctrl.y };
+  if (!collidesAt(ctrl, ctrl.x, proposedY, ctrl.w, ctrl.h, siblings)) return { x: ctrl.x, y: proposedY };
+  return { x: ctrl.x, y: ctrl.y };
+}
+
+function startControlPick(onPick) {
+  state.pickingCallback = onPick;
+  document.body.classList.add('picking-mode');
+  showPickingBanner();
+}
+
+function cancelControlPick() {
+  state.pickingCallback = null;
+  document.body.classList.remove('picking-mode');
+  hidePickingBanner();
+}
+
+function showPickingBanner() {
+  let banner = document.getElementById('pickingBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'pickingBanner';
+    banner.className = 'picking-banner';
+    banner.innerHTML = `<span>Click a control on the canvas to select it</span><button type="button" class="btn btn-ghost" id="pickingListBtn">Or pick from list</button><button type="button" class="btn btn-ghost" id="pickingCancelBtn">Cancel (Esc)</button>`;
+    document.body.appendChild(banner);
+    banner.querySelector('#pickingCancelBtn').addEventListener('click', cancelControlPick);
+    banner.querySelector('#pickingListBtn').addEventListener('click', () => {
+      buildObjectsList();
+      document.getElementById('objectsModalOverlay').classList.add('open');
+    });
+  }
+  banner.classList.add('open');
+}
+
+function hidePickingBanner() {
+  const banner = document.getElementById('pickingBanner');
+  if (banner) banner.classList.remove('open');
+}
+
+function onControlMouseDown(e) {
+  const id = e.currentTarget.dataset.id;
+  const ctrl = getControl(id);
+  if (!ctrl) return;
+
+  if (state.pickingCallback) {
+    e.stopPropagation();
+    e.preventDefault();
+    const cb = state.pickingCallback;
+    cancelControlPick();
+    cb(ctrl);
+    return;
+  }
+
+  if (e.target.dataset.handle) {
+    e.stopPropagation();
+    startResize(e, ctrl, e.target.dataset.handle);
+    return;
+  }
+
+  if (ctrl.interact) {
+    // Deliberately do NOT call selectControl()/render() here. render()
+    // rebuilds the whole canvas DOM, which would destroy the very
+    // checkbox/select/input/date-picker the user is mid-click on, before
+    // the browser finishes toggling/opening/focusing it. Only update
+    // selection state (lightweight, no canvas rebuild) if it actually
+    // changed, so the real control is free to receive the interaction.
+    if (state.selectedId !== id) {
+      document.querySelectorAll('.ctrl.selected').forEach(elx => elx.classList.remove('selected'));
+      e.currentTarget.classList.add('selected');
+      state.selectedId = id;
+      renderProps();
+      renderStatus();
+    }
+    return;
+  }
+
+  selectControl(id);
+
+  e.stopPropagation();
+  e.preventDefault();
+  const startX = e.clientX, startY = e.clientY;
+  const origX = ctrl.x, origY = ctrl.y;
+  dragCtx = { type: 'move', ctrl, startX, startY, origX, origY };
+  state.suppressUndoCheckpoint = true;
+
+  function onMove(ev) {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    const resolved = resolveDragCollision(ctrl, snap(origX + dx), snap(origY + dy));
+    ctrl.x = resolved.x;
+    ctrl.y = resolved.y;
+    render();
+    reselectAfterRender(id);
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    dragCtx = null;
+    state.suppressUndoCheckpoint = false;
+    render();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function startResize(e, ctrl, handle) {
+  const startX = e.clientX, startY = e.clientY;
+  const orig = { x: ctrl.x, y: ctrl.y, w: ctrl.w, h: ctrl.h };
+  state.suppressUndoCheckpoint = true;
+  // If this is a container, snapshot its children's bounds too so their
+  // Anchor percentages compute from a fixed origin (not compounding
+  // rounding drift tick-to-tick). Empty for leaf controls - harmless.
+  const origChildren = state.controls.filter(c => c.parentId === ctrl.id).map(c => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }));
+
+  function onMove(ev) {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    let { x, y, w, h } = orig;
+    if (handle.includes('e')) w = Math.max(12, orig.w + dx);
+    if (handle.includes('s')) h = Math.max(12, orig.h + dy);
+    if (handle.includes('w')) { w = Math.max(12, orig.w - dx); x = orig.x + dx; }
+    if (handle.includes('n')) { h = Math.max(12, orig.h - dy); y = orig.y + dy; }
+    x = snap(x); y = snap(y); w = snap(w); h = snap(h);
+
+    // Same-z siblings can touch but not overlap - if this resize would
+    // grow into one, freeze at the control's last valid size/position.
+    const siblings = sameZSiblings(ctrl);
+    if (siblings.length && collidesAt(ctrl, x, y, w, h, siblings)) {
+      x = ctrl.x; y = ctrl.y; w = ctrl.w; h = ctrl.h;
+    }
+    ctrl.x = x; ctrl.y = y; ctrl.w = w; ctrl.h = h;
+
+    origChildren.forEach(oc => {
+      const child = getControl(oc.id);
+      if (!child) return;
+      applyAnchorFromOrigin(child, oc, orig.w, orig.h, ctrl.w, ctrl.h);
+    });
+
+    render();
+    reselectAfterRender(ctrl.id);
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    state.suppressUndoCheckpoint = false;
+    render();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function reselectAfterRender(id) {
+  // render() rebuilds the DOM; nothing further needed since selection state is data-driven
+}
+
+function selectControl(id) {
+  state.selectedId = id;
+  render();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('designSurface').addEventListener('mousedown', (e) => {
+    if (e.target.id === 'designSurface') {
+      state.selectedId = null;
+      render();
+    }
+  });
+});
+
+// Arrow-key nudge (works when a control is selected and focus isn't in a text field)
+document.addEventListener('keydown', (e) => {
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+  if (!state.selectedId) return;
+  const ctrl = getControl(state.selectedId);
+  if (!ctrl) return;
+  const step = state.nudgeStep;
+  let moved = true;
+  if (e.key === 'ArrowUp') ctrl.y = ctrl.y - step;
+  else if (e.key === 'ArrowDown') ctrl.y = ctrl.y + step;
+  else if (e.key === 'ArrowLeft') ctrl.x = ctrl.x - step;
+  else if (e.key === 'ArrowRight') ctrl.x = ctrl.x + step;
+  else if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); return; }
+  else moved = false;
+  if (moved) { e.preventDefault(); render(); }
+});
+
+function nudge(dir) {
+  const ctrl = getControl(state.selectedId);
+  if (!ctrl) return;
+  const step = state.nudgeStep;
+  if (dir === 'up') ctrl.y = ctrl.y - step;
+  if (dir === 'down') ctrl.y = ctrl.y + step;
+  if (dir === 'left') ctrl.x = ctrl.x - step;
+  if (dir === 'right') ctrl.x = ctrl.x + step;
+  render();
+}
+
+function deleteSelected() {
+  if (!state.selectedId) return;
+  const id = state.selectedId;
+  // remove control and any descendants
+  const toRemove = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    state.controls.forEach(c => {
+      if (c.parentId && toRemove.has(c.parentId) && !toRemove.has(c.id)) { toRemove.add(c.id); grew = true; }
+    });
+  }
+  state.controls = state.controls.filter(c => !toRemove.has(c.id));
+  state.selectedId = null;
+  render();
+}
+
+/* =========================================================================
+   Toolbox: drag-and-drop placement
+   ========================================================================= */
+
+function initToolbox() {
+  const box = document.getElementById('toolboxList');
+  box.innerHTML = '';
+  TOOLBOX_GROUPS.forEach(group => {
+    const h = document.createElement('div');
+    h.className = 'toolbox-heading';
+    h.textContent = group.heading;
+    box.appendChild(h);
+    group.types.forEach(type => {
+      const def = CONTROL_DEFS[type];
+      const item = document.createElement('div');
+      item.className = 'tool-item';
+      item.draggable = true;
+      item.dataset.type = type;
+      item.title = TOOL_DESCRIPTIONS[type] || def.label;
+      item.innerHTML = `<span class="tool-icon">${toolIconSvg(type)}</span><span class="tool-label">${def.label}</span>`;
+      item.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', type);
+      });
+      item.addEventListener('dblclick', () => {
+        const c = createControl(type, 20, 20, null);
+        selectControl(c.id);
+      });
+      box.appendChild(item);
+    });
+  });
+}
+
+function initCanvasDrop() {
+  const surface = surfaceEl();
+  surface.addEventListener('dragover', (e) => e.preventDefault());
+  surface.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const type = e.dataTransfer.getData('text/plain');
+    if (!CONTROL_DEFS[type]) return;
+    const rect = surface.getBoundingClientRect();
+    let x = e.clientX - rect.left, y = e.clientY - rect.top;
+
+    // If dropped inside a container control, parent to it (coords relative to container)
+    let parentId = null;
+    let tabPage = null;
+    const containerEl = document.elementFromPoint(e.clientX, e.clientY);
+    const hostEl = containerEl && containerEl.closest && containerEl.closest('.ctrl');
+    if (hostEl) {
+      const hostCtrl = getControl(hostEl.dataset.id);
+      if (hostCtrl && CONTROL_DEFS[hostCtrl.type].isContainer) {
+        parentId = hostCtrl.id;
+        // For a TabControl or Wizard, coordinates are relative to the
+        // content area (below the header strip, if any), not the whole
+        // control, and the new child belongs to whichever page is active.
+        const contentEl = hostEl.querySelector(':scope > .tabcontrol-content, :scope > .wizard-content');
+        const refEl = contentEl || hostEl;
+        const refRect = refEl.getBoundingClientRect();
+        x = e.clientX - refRect.left;
+        y = e.clientY - refRect.top;
+        if (CONTROL_DEFS[hostCtrl.type].isTabControl || CONTROL_DEFS[hostCtrl.type].isWizard) tabPage = hostCtrl.activeTabId;
+      }
+    }
+    const c = createControl(type, x, y, parentId, tabPage);
+    selectControl(c.id);
+  });
+}
+
+/* =========================================================================
+   Properties pane (renderProps, every buildXRow/buildXSection builder,
+   the events/snippets editor, MenuStrip/TabControl editors, the
+   comment-based help block builder and its generator functions) -
+   moved to Properties-Pane.js (loaded before this file).
+   ========================================================================= */
+
+/* =========================================================================
+   Code generation (generateHTML/WinForms/WPF/WinUI and their helpers,
+   plus GENERATORS) - moved to CodeGen.js/CodeGen-HTML.js/
+   CodeGen-WinForms.js/CodeGen-WPF.js/CodeGen-WinUI.js.
+   ========================================================================= */
+
+/* =========================================================================
+   Wiring: toolbar, modals
+   ========================================================================= */
+
+// Single source of truth for each output format's implementation status -
+// used both for the toolbar language buttons' tooltips and the Show Code
+// modal's scaffold note, so the wording can't drift out of sync between
+// the two places it's shown.
+const FORMAT_STATUS = {
+  winforms: { level: 'done', tooltip: 'Fully implemented and tested.' },
+  html: { level: 'done', tooltip: 'Fully implemented and tested.' },
+  wpf: { level: 'done', tooltip: 'Fully implemented and tested.' },
+  winui: {
+    level: 'stub',
+    tooltip: 'Not implemented yet: generates a page shell with a TODO list of your controls for manual porting.',
+  },
 };
 
-// Control types where Text functions as a caption (what you'd naturally
-// want to start out matching the control's Name) rather than user-
-// editable content (a TextBox's typed-in value, a ComboBox's current
-// selection, etc) - drives the one-way Name -> Text sync in Properties-
-// Pane.js: renaming a freshly-created control of one of these types also
-// updates its Text, until the person edits Text directly themselves, at
-// which point the sync breaks permanently (see ctrl.textAutoSynced).
-const TEXT_SYNCS_WITH_NAME_TYPES = ['Button', 'Label', 'CheckBox', 'RadioButton', 'GroupBox', 'LinkLabel', 'CliPreview'];
+function initFormatSwitch() {
+  document.querySelectorAll('.format-switch button').forEach(btn => {
+    const status = FORMAT_STATUS[btn.dataset.format];
+    if (status) btn.title = status.tooltip;
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.format-switch button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.currentFormat = btn.dataset.format;
+      render();
+    });
+  });
+}
 
-const TOOLBOX_GROUPS = [
-  { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'MaskedTextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
-  { heading: 'Lists & Selection', types: ['ComboBox', 'ListBox', 'CheckedListBox', 'NumericUpDown', 'DateTimePicker', 'TrackBar'] },
-  { heading: 'Containers', types: ['Panel', 'GroupBox', 'TabControl', 'FlowLayoutPanel', 'TableLayoutPanel'] },
-  { heading: 'Display', types: ['PictureBox', 'ProgressBar', 'RichTextBox', 'CliPreview'] },
-  { heading: 'Menus & Bars', types: ['MenuStrip', 'ToolStrip', 'StatusStrip'] },
-];
-// Wizard is intentionally NOT in the toolbox above - it doesn't behave
-// like a draggable-to-a-spot control (it fills its host, opens a setup
-// modal, etc.), so it gets its own dedicated toolbar button + picker
-// modal instead (see the Wizards toolbar button, Wizard-Builder.js).
-const WIZARD_TYPES = [
-  { type: 'Wizard', label: 'Multipage Wizard', description: 'An installer-style wizard with a guided page setup, Back/Next/Cancel navigation, and per-page requirements.' },
-];
+// UI chrome theme (Standard/Dark/Light) - separate from state.currentFormat,
+// which controls the WinForms/HTML/WPF/WinUI PREVIEW skin inside the design
+// canvas. This only affects the app's own toolbar/toolbox/properties-pane/
+// status-bar colors and persists across sessions via localStorage.
+const THEME_STORAGE_KEY = 'guiDesignerTheme';
+const DEFAULT_THEME = 'dark';
+
+function applyTheme(theme) {
+  if (theme === 'standard') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+  document.querySelectorAll('.theme-switch button').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === theme);
+  });
+  try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { /* storage unavailable - theme just won't persist */ }
+}
+
+function initThemeSwitch() {
+  document.querySelectorAll('.theme-switch button').forEach(btn => {
+    btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
+  });
+  let saved = DEFAULT_THEME;
+  try { saved = localStorage.getItem(THEME_STORAGE_KEY) || DEFAULT_THEME; } catch (e) { /* storage unavailable - use default */ }
+  applyTheme(saved);
+}
+
+function initShowCodeModal() {
+  const overlay = document.getElementById('codeModalOverlay');
+  document.getElementById('btnShowCode').addEventListener('click', () => {
+    overlay.classList.add('open');
+    switchCodeTab(state.currentFormat);
+  });
+  document.getElementById('codeModalClose').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+
+  document.querySelectorAll('.code-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => switchCodeTab(btn.dataset.tab));
+  });
+
+  document.getElementById('btnCopyCode').addEventListener('click', async () => {
+    const text = document.getElementById('codeOutput').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById('btnCopyCode');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1200);
+    } catch (err) { /* clipboard may be unavailable in this context */ }
+  });
+
+  document.getElementById('btnCopyXaml').addEventListener('click', async () => {
+    const text = document.getElementById('xamlOutput').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById('btnCopyXaml');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1200);
+    } catch (err) { /* clipboard may be unavailable in this context */ }
+  });
+
+  document.querySelectorAll('#wpfFileModeSwitch button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#wpfFileModeSwitch button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      setWpfFileMode(btn.dataset.mode);
+      switchCodeTab('wpf');
+    });
+  });
+
+  const xamlInput = document.getElementById('wpfXamlFilenameInput');
+  const xamlError = document.getElementById('wpfXamlFilenameError');
+  xamlInput.addEventListener('input', () => {
+    const val = xamlInput.value.trim();
+    const bad = val && !isValidWpfXamlPath(val);
+    xamlInput.classList.toggle('input-error', bad);
+    xamlError.textContent = bad ? 'Use a filename or relative path ending in .xaml, e.g. ui.xaml or ./sub/ui.xaml' : '';
+  });
+  xamlInput.addEventListener('change', () => {
+    const result = setWpfXamlFileName(xamlInput.value);
+    xamlInput.classList.toggle('input-error', !result.ok);
+    xamlError.textContent = result.ok ? '' : result.error;
+    if (result.ok) xamlInput.value = result.value;
+    switchCodeTab('wpf');
+  });
+  xamlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') xamlInput.blur(); });
+}
+
+function switchCodeTab(tab) {
+  document.querySelectorAll('.code-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  const note = document.getElementById('scaffoldNote');
+  const status = FORMAT_STATUS[tab];
+  const scaffolded = status && status.level !== 'done';
+  note.style.display = scaffolded ? 'block' : 'none';
+  note.textContent = scaffolded ? status.tooltip : '';
+
+  const isWpf = tab === 'wpf';
+  const dualMode = isWpf && getWpfFileMode() === 'dual';
+  document.getElementById('wpfFileControls').style.display = isWpf ? 'flex' : 'none';
+  document.getElementById('wpfXamlFilenameRow').style.display = dualMode ? 'flex' : 'none';
+  document.getElementById('codeOutputPrimaryLabel').style.display = isWpf ? 'block' : 'none';
+  document.getElementById('codeOutputPrimaryLabel').textContent = dualMode ? 'PowerShell (.ps1)' : 'PowerShell (.ps1, embedded XAML)';
+  document.getElementById('xamlOutputLabel').style.display = dualMode ? 'block' : 'none';
+  document.getElementById('xamlOutput').style.display = dualMode ? 'block' : 'none';
+  document.getElementById('btnCopyXaml').style.display = dualMode ? 'inline-block' : 'none';
+
+  if (dualMode) {
+    document.getElementById('wpfXamlFilenameInput').value = currentWpfXamlFileName();
+    document.getElementById('xamlOutput').textContent = generateWPFXaml();
+  }
+
+  document.getElementById('codeOutput').textContent = GENERATORS[tab]();
+}
+
+// Fill these in to match your GitHub Pages repo so the File Versions
+// modal's Last Updated column can look up each file's real last-commit
+// date via the GitHub REST API, instead of the CDN's Last-Modified
+// header (which turned out to reflect deploy time, not per-file commit
+// time). Leave GITHUB_REPO_OWNER blank to disable the lookup entirely -
+// every row then just keeps showing its hardcoded LAST_UPDATED
+// constant.
+const GITHUB_REPO_OWNER = 'Drgn-Lrd';
+const GITHUB_REPO_NAME = 'Build-GuiForge';
+const GITHUB_REPO_BRANCH = 'main';
+
+// localStorage-backed cache (rather than in-memory) so re-opening the
+// modal AND reloading the page during testing don't re-spend API
+// calls - unauthenticated GitHub API requests are capped at 60/hour
+// per IP, and this modal alone can have 14 files to look up per open.
+// Each cached entry is refreshed at most once per FILE_VERSIONS_CACHE_
+// TTL_MS.
+const FILE_VERSIONS_CACHE_KEY = 'fileVersionsCommitDateCache';
+const FILE_VERSIONS_CACHE_TTL_MS = 90 * 60 * 1000; // 1.5 hours
+
+function readFileVersionsCache() {
+  try {
+    const raw = localStorage.getItem(FILE_VERSIONS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function writeFileVersionsCache(cache) {
+  try {
+    localStorage.setItem(FILE_VERSIONS_CACHE_KEY, JSON.stringify(cache));
+  } catch (err) { /* localStorage unavailable - private browsing, quota, etc. */ }
+}
+
+// Formats an HTTP-date or ISO-8601 date string into the project's
+// "DDMonYYYY @ HH:MM:SS" display style (local time). Date() parses
+// both formats, so this is shared by anything feeding it a raw date
+// string from an API/header.
+function formatDateForFileVersions(dateStr) {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad2 = (n) => String(n).padStart(2, '0');
+  return `${pad2(d.getDate())}${months[d.getMonth()]}${d.getFullYear()} @ ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+// Looks up the most recent commit that touched fileName via the GitHub
+// REST API and returns its committer date, formatted for display.
+// Returns null (leaving the hardcoded fallback on screen) if the repo
+// constants above aren't filled in, the request fails, or no commit
+// history is returned - e.g. when testing from file:// rather than the
+// deployed GitHub Pages site. Successful and failed lookups are both
+// cached for FILE_VERSIONS_CACHE_TTL_MS so a dead endpoint or a rate
+// limit doesn't get hammered on every page load.
+async function fetchLastCommitDateForFileVersions(fileName) {
+  if (!GITHUB_REPO_OWNER || !GITHUB_REPO_NAME) return null;
+
+  const cache = readFileVersionsCache();
+  const cached = cache[fileName];
+  if (cached && (Date.now() - cached.fetchedAt) < FILE_VERSIONS_CACHE_TTL_MS) {
+    return cached.value;
+  }
+
+  let result = null;
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/commits?path=${encodeURIComponent(fileName)}&sha=${encodeURIComponent(GITHUB_REPO_BRANCH)}&per_page=1`;
+    const res = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+    if (res.ok) {
+      const data = await res.json();
+      const commitDate = data && data[0] && data[0].commit && data[0].commit.committer && data[0].commit.committer.date;
+      result = commitDate ? formatDateForFileVersions(commitDate) : null;
+    }
+  } catch (err) { /* network error, CORS, offline, etc. - falls back to hardcoded value */ }
+
+  cache[fileName] = { value: result, fetchedAt: Date.now() };
+  writeFileVersionsCache(cache);
+  return result;
+}
+
+function initAboutModal() {
+  const overlay = document.getElementById('aboutModalOverlay');
+
+  // [file name, version cell id, last-updated cell id, version value]
+  function fileVersionsRows() {
+    const stylesheetVersion = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-version').trim().replace(/'/g, '') || 'n/a';
+    return [
+      ['Cli-Preview-Builder.js', 'aboutCliPreviewBuilderVersion', 'aboutCliPreviewBuilderLastUpdated', typeof CLI_PREVIEW_BUILDER_VERSION !== 'undefined' ? CLI_PREVIEW_BUILDER_VERSION : 'n/a'],
+      ['CodeGen-HTML.js', 'aboutCodegenHtmlVersion', 'aboutCodegenHtmlLastUpdated', typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a'],
+      ['CodeGen-WinForms.js', 'aboutCodegenWinFormsVersion', 'aboutCodegenWinFormsLastUpdated', typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a'],
+      ['CodeGen-WinUI.js', 'aboutCodegenWinUiVersion', 'aboutCodegenWinUiLastUpdated', typeof CODEGEN_WINUI_VERSION !== 'undefined' ? CODEGEN_WINUI_VERSION : 'n/a'],
+      ['CodeGen-WPF.js', 'aboutCodegenWpfVersion', 'aboutCodegenWpfLastUpdated', typeof CODEGEN_WPF_VERSION !== 'undefined' ? CODEGEN_WPF_VERSION : 'n/a'],
+      ['CodeGen.js', 'aboutCodegenVersion', 'aboutCodegenLastUpdated', typeof CODEGEN_VERSION !== 'undefined' ? CODEGEN_VERSION : 'n/a'],
+      ['Control-Copy.js', 'aboutControlCopyVersion', 'aboutControlCopyLastUpdated', typeof CONTROL_COPY_VERSION !== 'undefined' ? CONTROL_COPY_VERSION : 'n/a'],
+      ['Control-Data.js', 'aboutControlDataVersion', 'aboutControlDataLastUpdated', typeof CONTROL_DATA_VERSION !== 'undefined' ? CONTROL_DATA_VERSION : 'n/a'],
+      ['Engine.js', 'aboutEngineVersion', 'aboutEngineLastUpdated', ENGINE_VERSION],
+      ['Properties-Pane.js', 'aboutPropsPaneVersion', 'aboutPropsPaneLastUpdated', typeof PROPERTIES_PANE_VERSION !== 'undefined' ? PROPERTIES_PANE_VERSION : 'n/a'],
+      ['Render.js', 'aboutRenderVersion', 'aboutRenderLastUpdated', typeof RENDER_VERSION !== 'undefined' ? RENDER_VERSION : 'n/a'],
+      ['Styles.css', 'aboutStyleVersion', 'aboutStyleLastUpdated', stylesheetVersion],
+      ['Wizard-Boolean-Builder.js', 'aboutWizardBooleanBuilderVersion', 'aboutWizardBooleanBuilderLastUpdated', typeof WIZARD_BOOLEAN_BUILDER_VERSION !== 'undefined' ? WIZARD_BOOLEAN_BUILDER_VERSION : 'n/a'],
+      ['Wizard-Builder.js', 'aboutWizardBuilderVersion', 'aboutWizardBuilderLastUpdated', typeof WIZARD_BUILDER_VERSION !== 'undefined' ? WIZARD_BUILDER_VERSION : 'n/a'],
+      ['index.html', 'aboutPageVersion', 'aboutPageLastUpdated', window.PAGE_VERSION || 'n/a']
+    ];
+  }
+
+  document.getElementById('btnAbout').addEventListener('click', () => {
+    const rows = fileVersionsRows();
+    rows.forEach(([fileName, verId, updId, verVal]) => {
+      document.getElementById(verId).textContent = verVal;
+      document.getElementById(updId).textContent = 'Loading…';
+      fetchLastCommitDateForFileVersions(fileName).then((commitDate) => {
+        document.getElementById(updId).textContent = commitDate || 'n/a';
+      });
+    });
+    overlay.classList.add('open');
+  });
+  document.getElementById('aboutModalClose').addEventListener('click', () => overlay.classList.remove('open'));
+  document.getElementById('aboutModalClose2').addEventListener('click', () => overlay.classList.remove('open'));
+
+  document.getElementById('aboutCopyVersions').addEventListener('click', async () => {
+    const rows = fileVersionsRows();
+    const nameWidth = Math.max(...rows.map(([name]) => name.length));
+    const plainBody = rows.map(([name, verId]) => `${name.padEnd(nameWidth)}\t${document.getElementById(verId).textContent}`).join('\n');
+    const fencedPlain = '```\n' + plainBody + '\n```';
+    const htmlBody = `<pre><code>${escapeHtml(plainBody)}</code></pre>`;
+
+    const btn = document.getElementById('aboutCopyVersions');
+    const orig = btn.textContent;
+    const showCopied = () => {
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1200);
+    };
+
+    if (window.ClipboardItem) {
+      try {
+        const item = new ClipboardItem({
+          'text/plain': new Blob([fencedPlain], { type: 'text/plain' }),
+          'text/html': new Blob([htmlBody], { type: 'text/html' })
+        });
+        await navigator.clipboard.write([item]);
+        showCopied();
+        return;
+      } catch (err) { /* fall through to plain-text clipboard write */ }
+    }
+
+    try {
+      await navigator.clipboard.writeText(fencedPlain);
+      showCopied();
+      return;
+    } catch (err) { /* fall through to execCommand fallback */ }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = fencedPlain;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      showCopied();
+    } catch (err) { /* clipboard unavailable in this context */ }
+  });
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+}
+
+function initTopToolbar() {
+  document.getElementById('btnDelete').addEventListener('click', deleteSelected);
+  document.getElementById('btnCopy').addEventListener('click', startCopySelected);
+  document.getElementById('btnClearAll').addEventListener('click', () => {
+    if (state.controls.length && !confirm('Remove all controls from the form?')) return;
+    state.controls = [];
+    state.selectedId = null;
+    render();
+  });
+  document.getElementById('btnUndo').addEventListener('click', undo);
+  document.getElementById('btnRedo').addEventListener('click', redo);
+  document.getElementById('btnWizards').addEventListener('click', openWizardPickerModal);
+
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.icon-picker-popover.open').forEach(p => p.classList.remove('open'));
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.pickingCallback) { cancelControlPick(); return; }
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    if (e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+  });
+}
+
+function buildObjectsList() {
+  const container = document.getElementById('objectsList');
+  container.innerHTML = '';
+
+  // Root "Main Panel" (the Form itself) - was previously unreachable here
+  // once child controls fully covered it (e.g. Dock=Fill left no empty
+  // canvas to click), since there was no way to re-select the form to
+  // get back to its properties. Selecting it mirrors clicking empty
+  // canvas: selectedId becomes null and the props pane shows Form props.
+  // Not offered as a "Select Control" pick-mode target (e.g. wiring
+  // another control's property) since the Form isn't a valid target for
+  // that flow - it's only here so the form can always be re-selected.
+  if (!state.pickingCallback) {
+    const formRow = document.createElement('div');
+    formRow.className = 'objects-row' + (state.selectedId === null ? ' active' : '');
+    formRow.style.paddingLeft = '10px';
+    formRow.innerHTML = `<span class="objects-row-name">Main Panel</span><span class="objects-row-type">Form</span>`;
+    formRow.title = 'Click to select the form.';
+    formRow.addEventListener('click', () => {
+      selectControl(null);
+      document.getElementById('objectsModalOverlay').classList.remove('open');
+    });
+    container.appendChild(formRow);
+  }
+
+  function renderLevel(parentId, tabPage, depth) {
+    const kids = state.controls
+      .filter(c => (c.parentId || null) === (parentId || null) && (c.tabPage || null) === (tabPage || null))
+      .sort((a, b) => b.z - a.z); // front-most (highest z) first, since that's what's visually "on top"
+
+    kids.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'objects-row' + (c.id === state.selectedId ? ' active' : '');
+      row.style.paddingLeft = (10 + depth * 16) + 'px';
+      row.innerHTML = `<span class="objects-row-name">${escapeHtml(c.name)}</span><span class="objects-row-type">${c.type}</span>`;
+      row.title = state.pickingCallback ? 'Click to pick this control.' : 'Click to select this control.';
+      row.addEventListener('click', () => {
+        // Selecting a control that lives on a specific TabControl/Wizard
+        // page also switches the canvas to that page - so, e.g., picking
+        // "CheckBox1" (which only exists on the Options page) from here
+        // shows Options, the same as clicking its "[Options]" header does.
+        if (c.tabPage && c.parentId) {
+          const parent = getControl(c.parentId);
+          if (parent && (CONTROL_DEFS[parent.type].isTabControl || CONTROL_DEFS[parent.type].isWizard)) {
+            parent.activeTabId = c.tabPage;
+          }
+        }
+        if (state.pickingCallback) {
+          const cb = state.pickingCallback;
+          cancelControlPick();
+          cb(c);
+        } else {
+          selectControl(c.id);
+        }
+        document.getElementById('objectsModalOverlay').classList.remove('open');
+      });
+      container.appendChild(row);
+
+      const def = CONTROL_DEFS[c.type];
+      if (def.isTabControl) {
+        (c.props.tabs || []).forEach(tab => {
+          const tabHeader = document.createElement('div');
+          tabHeader.className = 'objects-row objects-tab-header';
+          tabHeader.style.paddingLeft = (10 + (depth + 1) * 16) + 'px';
+          tabHeader.textContent = `[${tab.label}]`;
+          tabHeader.title = 'Click to switch the canvas to this tab.';
+          tabHeader.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            c.activeTabId = tab.id;
+            render();
+            document.getElementById('objectsModalOverlay').classList.remove('open');
+          });
+          container.appendChild(tabHeader);
+          renderLevel(c.id, tab.id, depth + 2);
+        });
+      } else if (def.isWizard) {
+        (c.props.pages || []).forEach(page => {
+          const pageHeader = document.createElement('div');
+          pageHeader.className = 'objects-row objects-tab-header';
+          pageHeader.style.paddingLeft = (10 + (depth + 1) * 16) + 'px';
+          pageHeader.textContent = `[${page.label}]`;
+          pageHeader.title = 'Click to switch the canvas to this page.';
+          pageHeader.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            c.activeTabId = page.id;
+            render();
+            document.getElementById('objectsModalOverlay').classList.remove('open');
+          });
+          container.appendChild(pageHeader);
+          renderLevel(c.id, page.id, depth + 2);
+        });
+        const footerHeader = document.createElement('div');
+        footerHeader.className = 'objects-row objects-tab-header';
+        footerHeader.style.paddingLeft = (10 + (depth + 1) * 16) + 'px';
+        footerHeader.textContent = '[Footer]';
+        container.appendChild(footerHeader);
+        renderLevel(c.id, null, depth + 2);
+      } else if (def.isContainer) {
+        renderLevel(c.id, null, depth + 1);
+      }
+    });
+  }
+
+  renderLevel(null, null, 0);
+  if (!container.children.length) {
+    const empty = document.createElement('div');
+    empty.className = 'objects-empty';
+    empty.textContent = 'No controls on the form yet.';
+    container.appendChild(empty);
+  }
+}
+
+function initObjectsModal() {
+  const overlay = document.getElementById('objectsModalOverlay');
+  document.getElementById('btnObjects').addEventListener('click', () => {
+    // Copy's scoped tab/page picker (Control-Copy.js) borrows this same
+    // modal shell and retitles it - reset it back here so a leftover
+    // "Copy from ..." title never lingers into the real Objects list.
+    const titleEl = document.getElementById('objectsModalTitle');
+    if (titleEl) titleEl.textContent = 'Objects';
+    buildObjectsList();
+    overlay.classList.add('open');
+  });
+  document.getElementById('objectsModalClose').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+}
+
+function initInfoModal() {
+  const overlay = document.getElementById('infoModalOverlay');
+  document.getElementById('infoModalClose').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+
+function initEngine() {
+  initToolbox();
+  initCanvasDrop();
+  initFormatSwitch();
+  initThemeSwitch();
+  initShowCodeModal();
+  initAboutModal();
+  initObjectsModal();
+  initInfoModal();
+  initTopToolbar();
+  render();
+}
+
+document.addEventListener('DOMContentLoaded', initEngine);
