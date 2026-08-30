@@ -1,19 +1,16 @@
 /*
     Engine.js
     Written by: Johnathon Largent
-    Version 1.44
+    Version 1.45
 
     Revision:
 
-    1. File Versions modal: removed the hardcoded fallback LAST_UPDATED
-    constants (ENGINE_LAST_UPDATED here, plus the matching ones in
-    index.html and Styles.css) now that the GitHub API commit-date
-    lookup is confirmed working. Last Updated cells show "Loading…"
-    until the lookup resolves, then either the commit date or "n/a" if
-    it fails - no more constant to fall back to.
+    1. About modal's file-versions table now includes Cli-Preview-
+    Builder.js (new file, backs the CLI Command Preview control -
+    Control-Data.js, Properties-Pane.js, CodeGen-WinForms.js).
 */
 
-const ENGINE_VERSION = '1.44';
+const ENGINE_VERSION = '1.45';
 
 /* =========================================================================
    Control catalog, toolbox icons/descriptions, MenuStrip/TabControl
@@ -1103,6 +1100,7 @@ function initAboutModal() {
   function fileVersionsRows() {
     const stylesheetVersion = getComputedStyle(document.documentElement).getPropertyValue('--stylesheet-version').trim().replace(/'/g, '') || 'n/a';
     return [
+      ['Cli-Preview-Builder.js', 'aboutCliPreviewBuilderVersion', 'aboutCliPreviewBuilderLastUpdated', typeof CLI_PREVIEW_BUILDER_VERSION !== 'undefined' ? CLI_PREVIEW_BUILDER_VERSION : 'n/a'],
       ['CodeGen-HTML.js', 'aboutCodegenHtmlVersion', 'aboutCodegenHtmlLastUpdated', typeof CODEGEN_HTML_VERSION !== 'undefined' ? CODEGEN_HTML_VERSION : 'n/a'],
       ['CodeGen-WinForms.js', 'aboutCodegenWinFormsVersion', 'aboutCodegenWinFormsLastUpdated', typeof CODEGEN_WINFORMS_VERSION !== 'undefined' ? CODEGEN_WINFORMS_VERSION : 'n/a'],
       ['CodeGen-WinUI.js', 'aboutCodegenWinUiVersion', 'aboutCodegenWinUiLastUpdated', typeof CODEGEN_WINUI_VERSION !== 'undefined' ? CODEGEN_WINUI_VERSION : 'n/a'],
