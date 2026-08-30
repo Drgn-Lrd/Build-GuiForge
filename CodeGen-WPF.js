@@ -1,40 +1,19 @@
 /*
     CodeGen-WPF.js
     Written by: Johnathon Largent
-    Version 1.1
+    Version 1.2
 
     Revision:
 
-    1. Full parity rewrite (was a first-pass scaffold). Nested containers
-    now genuinely nest (Panel/GroupBox/TabControl pages wrap a Canvas so
-    absolutely-positioned children work the same way they do on the
-    design canvas; FlowLayoutPanel/TableLayoutPanel host children
-    directly, matching WinForms CodeGen's own level of fidelity for
-    those two). Added real event binding: the generated PS1 now loads
-    the XAML via XamlReader, FindName's every control, and wires
-    Add_<Event> handlers - with an explicit WPF_EVENT_OVERRIDES map for
-    events that rename (SelectedIndexChanged -> SelectionChanged),
-    dual-register (CheckedChanged -> Checked+Unchecked), or have no
-    clean WPF equivalent (left as a commented-out TODO instead of
-    silently generating a broken handler). Added previously-missing
-    per-type cases (NumericUpDown, DateTimePicker, RichTextBox,
-    CheckedListBox, MaskedTextBox, FlowLayoutPanel, TableLayoutPanel,
-    StatusStrip, ToolStrip) that used to fall through to an empty
-    self-closed tag. MenuStrip items now get x:Name + Add_Click wiring
-    (mirrors CodeGen-WinForms.js's menu handling) and a $Form = $Window
-    alias is emitted so preset menu action code written for WinForms'
-    $Form convention (Open/Save/Exit/About) works unchanged here. Also
-    added single-file (embedded here-string XAML) vs dual-file
-    (external .xaml, loaded via Get-Content/$PSScriptRoot) output,
-    driven by wpfFileMode/wpfXamlFileNameOverride module state (a
-    Show Code modal view-only toggle - not part of saved project
-    state), with setWpfFileMode/setWpfXamlFileName/isValidWpfXamlPath
-    exposed for Engine.js to wire up. Depends on orderedControls
-    (CodeGen.js) and helpBlockAsPs1Comment/helpBlockAsHtmlComment
-    (Properties-Pane.js) - load before CodeGen.js.
+    1. WPF_TAG gained a CliPreview -> Button entry. CLI Command Preview
+    is a WinForms/PowerShell-only feature (CodeGen-WinForms.js,
+    Cli-Preview-Builder.js) - WPF export was otherwise about to emit an
+    invalid <undefined> element for it (WPF_TAG had no entry, so tag was
+    undefined). Renders as a plain, inert Button here; no XAML-side CLI
+    behavior is implemented.
 */
 
-const CODEGEN_WPF_VERSION = '1.1';
+const CODEGEN_WPF_VERSION = '1.2';
 
 /* =========================================================================
    Single/dual-file mode state (Show Code modal view-only toggle - does
@@ -95,7 +74,7 @@ const WPF_TAG = {
   TrackBar: 'Slider', NumericUpDown: 'TextBox', DateTimePicker: 'DatePicker',
   RichTextBox: 'TextBox', LinkLabel: 'TextBlock', CheckedListBox: 'ListBox',
   MaskedTextBox: 'TextBox', FlowLayoutPanel: 'WrapPanel', TableLayoutPanel: 'Grid',
-  StatusStrip: 'StatusBar', ToolStrip: 'ToolBar',
+  StatusStrip: 'StatusBar', ToolStrip: 'ToolBar', CliPreview: 'Button',
 };
 
 /* =========================================================================
