@@ -1,19 +1,18 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.13
+    Version 1.14
 
     Revision:
 
-    1. New CliPreview control type: a button that opens a popout showing
-    a live-assembled command-line string built from other controls'
-    event Actions tagged as CLI contributors (Properties-Pane.js,
-    Cli-Preview-Builder.js). Props: Button Text, Base Command, and Pipe
-    Output To (a cliPipeEditor dropdown of common cmdlets plus Custom).
-    No user-editable events - its Click is fully generated.
+    1. Removed the Button "Run CLI Command on Click" property and its
+    changelog entry from 1.13 - that was scope I added without it being
+    asked for. CliPreview stays exactly what it was meant to be: a pure
+    display twin to the Wizard's Summary-of-Tasks log (just a Button
+    Text prop, no execution capability at all, now or later).
 */
 
-const CONTROL_DATA_VERSION = '1.13';
+const CONTROL_DATA_VERSION = '1.14';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -377,8 +376,6 @@ const CONTROL_DEFS = {
     label: 'CLI Command Preview', glyph: 'Cl', defaultW: 150, defaultH: 25,
     props: [
       ['text', 'Button Text', 'text', 'Preview Command'],
-      ['baseCommand', 'Base Command', 'text', 'script.ps1'],
-      ['pipeCmdlet', 'Pipe Output To', 'cliPipeEditor', { mode: 'None', custom: '' }],
     ],
     events: [],
   },
@@ -451,7 +448,7 @@ const TOOL_DESCRIPTIONS = {
   ToolStrip: 'A horizontal bar of buttons (usually docked to the top) for quick-access actions - New/Open/Save style toolbars.',
   TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
   Wizard: 'A multi-page installer-style wizard. Dropping this opens a setup dialog to choose your pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically. Use the Pages editor to add/rename/reorder/remove pages afterward.',
-  CliPreview: 'A button that pops a small dialog showing a live-assembled command-line string, built from other controls\' event Actions tagged as CLI contributors ("Also contributes to CLI command preview", on any Action). Set Base Command to the command/script name; optionally pipe the result into a cmdlet like Out-GridView. Scoped to its own immediate container - the same Form, Panel/GroupBox, or TabControl page it sits on - EXCEPT inside a Wizard, where it spans all of that wizard\'s pages (since a wizard\'s pages are cumulative steps, not independent views).',
+  CliPreview: 'A button that pops a small dialog showing the live-assembled command-line string built from other controls\' event Actions tagged as CLI contributors ("Also contributes to CLI command preview", on any Action - checkboxes/radio buttons for flags and switches, text boxes for raw values or pipe fragments). Purely a display, the same role as the Wizard\'s Summary-of-Tasks log - it never runs anything. Scoped to its own immediate container (the same Form, Panel/GroupBox, or TabControl page it sits on), EXCEPT inside a Wizard, where it spans all of that wizard\'s pages, since a wizard\'s pages are cumulative steps rather than independent views.',
 };
 
 const TOOLBOX_GROUPS = [
