@@ -1,42 +1,39 @@
 /*
     Cli-Preview-Builder.js
     Written by: Johnathon Largent
-    Version 1.0
+    Version 1.1
 
     Revision:
 
-    1. New file. Implements the CLI Command Preview control: a button
-    that opens a standard blocking dialog (ShowDialog) showing a live-
-    assembled command-line string built from other controls' event
-    Actions tagged as CLI contributors. Scoped to the Preview control's
-    own immediate container by default (same Form, Panel/GroupBox, or
-    TabControl page) - EXCEPT inside a Wizard, where it spans all of
-    that wizard's pages, since a wizard's pages are cumulative steps
-    (options chosen on page 1, more on page 2, etc.) rather than
-    independent views like a TabControl's tabs. Mirrors the Wizard
-    Summary-of-Tasks log's architecture (Wizard-Builder.js) - a fixed,
-    build-time-computed order plus a $script:-scoped dictionary kept in
-    sync by each contributing control's own event handler.
+    1. Removed the Run CLI Command on Click feature added in 1.0's
+    initial draft (cliRunInvocationLines and its call sites) - out of
+    scope. CliPreview is a pure display control, the same role as the
+    Wizard's Summary-of-Tasks log: it shows the assembled command-line
+    string, it does not execute anything, now or as a future option.
+    Renamed the "aggregator" terminology back to "preview" throughout
+    now that there's only ever one kind of thing building this string.
 */
 
-const CLI_PREVIEW_BUILDER_VERSION = '1.0';
-
-// Options for the CLI Preview control's own "Pipe Output To" property -
-// a handful of common cmdlets plus a Custom freeform entry.
-const CLI_PIPE_CMDLETS = ['None', 'Out-GridView', 'Out-File', 'Format-Table', 'Format-List', 'Custom'];
+const CLI_PREVIEW_BUILDER_VERSION = '1.1';
 
 // ---- Design-time helpers (used by Properties-Pane.js) ---------------
 
 // Every cli-tagged action on a control, across all of its events, in a
 // stable (event, then action index) order - each entry becomes one
-// dictionary key at codegen time.
+// dictionary key at codegen time. A Flag is required for Switch kind
+// (the flag IS the whole contribution), but optional for Value kind - a
+// blank Flag there is a deliberate way to contribute just a control's
+// own raw value with nothing prepended (e.g. a TextBox sitting right
+// after a CheckBox that already supplied the flag).
 function cliTaggedActionEntries(ctrl) {
   const entries = [];
   if (!ctrl.events) return entries;
   Object.entries(ctrl.events).forEach(([evtName, data]) => {
     if (!data || !data.actions) return;
     data.actions.forEach((action, actionIndex) => {
-      if (action.cli && action.cli.enabled && action.cli.flag) entries.push({ evtName, actionIndex, action });
+      if (action.cli && action.cli.enabled && (action.cli.kind === 'value' || action.cli.flag)) {
+        entries.push({ evtName, actionIndex, action });
+      }
     });
   });
   return entries;
@@ -67,20 +64,9 @@ function buildCliActionTagEditor(ctrl, action, sync) {
   wrap.appendChild(row);
 
   if (action.cli.enabled) {
-    const flagRow = document.createElement('div');
-    flagRow.className = 'prop-row';
-    flagRow.innerHTML = `<label>Flag</label>`;
-    const flagInput = document.createElement('input');
-    flagInput.type = 'text';
-    flagInput.placeholder = '-Full';
-    flagInput.value = action.cli.flag || '';
-    flagInput.addEventListener('change', () => { action.cli.flag = flagInput.value; sync(); });
-    flagRow.appendChild(flagInput);
-    wrap.appendChild(flagRow);
-
     const kindRow = document.createElement('div');
     kindRow.className = 'prop-row';
-    kindRow.innerHTML = `<label title="Switch: the flag appears alone, only while THIS control's own boolean state (Checked) is true. Value: the flag plus this control's own value (Text/Value/etc, based on its type) - blank values are omitted entirely.">Kind</label>`;
+    kindRow.innerHTML = `<label title="Switch: the Flag text appears alone, only while THIS control's own boolean state (Checked) is true - use for a command verb, a bare flag, or any other literal fragment. Value: the Flag text (if any) plus this control's own value (Text/Value/etc, based on its type) - leave Flag blank to contribute just the raw value on its own; blank VALUES are omitted entirely.">Kind</label>`;
     const kindSel = document.createElement('select');
     ['switch', 'value'].forEach(k => {
       const o = document.createElement('option');
@@ -89,44 +75,20 @@ function buildCliActionTagEditor(ctrl, action, sync) {
       if (action.cli.kind === k) o.selected = true;
       kindSel.appendChild(o);
     });
-    kindSel.addEventListener('change', () => { action.cli.kind = kindSel.value; sync(); });
+    kindSel.addEventListener('change', () => { action.cli.kind = kindSel.value; sync(); render(); });
     kindRow.appendChild(kindSel);
     wrap.appendChild(kindRow);
-  }
 
-  return wrap;
-}
-
-// Properties-pane row for the CLI Preview control's own "Pipe Output To"
-// property - a dropdown of common cmdlets, plus a Custom freeform field.
-function buildCliPipeEditorRow(ctrl, key, label) {
-  const wrap = document.createElement('div');
-  wrap.className = 'prop-row cli-pipe-editor-row';
-
-  const labelEl = document.createElement('label');
-  labelEl.textContent = label;
-  labelEl.title = tt(key);
-  wrap.appendChild(labelEl);
-
-  const val = ctrl.props[key] || { mode: 'None', custom: '' };
-  const sel = document.createElement('select');
-  CLI_PIPE_CMDLETS.forEach(cmd => {
-    const o = document.createElement('option');
-    o.value = cmd;
-    o.textContent = cmd;
-    if (val.mode === cmd) o.selected = true;
-    sel.appendChild(o);
-  });
-  sel.addEventListener('change', () => { val.mode = sel.value; ctrl.props[key] = val; render(); });
-  wrap.appendChild(sel);
-
-  if (val.mode === 'Custom') {
-    const customInput = document.createElement('input');
-    customInput.type = 'text';
-    customInput.placeholder = 'Custom-Cmdlet';
-    customInput.value = val.custom || '';
-    customInput.addEventListener('change', () => { val.custom = customInput.value; ctrl.props[key] = val; render(); });
-    wrap.appendChild(customInput);
+    const flagRow = document.createElement('div');
+    flagRow.className = 'prop-row';
+    flagRow.innerHTML = `<label>Flag${action.cli.kind === 'value' ? ' (optional)' : ''}</label>`;
+    const flagInput = document.createElement('input');
+    flagInput.type = 'text';
+    flagInput.placeholder = action.cli.kind === 'value' ? '-Name (leave blank for a bare value)' : '-Full';
+    flagInput.value = action.cli.flag || '';
+    flagInput.addEventListener('change', () => { action.cli.flag = flagInput.value; sync(); });
+    flagRow.appendChild(flagInput);
+    wrap.appendChild(flagRow);
   }
 
   return wrap;
@@ -164,7 +126,11 @@ function cliFindHostWizard(ctrl) {
 // may never have looked at; scoping to the exact container the Preview
 // itself sits in - matching by construction, since the Preview can only
 // be seen/clicked while its own tab/panel is showing - avoids that
-// without needing any runtime "which tab is active" check.
+// without needing any runtime "which tab is active" check. Only direct
+// children of the wizard/page (or the Preview's own immediate parent)
+// are scanned, matching the Summary log's own scoping - a cli-tagged
+// action inside a nested Panel/GroupBox one level further down isn't
+// reached, same limitation as that feature.
 function cliOrderedContributors(previewCtrl) {
   const wizard = cliFindHostWizard(previewCtrl);
   const results = [];
@@ -199,11 +165,12 @@ function cliValuePropertyForType(type) {
 // The PowerShell lines that keep one $script:<Preview>_Args entry in
 // sync with this control's current state for a single cli-tagged
 // action - Switch sets/removes a bare flag based on $ThisControl.Checked;
-// Value sets/removes "flag value" based on whether the control's own
-// value property is blank (numeric/date properties are never blank, so
-// those are always included once the control exists).
+// Value sets/removes "flag value" (or just "value" when Flag is blank)
+// based on whether the control's own value property is blank
+// (numeric/date properties are never blank, so those are always
+// included once the control exists).
 function cliArgAssignmentLines(ctrl, flag, key, kind, previewVar) {
-  const escapedFlag = flag.replace(/"/g, '""').replace(/'/g, "''");
+  const escapedFlag = (flag || '').replace(/"/g, '""').replace(/'/g, "''");
   if (kind === 'switch') {
     return [
       `if ($ThisControl.Checked) {`,
@@ -214,32 +181,30 @@ function cliArgAssignmentLines(ctrl, flag, key, kind, previewVar) {
     ].join('\n');
   }
   const prop = cliValuePropertyForType(ctrl.type);
+  const prefix = escapedFlag ? `'${escapedFlag} ' + ` : '';
   if (prop === 'Text') {
     return [
       `if ([string]::IsNullOrWhiteSpace($ThisControl.Text)) {`,
       `    $script:${previewVar}_Args.Remove('${key}')`,
       `} else {`,
-      `    $script:${previewVar}_Args['${key}'] = '${escapedFlag} ' + $ThisControl.Text`,
+      `    $script:${previewVar}_Args['${key}'] = ${prefix}$ThisControl.Text`,
       `}`,
     ].join('\n');
   }
-  return `$script:${previewVar}_Args['${key}'] = '${escapedFlag} ' + $ThisControl.${prop}`;
+  return `$script:${previewVar}_Args['${key}'] = ${prefix}$ThisControl.${prop}`;
 }
 
 // The CLI Preview control's own Click handler: rebuilds the command
 // string fresh from $script:<Name>_Args (in $script:<Name>_ArgsOrder
 // order) and shows it in a standard blocking dialog (ShowDialog, not
 // Show) - same "stays open until you deal with it" behavior as any
-// ordinary "Save changes?" prompt, not a click-outside-to-dismiss
+// ordinary "Save changes?" prompt, never a click-outside-to-dismiss
 // popup. The Close button's DialogResult is set directly rather than
 // wired through its own Add_Click, so ShowDialog() returns/closes on
-// click with no extra nested handler needed for it.
-function cliPreviewClickHandlerLines(c, p) {
-  const baseCmd = (p.baseCommand || '').replace(/"/g, '""');
-  const pipe = p.pipeCmdlet || { mode: 'None', custom: '' };
-  const pipeName = pipe.mode === 'Custom' ? (pipe.custom || '') : pipe.mode;
-  const pipeSuffix = (pipeName && pipeName !== 'None') ? ` | ${pipeName}`.replace(/"/g, '\\"') : '';
-
+// click with no extra nested handler needed for it. Purely a display -
+// the same role as the Wizard's Summary-of-Tasks log - it never
+// executes $cliCommand.
+function cliPreviewClickHandlerLines(c) {
   const lines = [];
   lines.push(`$${c.name}.Add_Click({`);
   lines.push(`    param($sender, $e)`);
@@ -247,9 +212,7 @@ function cliPreviewClickHandlerLines(c, p) {
   lines.push(`    foreach ($key in $script:${c.name}_ArgsOrder) {`);
   lines.push(`        if ($script:${c.name}_Args.ContainsKey($key)) { $cliParts += $script:${c.name}_Args[$key] }`);
   lines.push(`    }`);
-  lines.push(`    $cliCommand = "${baseCmd}"`);
-  lines.push(`    if ($cliParts.Count -gt 0) { $cliCommand = $cliCommand + ' ' + ($cliParts -join ' ') }`);
-  if (pipeSuffix) lines.push(`    $cliCommand = $cliCommand + "${pipeSuffix}"`);
+  lines.push(`    $cliCommand = ($cliParts -join ' ').Trim()`);
   lines.push(`    $cliModal = New-Object System.Windows.Forms.Form`);
   lines.push(`    $cliModal.Text = "Command Preview"`);
   lines.push(`    $cliModal.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog`);
