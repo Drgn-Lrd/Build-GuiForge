@@ -1,18 +1,19 @@
 /*
     Control-Data.js
     Written by: Johnathon Largent
-    Version 1.14
+    Version 1.15
 
     Revision:
 
-    1. Removed the Button "Run CLI Command on Click" property and its
-    changelog entry from 1.13 - that was scope I added without it being
-    asked for. CliPreview stays exactly what it was meant to be: a pure
-    display twin to the Wizard's Summary-of-Tasks log (just a Button
-    Text prop, no execution capability at all, now or later).
+    1. New TEXT_SYNCS_WITH_NAME_TYPES list (Button, Label, CheckBox,
+    RadioButton, GroupBox, LinkLabel, CliPreview) - drives a one-way
+    Name -> Text sync in Properties-Pane.js/Engine.js: a freshly-created
+    control of one of these types has its Text kept in sync with Name
+    until the person edits Text directly, at which point the sync breaks
+    permanently for that control.
 */
 
-const CONTROL_DATA_VERSION = '1.14';
+const CONTROL_DATA_VERSION = '1.15';
 
 // Which properties make sense to SET on another control from event action
 // code, per control type - used by the "Set another control's property"
@@ -450,6 +451,15 @@ const TOOL_DESCRIPTIONS = {
   Wizard: 'A multi-page installer-style wizard. Dropping this opens a setup dialog to choose your pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically. Use the Pages editor to add/rename/reorder/remove pages afterward.',
   CliPreview: 'A button that pops a small dialog showing the live-assembled command-line string built from other controls\' event Actions tagged as CLI contributors ("Also contributes to CLI command preview", on any Action - checkboxes/radio buttons for flags and switches, text boxes for raw values or pipe fragments). Purely a display, the same role as the Wizard\'s Summary-of-Tasks log - it never runs anything. Scoped to its own immediate container (the same Form, Panel/GroupBox, or TabControl page it sits on), EXCEPT inside a Wizard, where it spans all of that wizard\'s pages, since a wizard\'s pages are cumulative steps rather than independent views.',
 };
+
+// Control types where Text functions as a caption (what you'd naturally
+// want to start out matching the control's Name) rather than user-
+// editable content (a TextBox's typed-in value, a ComboBox's current
+// selection, etc) - drives the one-way Name -> Text sync in Properties-
+// Pane.js: renaming a freshly-created control of one of these types also
+// updates its Text, until the person edits Text directly themselves, at
+// which point the sync breaks permanently (see ctrl.textAutoSynced).
+const TEXT_SYNCS_WITH_NAME_TYPES = ['Button', 'Label', 'CheckBox', 'RadioButton', 'GroupBox', 'LinkLabel', 'CliPreview'];
 
 const TOOLBOX_GROUPS = [
   { heading: 'Common', types: ['Button', 'Label', 'TextBox', 'MaskedTextBox', 'CheckBox', 'RadioButton', 'LinkLabel'] },
