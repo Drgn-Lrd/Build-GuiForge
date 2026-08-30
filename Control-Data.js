@@ -451,7 +451,7 @@ const TOOL_DESCRIPTIONS = {
   ToolStrip: 'A horizontal bar of buttons (usually docked to the top) for quick-access actions - New/Open/Save style toolbars.',
   TabControl: 'A container with multiple named tab pages. Click a tab header on the canvas to switch which page you\'re placing controls onto - each page keeps its own separate set of children.',
   Wizard: 'A multi-page installer-style wizard. Dropping this opens a setup dialog to choose your pages (with optional Welcome/Options/Summary starter content); Back/Next/Cancel buttons are added automatically. Use the Pages editor to add/rename/reorder/remove pages afterward.',
-  CliPreview: 'A button that pops a small window showing a live-assembled command-line string, built from other controls\' event Actions tagged as CLI contributors ("Also contributes to CLI command preview", on any Action). Set Base Command to the command/script name; optionally pipe the result into a cmdlet like Out-GridView. Placed inside a Wizard, it reaches across all of that wizard\'s pages - otherwise it covers the whole Form.',
+  CliPreview: 'A button that pops a small dialog showing a live-assembled command-line string, built from other controls\' event Actions tagged as CLI contributors ("Also contributes to CLI command preview", on any Action). Set Base Command to the command/script name; optionally pipe the result into a cmdlet like Out-GridView. Scoped to its own immediate container - the same Form, Panel/GroupBox, or TabControl page it sits on - EXCEPT inside a Wizard, where it spans all of that wizard\'s pages (since a wizard\'s pages are cumulative steps, not independent views).',
 };
 
 const TOOLBOX_GROUPS = [
