@@ -6,13 +6,17 @@
     Revision:
 
     1. New file. Implements the CLI Command Preview control: a button
-    that pops a modal showing a live-assembled command-line string built
-    from other controls' event Actions tagged as CLI contributors.
-    Mirrors the Wizard Summary-of-Tasks log's architecture (Wizard-
-    Builder.js) - a fixed, build-time-computed order plus a $script:-
-    scoped dictionary kept in sync by each contributing control's own
-    event handler - generalized to build a command line instead of a
-    log, and to reach across a Wizard's pages OR a plain Form.
+    that opens a standard blocking dialog (ShowDialog) showing a live-
+    assembled command-line string built from other controls' event
+    Actions tagged as CLI contributors. Scoped to the Preview control's
+    own immediate container by default (same Form, Panel/GroupBox, or
+    TabControl page) - EXCEPT inside a Wizard, where it spans all of
+    that wizard's pages, since a wizard's pages are cumulative steps
+    (options chosen on page 1, more on page 2, etc.) rather than
+    independent views like a TabControl's tabs. Mirrors the Wizard
+    Summary-of-Tasks log's architecture (Wizard-Builder.js) - a fixed,
+    build-time-computed order plus a $script:-scoped dictionary kept in
+    sync by each contributing control's own event handler.
 */
 
 const CLI_PREVIEW_BUILDER_VERSION = '1.0';
@@ -145,16 +149,22 @@ function cliFindHostWizard(ctrl) {
 }
 
 // Ordered list of every cli-tagged action reachable by one CLI Preview
-// control: if it lives inside a Wizard, spans ALL of that wizard's pages
-// (fixed page order, then top-left-to-bottom-right within a page) - the
-// same convention as wizardLogTargetOrderedControlNames (Wizard-
-// Builder.js), just generalized from "has a log action" to "has a
-// cli-tagged action" and keeping the action entries themselves (a
-// control can contribute more than one flag). Otherwise, every
-// top-level control directly on the Form, in the same Y-then-X order.
-// Only direct children of the wizard/page (or the Form) are scanned,
-// matching the Summary log's own scoping - a cli-tagged action inside a
-// nested Panel/GroupBox isn't reached, same limitation as that feature.
+// control. A Wizard is a special case ON PURPOSE: its pages are
+// cumulative steps the person walks through in sequence (options on
+// page 1, more on page 2, etc.), so a wizard-hosted Preview spans ALL
+// of that wizard's pages, fixed page order then top-left-to-bottom-
+// right within a page - same convention as
+// wizardLogTargetOrderedControlNames (Wizard-Builder.js).
+// Everywhere else - the Form itself, a Panel/GroupBox, or one page of a
+// plain TabControl - a Preview only ever sees its OWN immediate
+// container's siblings (same parentId, and same tabPage when that
+// parent is a TabControl). A TabControl's tabs are independent views a
+// person can switch between at will, not sequential steps, so pulling
+// in another tab's controls would silently include state the person
+// may never have looked at; scoping to the exact container the Preview
+// itself sits in - matching by construction, since the Preview can only
+// be seen/clicked while its own tab/panel is showing - avoids that
+// without needing any runtime "which tab is active" check.
 function cliOrderedContributors(previewCtrl) {
   const wizard = cliFindHostWizard(previewCtrl);
   const results = [];
@@ -170,7 +180,7 @@ function cliOrderedContributors(previewCtrl) {
       collectFrom(state.controls.filter(ch => ch.parentId === wizard.id && ch.tabPage === page.id && !ch.wizardFooter));
     });
   } else {
-    collectFrom(state.controls.filter(ch => !ch.parentId));
+    collectFrom(state.controls.filter(ch => ch.parentId === previewCtrl.parentId && ch.tabPage === previewCtrl.tabPage));
   }
   return results;
 }
@@ -218,10 +228,12 @@ function cliArgAssignmentLines(ctrl, flag, key, kind, previewVar) {
 
 // The CLI Preview control's own Click handler: rebuilds the command
 // string fresh from $script:<Name>_Args (in $script:<Name>_ArgsOrder
-// order) and shows it in a small popout. This is a snapshot by design -
-// the popout closes the instant the person clicks outside it (Deactivate
-// -> Close), so there is no case where it needs to keep redrawing while
-// they interact with controls behind it.
+// order) and shows it in a standard blocking dialog (ShowDialog, not
+// Show) - same "stays open until you deal with it" behavior as any
+// ordinary "Save changes?" prompt, not a click-outside-to-dismiss
+// popup. The Close button's DialogResult is set directly rather than
+// wired through its own Add_Click, so ShowDialog() returns/closes on
+// click with no extra nested handler needed for it.
 function cliPreviewClickHandlerLines(c, p) {
   const baseCmd = (p.baseCommand || '').replace(/"/g, '""');
   const pipe = p.pipeCmdlet || { mode: 'None', custom: '' };
@@ -258,8 +270,14 @@ function cliPreviewClickHandlerLines(c, p) {
   lines.push(`    $cliCopyBtn.Text = "Copy to Clipboard"`);
   lines.push(`    $cliCopyBtn.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($cliText.Text) }.GetNewClosure())`);
   lines.push(`    $cliModal.Controls.Add($cliCopyBtn)`);
-  lines.push(`    $cliModal.Add_Deactivate({ $cliModal.Close() }.GetNewClosure())`);
-  lines.push(`    $cliModal.Show($sender.FindForm())`);
+  lines.push(`    $cliCloseBtn = New-Object System.Windows.Forms.Button`);
+  lines.push(`    $cliCloseBtn.Location = New-Object System.Drawing.Point(150, 42)`);
+  lines.push(`    $cliCloseBtn.Size = New-Object System.Drawing.Size(80, 25)`);
+  lines.push(`    $cliCloseBtn.Text = "Close"`);
+  lines.push(`    $cliCloseBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel`);
+  lines.push(`    $cliModal.Controls.Add($cliCloseBtn)`);
+  lines.push(`    $cliModal.CancelButton = $cliCloseBtn`);
+  lines.push(`    [void]$cliModal.ShowDialog($sender.FindForm())`);
   lines.push(`})`);
   return lines;
 }
