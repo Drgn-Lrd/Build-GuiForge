@@ -1,13 +1,13 @@
 <!--
     index.html
     Written by: Johnathon Largent
-    Version 1.22
+    Version 1.23
 
     Revision:
 
-    1. Removed window.PAGE_LAST_UPDATED (the hardcoded fallback
-    timestamp) now that the File Versions modal's GitHub API
-    commit-date lookup is confirmed working and no longer needs it.
+    1. New Cli-Preview-Builder.js script include (loaded after Control-
+    Data.js, before Wizard-Builder.js) plus its About-modal file-list
+    row - backs the new CLI Command Preview control.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -16,7 +16,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GUI Designer</title>
 <link rel="stylesheet" href="Styles.css">
-<script>window.PAGE_VERSION = '1.22';</script>
+<script>window.PAGE_VERSION = '1.23';</script>
 </head>
 <body>
 
@@ -153,6 +153,7 @@
           <tr><th>File</th><th>Version</th><th>Last Updated</th></tr>
         </thead>
         <tbody>
+          <tr><td>Cli-Preview-Builder.js</td><td id="aboutCliPreviewBuilderVersion">1.0</td><td id="aboutCliPreviewBuilderLastUpdated">n/a</td></tr>
           <tr><td>CodeGen-HTML.js</td><td id="aboutCodegenHtmlVersion">1.0</td><td id="aboutCodegenHtmlLastUpdated">n/a</td></tr>
           <tr><td>CodeGen-WinForms.js</td><td id="aboutCodegenWinFormsVersion">1.0</td><td id="aboutCodegenWinFormsLastUpdated">n/a</td></tr>
           <tr><td>CodeGen-WinUI.js</td><td id="aboutCodegenWinUiVersion">1.0</td><td id="aboutCodegenWinUiLastUpdated">n/a</td></tr>
@@ -204,6 +205,7 @@
 </div>
 
 <script src="Control-Data.js"></script>
+<script src="Cli-Preview-Builder.js"></script>
 <script src="Wizard-Builder.js"></script>
 <script src="Wizard-Boolean-Builder.js"></script>
 <script src="Control-Copy.js"></script>
