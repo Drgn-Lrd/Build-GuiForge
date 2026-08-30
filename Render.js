@@ -1,17 +1,16 @@
 /*
     Render.js
     Written by: Johnathon Largent
-    Version 1.9
+    Version 1.10
 
     Revision:
 
-    1. Step counter preview now lines up with the footer buttons'
-    corrected centered position (Wizard-Builder.js 1.23,
-    WIZARD_FOOTER_HEIGHT 46 -> 45) - 10px down from the top of the
-    footer strip instead of flush against it.
+    1. New canvas preview for the CliPreview control - renders like a
+    Button with a small terminal-prompt glyph ahead of its Text, so it
+    reads as distinct from a plain Button in the designer.
 */
 
-const RENDER_VERSION = '1.9';
+const RENDER_VERSION = '1.10';
 
 function renderControl(c) {
   const def = CONTROL_DEFS[c.type];
@@ -196,6 +195,10 @@ function renderInner(c) {
   switch (c.type) {
     case 'Button': {
       wrap.innerHTML = `<div class="rc-button" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};">${escapeHtml(p.text)}</div>`;
+      break;
+    }
+    case 'CliPreview': {
+      wrap.innerHTML = `<div class="rc-button" style="${fontStyleFor(p)}background:${p.backColor};color:${p.foreColor};">&#10095;_ ${escapeHtml(p.text)}</div>`;
       break;
     }
     case 'Label': {
