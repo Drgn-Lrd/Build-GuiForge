@@ -1,18 +1,17 @@
 /*
     CodeGen-WinForms.js
     Written by: Johnathon Largent
-    Version 1.17
+    Version 1.18
 
     Revision:
 
-    1. Removed Run CLI Command on Click support entirely (the 1.16
-    entry below) - CliPreview is meant to stay a pure display, the same
-    role as the Wizard's Summary-of-Tasks log, not a trigger for
-    actually running anything. Back to a single, simple aggregator
-    (CliPreview only).
+    1. cliArgAssignmentLines call site updated to pass the whole
+    action.cli object (Cli-Preview-Builder.js 1.2) instead of separate
+    flag/kind arguments, to support the new "List (OR'd)" Kind's extra
+    fields (Prefix/Item Template/Joiner/Suffix).
 */
 
-const CODEGEN_WINFORMS_VERSION = '1.17';
+const CODEGEN_WINFORMS_VERSION = '1.18';
 
 function psColor(hex) {
   if (!hex) return "[System.Drawing.Color]::White";
@@ -70,7 +69,7 @@ function generateWinForms() {
   // order per-control - same reasoning as the Wizard's own ordered-name
   // precompute for its Summary log.
   const cliContributorsByPreview = {}; // previewCtrl.id -> ordered [{ctrl, evtName, actionIndex, action}]
-  const cliByControlEvent = {}; // `${ctrlId}::${evtName}` -> [{ previewVar, key, flag, kind }]
+  const cliByControlEvent = {}; // `${ctrlId}::${evtName}` -> [{ previewVar, key, cli }]
   ctrls.filter(c => c.type === 'CliPreview').forEach(cp => {
     const contributors = cliOrderedContributors(cp);
     cliContributorsByPreview[cp.id] = contributors;
@@ -78,7 +77,7 @@ function generateWinForms() {
       const key = `${entry.ctrl.name}_${entry.actionIndex}`;
       const mapKey = `${entry.ctrl.id}::${entry.evtName}`;
       if (!cliByControlEvent[mapKey]) cliByControlEvent[mapKey] = [];
-      cliByControlEvent[mapKey].push({ previewVar: cp.name, key, flag: entry.action.cli.flag, kind: entry.action.cli.kind });
+      cliByControlEvent[mapKey].push({ previewVar: cp.name, key, cli: entry.action.cli });
     });
   });
 
@@ -428,7 +427,7 @@ function generateWinForms() {
         const cliEntries = cliByControlEvent[`${c.id}::${evtName}`];
         if (cliEntries && cliEntries.length) {
           const cliLines = cliEntries
-            .map(e => cliArgAssignmentLines(c, e.flag, e.key, e.kind, e.previewVar))
+            .map(e => cliArgAssignmentLines(c, e.cli, e.key, e.previewVar))
             .join('\n')
             .split('\n').join('\n    ');
           body = body ? `${body}\n    ${cliLines}` : cliLines;
