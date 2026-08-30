@@ -1,30 +1,22 @@
 /*
     Properties-Pane.js
     Written by: Johnathon Largent
-    Version 1.13
+    Version 1.14
 
     Revision:
 
-    1. Corrected the Layout section's Position (X/Y) and Size
-    (Width/Height) number input fix from 1.12: snap() is only meant for
-    click-and-drag (moving/resizing controls with the mouse), not typed
-    values or the native spinner arrows, which now always step by
-    exactly 1 and set the field to the exact value entered - no
-    snapping. The earlier 1.12 fix instead tied the step to the grid
-    size, which wasn't the actual intent.
+    1. New cliPipeEditor prop type dispatch, for the CLI Command
+    Preview control's own "Pipe Output To" property (Cli-Preview-
+    Builder.js).
 
-    2. The grow/shrink buttons under Width/Height (already using the
-    Nudge section's selected step) and the D-pad/arrow-key nudge
-    (Engine.js) no longer run through snap() either, for the same
-    reason - snap() stays reserved for actual drag operations
-    (Engine.js's control-drag/resize/handle-drag code, untouched).
-
-    3. New wizardFooterOptionsEditor prop type dispatch, for the new
-    Footer Options editor (Wizard-Builder.js) under the Wizard-specific
-    section.
+    2. Every action card (buildActionBlock, both snippet-bound and raw/
+    freeform modes) now appends a CLI tag sub-editor - "Also contributes
+    to CLI command preview" - so any action on any control's event can
+    be tagged as a CLI Command Preview contributor without touching the
+    event-snippet system itself (Cli-Preview-Builder.js).
 */
 
-const PROPERTIES_PANE_VERSION = '1.13';
+const PROPERTIES_PANE_VERSION = '1.14';
 
 const EVENT_SNIPPETS = [
   { id: 'none', label: '-- Insert snippet --', template: '', help: '', params: [] },
@@ -1132,6 +1124,10 @@ function buildPropRows(ctrl, propDefs) {
       frag.appendChild(buildItemsListEditorRow(ctrl, key, label));
       return;
     }
+    if (type === 'cliPipeEditor') {
+      frag.appendChild(buildCliPipeEditorRow(ctrl, key, label));
+      return;
+    }
     if (type === 'toolStripItemsEditor') {
       frag.appendChild(buildToolStripItemsEditorRow(ctrl, key, label));
       return;
@@ -1703,6 +1699,8 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
     preview.textContent = action.code;
     card.appendChild(preview);
 
+    card.appendChild(buildCliActionTagEditor(ctrl, action, sync));
+
     return card;
   }
 
@@ -1762,6 +1760,7 @@ function buildActionBlock(ctrl, evtName, actions, i, sync) {
     });
   });
   card.appendChild(pickBtn);
+  card.appendChild(buildCliActionTagEditor(ctrl, action, sync));
 
   insertBtn.addEventListener('click', () => {
     const id = sel.selectedOptions[0].dataset.id;
